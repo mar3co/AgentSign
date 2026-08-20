@@ -9,6 +9,12 @@ import {
 } from "../db/schema.js";
 import { logEvent } from "../lib/audit.js";
 import { getDeps } from "../lib/deps.js";
+import {
+  createMailer,
+  inviteEmail,
+  sendLiveEmail,
+  type Mailer,
+} from "../lib/email.js";
 import { verifyOtp } from "../lib/otp.js";
 import { newSigningToken, newTmpKey } from "../lib/tokens.js";
 
@@ -24,6 +30,10 @@ function jsonError(status: number, error: string, code: string): Response {
 
 function requireDb() {
   return getDeps().db ?? getDb();
+}
+
+function requireMailer(): Mailer {
+  return getDeps().mailer ?? createMailer();
 }
 
 function now(): Date {
@@ -105,13 +115,16 @@ export async function verifyEnvelopeOtp(
   signerRows.sort((a, b) => a.signingOrder - b.signingOrder);
 
   const outSigners: { email: string; sign_url: string }[] = [];
+  const rawById = new Map<string, string>();
   for (const row of signerRows) {
     const token = newSigningToken();
     await db
       .update(signersTable)
       .set({ tokenHash: token.hash })
       .where(eq(signersTable.id, row.id));
-    outSigners.push({ email: row.email, sign_url: `/s/${token.raw}` });
+    const signUrl = `/s/${token.raw}`;
+    rawById.set(row.id, signUrl);
+    outSigners.push({ email: row.email, sign_url: signUrl });
   }
 
   const tmp = newTmpKey();
@@ -123,6 +136,39 @@ export async function verifyEnvelopeOtp(
     expiresAt: envelope.shredAt,
   });
   await logEvent(db, { envelopeId: envelope.id, event: "email_verified" });
+
+  const mailer = requireMailer();
+  const first = signerRows[0];
+  if (first) {
+    const signUrl = rawById.get(first.id)!;
+    const invite = inviteEmail({
+      signUrl,
+      senderEmail: envelope.senderEmail,
+      title: envelope.title,
+      expiresAt: envelope.expiresAt,
+    });
+    await mailer.sendMail({ to: first.email, ...invite });
+    await db
+      .update(signersTable)
+      .set({ sentAt: at })
+      .where(eq(signersTable.id, first.id));
+    await logEvent(db, {
+      envelopeId: envelope.id,
+      signerId: first.id,
+      event: "sent",
+    });
+    await logEvent(db, {
+      envelopeId: envelope.id,
+      signerId: first.id,
+      event: "emailed",
+    });
+  }
+
+  const live = sendLiveEmail({
+    title: envelope.title,
+    tmpKeyShownInResponse: true,
+  });
+  await mailer.sendMail({ to: envelope.senderEmail, ...live });
 
   return Response.json({
     id: envelope.id,

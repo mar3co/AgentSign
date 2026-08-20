@@ -10,12 +10,18 @@ import {
 import { getEnv } from "../env.js";
 import { logEvent, type AuditDb } from "../lib/audit.js";
 import { getDeps } from "../lib/deps.js";
-import { stubMailer, type Mailer } from "../lib/email.js";
+import {
+  completionAttachments,
+  completionEmail,
+  createMailer,
+  inviteEmail,
+  type Mailer,
+} from "../lib/email.js";
 import { sha256Hex } from "../lib/hash.js";
 import { completeEnvelopePdf } from "../lib/pdf/complete.js";
 import { loadSigningP12 } from "../lib/pdf/devP12.js";
 import { objectKey, type BlobStore } from "../lib/storage.js";
-import { hashSigningToken } from "../lib/tokens.js";
+import { hashSigningToken, newSigningToken } from "../lib/tokens.js";
 
 export const CONSENT_TEXT =
   "I agree to sign this document electronically. I consent to receiving and storing records electronically. My signature is intended to be as binding as a handwritten signature under applicable law, including ESIGN and UETA. This is not legal advice. This is not a notary service.";
@@ -39,7 +45,7 @@ function requireStore(): BlobStore {
 }
 
 function requireMailer(): Mailer {
-  return getDeps().mailer ?? stubMailer;
+  return getDeps().mailer ?? createMailer();
 }
 
 function now(): Date {
@@ -318,6 +324,33 @@ export async function postSign(req: Request, token: string): Promise<Response> {
       ip: ip ?? undefined,
       ua: ua ?? undefined,
     });
+
+    const mailer = requireMailer();
+    const attachments = completionAttachments(result.sealed, result.certificate);
+    const recipients = new Set<string>([
+      envelope.senderEmail,
+      ...allSigners.map((s) => s.email),
+    ]);
+    for (const to of recipients) {
+      const body = completionEmail({
+        to,
+        title: envelope.title,
+        shredAt,
+        includeAttachments: Boolean(attachments),
+      });
+      await mailer.sendMail({
+        to,
+        subject: body.subject,
+        text: body.text,
+        attachments,
+      });
+      await logEvent(db, {
+        envelopeId: envelope.id,
+        event: "emailed",
+        payload: { to, kind: "completion" },
+      });
+    }
+
     await fireEnvelopeCompleted({
       event: "envelope.completed",
       id: envelope.id,
@@ -343,6 +376,35 @@ export async function postSign(req: Request, token: string): Promise<Response> {
     ip: ip ?? undefined,
     ua: ua ?? undefined,
   });
+
+  const next = allSigners.find((s) => s.signingOrder === signer.signingOrder + 1);
+  if (next && !next.signedAt && !next.declinedAt) {
+    const mailer = requireMailer();
+    const token = newSigningToken();
+    const signUrl = `/s/${token.raw}`;
+    await db
+      .update(signersTable)
+      .set({ tokenHash: token.hash, sentAt: at })
+      .where(eq(signersTable.id, next.id));
+    const invite = inviteEmail({
+      signUrl,
+      senderEmail: envelope.senderEmail,
+      title: envelope.title,
+      expiresAt: envelope.expiresAt,
+    });
+    await mailer.sendMail({ to: next.email, ...invite });
+    await logEvent(db, {
+      envelopeId: envelope.id,
+      signerId: next.id,
+      event: "sent",
+    });
+    await logEvent(db, {
+      envelopeId: envelope.id,
+      signerId: next.id,
+      event: "emailed",
+    });
+  }
+
   return Response.json({ status: "pending" });
 }
 

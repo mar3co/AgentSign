@@ -9,7 +9,7 @@ import {
 } from "../db/schema.js";
 import { logEvent } from "../lib/audit.js";
 import { getDeps } from "../lib/deps.js";
-import { stubMailer, type Mailer } from "../lib/email.js";
+import { createMailer, otpEmail, type Mailer } from "../lib/email.js";
 import { sha256Hex } from "../lib/hash.js";
 import { newOtp } from "../lib/otp.js";
 import { objectKey, type BlobStore } from "../lib/storage.js";
@@ -49,7 +49,7 @@ function requireStore(): BlobStore {
 }
 
 function requireMailer(): Mailer {
-  return getDeps().mailer ?? stubMailer;
+  return getDeps().mailer ?? createMailer();
 }
 
 function now(): Date {
@@ -163,11 +163,7 @@ export async function createEnvelope(req: Request): Promise<Response> {
     codeHash: otp.hash,
     expiresAt: new Date(at.getTime() + OTP_TTL_MS),
   });
-  await mailer.sendMail({
-    to: senderEmail,
-    subject: "Your Sign verification code",
-    text: `Your verification code is ${otp.digits}. It expires in 10 minutes.`,
-  });
+  await mailer.sendMail({ to: senderEmail, ...otpEmail(otp.digits) });
   await logEvent(db, { envelopeId: envelope.id, event: "otp_sent" });
 
   return Response.json(
