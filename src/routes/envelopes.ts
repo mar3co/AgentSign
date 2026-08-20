@@ -137,7 +137,7 @@ export async function createEnvelope(req: Request): Promise<Response> {
   }
 
   const title = String(form.get("title") ?? "").trim();
-  const senderEmail = String(form.get("sender_email") ?? "").trim();
+  const senderEmail = String(form.get("sender_email") ?? "").trim().toLowerCase();
   const signersField = form.get("signers");
   const file = form.get("file");
 
@@ -268,7 +268,7 @@ export async function createEnvelope(req: Request): Promise<Response> {
     parsedSigners.map((s, i) => ({
       envelopeId: envelope.id,
       name: s.name,
-      email: s.email,
+      email: s.email.trim().toLowerCase(),
       signingOrder: i + 1,
       tokenHash: sha256Hex(`pending:${envelope.id}:${i}`),
     })),
@@ -357,7 +357,10 @@ async function authorizeEnvelope(req: Request, envelopeId: string): Promise<Auth
     .select()
     .from(signersTable)
     .where(
-      and(eq(signersTable.envelopeId, envelopeId), eq(signersTable.email, user.email)),
+      and(
+        eq(signersTable.envelopeId, envelopeId),
+        eq(signersTable.email, user.email.trim().toLowerCase()),
+      ),
     );
   if (!canDelete && !signed) {
     return { ok: false, response: jsonError(401, "Unauthorized", "unauthorized") };
@@ -396,7 +399,7 @@ export async function listEnvelopes(req: Request): Promise<Response> {
       .select()
       .from(accounts)
       .where(eq(accounts.userId, key.userId));
-    email = account?.email ?? null;
+    email = account?.email?.trim().toLowerCase() ?? null;
   } else {
     const cookie = req.headers.get("cookie");
     if (!cookie) return jsonError(401, "Unauthorized", "unauthorized");
@@ -405,7 +408,7 @@ export async function listEnvelopes(req: Request): Promise<Response> {
     await ensureAccount(db, user);
     await claimSends(db, user.id, user.email);
     userId = user.id;
-    email = user.email;
+    email = user.email.trim().toLowerCase();
   }
 
   const sent = await db

@@ -63,11 +63,11 @@ export function LoginForm({ email, next }: { email: string; next: string }) {
     const action = submitter?.value ?? "magic";
     const { email: value, password } = values(e.currentTarget);
     if (action === "password") {
-      void post("/login", { email: value, password, next }, "session");
+      void post("/login/session", { email: value, password, next }, "session");
     } else if (action === "signup") {
       void post("/signup", { email: value, password }, "signup");
     } else {
-      void post("/login", { email: value, next }, "magic");
+      void post("/login/session", { email: value, next }, "magic");
     }
   }
 

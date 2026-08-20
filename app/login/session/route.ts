@@ -1,4 +1,4 @@
-import { postLogin } from "../../src/routes/auth.js";
+import { postLogin } from "../../../src/routes/auth.js";
 
 export const runtime = "nodejs";
 

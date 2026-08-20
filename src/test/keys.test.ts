@@ -7,7 +7,8 @@ import { eq } from "drizzle-orm";
 import { POST as postKeys } from "../../app/v1/keys/route.js";
 import { GET as listEnvelopes, POST as postEnvelope } from "../../app/v1/envelopes/route.js";
 import { POST as postOtp } from "../../app/v1/envelopes/[id]/otp/route.js";
-import { getAuthCallback, postLogin } from "../routes/auth.js";
+import { POST as postLogin } from "../../app/login/session/route.js";
+import { GET as getAuthCallback } from "../../app/auth/callback/route.js";
 import { accounts, apiKeys, envelopes } from "../db/schema.js";
 import { setDeps } from "../lib/deps.js";
 import { extendKeep } from "../lib/keys.js";
@@ -83,7 +84,7 @@ function cookieFrom(res: Response): string {
 
 async function magicCookie(email: string) {
   const login = await postLogin(
-    new Request("http://sign.test/login", {
+    new Request("http://sign.test/login/session", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ email }),

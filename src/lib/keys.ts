@@ -34,16 +34,21 @@ export async function mintLiveKey(
   return { raw: live.raw, prefix: live.prefix, expiresAt };
 }
 
+function normEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
 export async function ensureAccount(
   db: AuditDb,
   user: { id: string; email: string },
 ): Promise<void> {
+  const email = normEmail(user.email);
   await db
     .insert(accounts)
-    .values({ userId: user.id, email: user.email, plan: "free" })
+    .values({ userId: user.id, email, plan: "free" })
     .onConflictDoUpdate({
       target: accounts.userId,
-      set: { email: user.email },
+      set: { email },
     });
 }
 
@@ -56,7 +61,7 @@ export async function claimSends(
   await db
     .update(envelopes)
     .set({ userId })
-    .where(and(eq(envelopes.senderEmail, email), isNull(envelopes.userId)));
+    .where(and(eq(envelopes.senderEmail, normEmail(email)), isNull(envelopes.userId)));
 }
 
 /** Pro keep: completed envelopes this user sent or signed. Stripe webhook (Task 15). */

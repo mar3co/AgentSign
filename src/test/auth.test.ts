@@ -10,17 +10,15 @@ import LoginPage from "../../app/login/page.js";
 import Home from "../../app/page.js";
 import SigningPage from "../../app/s/[token]/page.js";
 import { GET as getGoogle } from "../../app/login/google/route.js";
+import { POST as postLogin } from "../../app/login/session/route.js";
+import { POST as postSignup } from "../../app/signup/route.js";
 import { POST as postKeys } from "../../app/v1/keys/route.js";
 import { GET as listEnvelopes, POST as postEnvelope } from "../../app/v1/envelopes/route.js";
 import { DELETE as deleteEnvelope } from "../../app/v1/envelopes/[id]/route.js";
 import { POST as postOtp } from "../../app/v1/envelopes/[id]/otp/route.js";
 import { POST as postConsent } from "../../app/s/[token]/consent/route.js";
 import { POST as postSign } from "../../app/s/[token]/sign/route.js";
-import {
-  getAuthCallback,
-  postLogin,
-  postSignup,
-} from "../routes/auth.js";
+import { GET as getAuthCallback } from "../../app/auth/callback/route.js";
 import { envelopes } from "../db/schema.js";
 import { setDeps } from "../lib/deps.js";
 import { makeDevP12 } from "../lib/pdf/devP12.js";
@@ -184,7 +182,7 @@ describe("login", () => {
     expect(signup.status).toBe(200);
     expect(signup.headers.get("set-cookie")).toBeNull();
     const login = await postLogin(
-      new Request("http://sign.test/login", {
+      new Request("http://sign.test/login/session", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -282,7 +280,7 @@ describe("login", () => {
     expect(sign.status).toBe(200);
 
     const magic = await postLogin(
-      new Request("http://sign.test/login", {
+      new Request("http://sign.test/login/session", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ email: "jane@example.com" }),
