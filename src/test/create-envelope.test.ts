@@ -9,7 +9,7 @@ import { minimalPdf } from "./pdf.js";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { otpChallenges } from "../db/schema.js";
+import { apiKeys, envelopes, otpChallenges } from "../db/schema.js";
 
 async function startEnvelope(now?: () => Date) {
   const db = await createTestDb();
@@ -160,5 +160,38 @@ describe("POST /v1/envelopes", () => {
     const json = await res.json();
     expect(json.error).toBeTruthy();
     expect(json.code).toBe("otp_expired");
+  });
+
+  it("second OTP after success is not 200 and does not issue a new tmp key", async () => {
+    const { db, sent, id } = await startEnvelope();
+    const code = sent[0]!.text.match(/\b(\d{6})\b/)![1]!;
+    const first = await postOtpCode(id, code);
+    expect(first.status).toBe(200);
+    const done = await first.json();
+    expect(done.key).toMatch(/^sign_tmp_/);
+    const second = await postOtpCode(id, code);
+    expect(second.status).not.toBe(200);
+    const json = await second.json();
+    expect(json.error).toBeTruthy();
+    expect(json.code).toBeTruthy();
+    expect(JSON.stringify(json)).not.toMatch(/sign_tmp_/);
+    const keys = await db.select().from(apiKeys).where(eq(apiKeys.envelopeId, id));
+    expect(keys).toHaveLength(1);
+  });
+
+  it("OTP on a non-pending_sender envelope returns 409 and does not consume or mint a key", async () => {
+    const { db, sent, id } = await startEnvelope();
+    const code = sent[0]!.text.match(/\b(\d{6})\b/)![1]!;
+    await db.update(envelopes).set({ status: "pending" }).where(eq(envelopes.id, id));
+    const res = await postOtpCode(id, code);
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error).toBeTruthy();
+    expect(json.code).toBe("invalid_state");
+    expect(JSON.stringify(json)).not.toMatch(/sign_tmp_/);
+    const [challenge] = await db.select().from(otpChallenges).where(eq(otpChallenges.envelopeId, id));
+    expect(challenge!.consumedAt).toBeNull();
+    const keys = await db.select().from(apiKeys).where(eq(apiKeys.envelopeId, id));
+    expect(keys).toHaveLength(0);
   });
 });

@@ -53,6 +53,13 @@ export async function verifyEnvelopeOtp(
     .from(envelopes)
     .where(eq(envelopes.id, envelopeId));
   if (!envelope) return jsonError(404, "Envelope not found", "not_found");
+  if (envelope.status !== "pending_sender") {
+    return jsonError(
+      409,
+      "Envelope is not awaiting sender verification",
+      "invalid_state",
+    );
+  }
 
   const [challenge] = await db
     .select()
