@@ -7,9 +7,8 @@ import {
   signers as signersTable,
 } from "../db/schema.js";
 import { logEvent, type AuditDb } from "../lib/audit.js";
-import { inviteEmail, type Mailer } from "../lib/email.js";
+import { reminderEmail, type Mailer } from "../lib/email.js";
 import { objectKey, type BlobStore } from "../lib/storage.js";
-import { newSigningToken } from "../lib/tokens.js";
 
 const KINDS = ["original", "sealed", "certificate"] as const;
 const REMIND_AFTER_MS = 3 * 86_400_000;
@@ -66,7 +65,7 @@ export async function shredDue(
   }
 }
 
-/** Re-invite pending signers at most twice, 3 days apart, before expires_at. */
+/** Nudge pending signers at most twice, 3 days apart, before expires_at. Does not remint tokens. */
 export async function remindDue(
   db: AuditDb,
   mailer: Mailer,
@@ -102,18 +101,16 @@ export async function remindDue(
         );
       if (Number(n?.n ?? 0) >= MAX_REMINDERS) continue;
 
-      const token = newSigningToken();
       await db
         .update(signersTable)
-        .set({ tokenHash: token.hash, remindedAt: now })
+        .set({ remindedAt: now })
         .where(eq(signersTable.id, signer.id));
-      const invite = inviteEmail({
-        signUrl: `/s/${token.raw}`,
+      const reminder = reminderEmail({
         senderEmail: envelope.senderEmail,
         title: envelope.title,
         expiresAt: envelope.expiresAt,
       });
-      await mailer.sendMail({ to: signer.email, ...invite });
+      await mailer.sendMail({ to: signer.email, ...reminder });
       await logEvent(db, {
         envelopeId: envelope.id,
         signerId: signer.id,

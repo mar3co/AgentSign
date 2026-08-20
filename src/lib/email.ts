@@ -101,6 +101,24 @@ export function inviteEmail(input: {
   };
 }
 
+/** Nudge only — never include a new /s/ token; the original invite URL stays valid. */
+export function reminderEmail(input: {
+  senderEmail: string;
+  title: string;
+  expiresAt: Date;
+}): Pick<MailMessage, "subject" | "text"> {
+  return {
+    subject: `Reminder: please sign "${input.title}"`,
+    text: [
+      `${input.senderEmail} asked you to sign "${input.title}".`,
+      ``,
+      `Use the unique signing link we already sent you.`,
+      ``,
+      `This link expires on ${input.expiresAt.toISOString()}.`,
+    ].join("\n"),
+  };
+}
+
 export function sendLiveEmail(input: {
   title: string;
   tmpKeyShownInResponse: boolean;

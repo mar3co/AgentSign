@@ -178,6 +178,12 @@ describe("GET/DELETE envelope", () => {
     expect(err.error).toBeTruthy();
     expect(err.code).toBeTruthy();
 
+    const status = await getEnvelope(
+      bearer(key, `http://sign.test/v1/envelopes/${id}`),
+      { params: Promise.resolve({ id }) },
+    );
+    expect(status.status).toBe(401);
+
     const audits = await db
       .select()
       .from(auditEvents)
