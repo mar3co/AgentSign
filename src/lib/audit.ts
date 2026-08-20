@@ -4,7 +4,15 @@ import type { AuditEvent } from "../db/schema.js";
 import * as schema from "../db/schema.js";
 import { auditEvents } from "../db/schema.js";
 
-const SECRET_KEYS = new Set(["token", "raw", "sign_url", "otp", "digits"]);
+const SECRET_KEYS = new Set([
+  "token",
+  "raw",
+  "sign_url",
+  "otp",
+  "digits",
+  "key",
+  "webhook_secret",
+]);
 
 export type AuditDb =
   | PostgresJsDatabase<typeof schema>

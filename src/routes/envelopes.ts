@@ -24,6 +24,7 @@ import {
 import { newOtp } from "../lib/otp.js";
 import { objectKey, type BlobStore } from "../lib/storage.js";
 import { newSigningToken } from "../lib/tokens.js";
+import { newWebhookSecret, webhookUrlError } from "../lib/webhooks.js";
 import { getEnv } from "../env.js";
 import { purgeEnvelope } from "../jobs/shred.js";
 
@@ -170,6 +171,16 @@ export async function createEnvelope(req: Request): Promise<Response> {
     return jsonError(400, "File must be a PDF", "invalid_pdf");
   }
 
+  const webhookField = String(form.get("webhook_url") ?? "").trim();
+  let webhookUrl: string | null = null;
+  let webhookSecret: { raw: string; hash: string } | null = null;
+  if (webhookField) {
+    const blocked = webhookUrlError(webhookField);
+    if (blocked) return jsonError(400, blocked, "invalid_webhook_url");
+    webhookUrl = webhookField;
+    webhookSecret = newWebhookSecret();
+  }
+
   const db = requireDb();
   const store = requireStore();
   const mailer = requireMailer();
@@ -251,6 +262,8 @@ export async function createEnvelope(req: Request): Promise<Response> {
       expiresAt,
       shredAt: expiresAt,
       sha256: documentHash,
+      webhookUrl,
+      webhookSecretHash: webhookSecret?.raw ?? null,
       createdAt: at,
     })
     .returning();
@@ -276,7 +289,14 @@ export async function createEnvelope(req: Request): Promise<Response> {
 
   if (live) {
     await inviteFirstSigner(db, mailer, envelope, at);
-    return Response.json({ id: envelope.id, status: "pending" }, { status: 201 });
+    return Response.json(
+      {
+        id: envelope.id,
+        status: "pending",
+        ...(webhookSecret ? { webhook_secret: webhookSecret.raw } : {}),
+      },
+      { status: 201 },
+    );
   }
 
   const otp = await newOtp();
@@ -289,7 +309,11 @@ export async function createEnvelope(req: Request): Promise<Response> {
   await logEvent(db, { envelopeId: envelope.id, event: "otp_sent" });
 
   return Response.json(
-    { id: envelope.id, status: "pending_sender" },
+    {
+      id: envelope.id,
+      status: "pending_sender",
+      ...(webhookSecret ? { webhook_secret: webhookSecret.raw } : {}),
+    },
     { status: 201 },
   );
 }

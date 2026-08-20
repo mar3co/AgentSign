@@ -12,6 +12,7 @@ export type Deps = {
   stripe?: unknown;
   p12?: Buffer;
   p12Passphrase?: string;
+  fetch?: typeof fetch;
 };
 
 let deps: Deps = {};

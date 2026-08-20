@@ -22,6 +22,7 @@ import { completeEnvelopePdf } from "../lib/pdf/complete.js";
 import { loadSigningP12 } from "../lib/pdf/devP12.js";
 import { objectKey, type BlobStore } from "../lib/storage.js";
 import { hashSigningToken, newSigningToken } from "../lib/tokens.js";
+import { fireEnvelopeCompleted } from "../lib/webhooks.js";
 
 export const CONSENT_TEXT =
   "I agree to sign this document electronically. I consent to receiving and storing records electronically. My signature is intended to be as binding as a handwritten signature under applicable law, including ESIGN and UETA. This is not legal advice. This is not a notary service.";
@@ -65,15 +66,6 @@ function signingP12(): { p12: Buffer; passphrase: string } {
   }
   return loadSigningP12();
 }
-
-/** Task 17 implements HMAC delivery; no-op until then. */
-async function fireEnvelopeCompleted(_payload: {
-  event: "envelope.completed";
-  id: string;
-  status: string;
-  sha256: string;
-  shred_at: Date;
-}): Promise<void> {}
 
 type SignerRow = typeof signersTable.$inferSelect;
 type EnvelopeRow = typeof envelopes.$inferSelect;
@@ -351,13 +343,17 @@ export async function postSign(req: Request, token: string): Promise<Response> {
       });
     }
 
-    await fireEnvelopeCompleted({
-      event: "envelope.completed",
-      id: envelope.id,
-      status: "completed",
-      sha256: result.sha256,
-      shred_at: shredAt,
-    });
+    await fireEnvelopeCompleted(
+      db,
+      envelope,
+      {
+        event: "envelope.completed",
+        id: envelope.id,
+        status: "completed",
+        sha256: result.sha256,
+        shred_at: shredAt,
+      },
+    );
     return Response.json({
       status: "completed",
       shred_at: shredAt.toISOString(),
