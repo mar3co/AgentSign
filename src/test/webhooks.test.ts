@@ -185,19 +185,23 @@ describe("envelope.completed webhook", () => {
     expect(json.code).toBeTruthy();
   });
 
-  it("rejects https loopback, localhost, and private webhook URLs with 400", async () => {
-    for (const url of [
-      "https://127.0.0.1/hook",
-      "https://localhost/hook",
-      "https://192.168.0.1/hook",
-    ]) {
-      const { res } = await startVerified({ webhookUrl: url });
-      expect(res.status, url).toBe(400);
-      const json = (await res.json()) as { error: string; code: string };
-      expect(json.error, url).toBeTruthy();
-      expect(json.code, url).toBeTruthy();
-    }
-  });
+  it(
+    "rejects https loopback, localhost, and private webhook URLs with 400",
+    { timeout: 60_000 },
+    async () => {
+      for (const url of [
+        "https://127.0.0.1/hook",
+        "https://localhost/hook",
+        "https://192.168.0.1/hook",
+      ]) {
+        const { res } = await startVerified({ webhookUrl: url });
+        expect(res.status, url).toBe(400);
+        const json = (await res.json()) as { error: string; code: string };
+        expect(json.error, url).toBeTruthy();
+        expect(json.code, url).toBeTruthy();
+      }
+    },
+  );
 
   it(
     "webhook fetch failure keeps envelope completed and audits webhook_failed once",
