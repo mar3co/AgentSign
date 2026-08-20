@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { eq } from "drizzle-orm";
 import { createTestDb } from "./db.js";
 import { createFsStore } from "../lib/storage.js";
 import { setDeps } from "../lib/deps.js";
@@ -9,6 +10,39 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { otpChallenges } from "../db/schema.js";
+
+async function startEnvelope(now?: () => Date) {
+  const db = await createTestDb();
+  const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+  const sent: { to: string; subject: string; text: string }[] = [];
+  setDeps({
+    db,
+    store,
+    mailer: { sendMail: async (m) => { sent.push(m); } },
+    now: now ?? (() => new Date()),
+  });
+  const pdf = await minimalPdf();
+  const body = new FormData();
+  body.set("title", "Repair authorization");
+  body.set("sender_email", "shop@example.com");
+  body.set("signers", JSON.stringify([{ name: "Jane", email: "jane@example.com" }]));
+  body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
+  const res = await postEnvelope(new Request("http://sign.test/v1/envelopes", { method: "POST", body }));
+  expect(res.status).toBe(201);
+  const json = await res.json() as { id: string; status: string };
+  return { db, sent, id: json.id };
+}
+
+function postOtpCode(id: string, code: string) {
+  return postOtp(
+    new Request(`http://sign.test/v1/envelopes/${id}/otp`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code }),
+    }),
+    { params: Promise.resolve({ id }) },
+  );
+}
 
 describe("POST /v1/envelopes", () => {
   it("one-off send is pending_sender until OTP", async () => {
@@ -80,5 +114,51 @@ describe("POST /v1/envelopes", () => {
     expect(json.error).toBeTruthy();
     expect(json.code).toBeTruthy();
     expect(JSON.stringify(json)).not.toMatch(/20/);
+  });
+
+  it("wrong OTP increments attempts and returns invalid_otp", async () => {
+    const { db, sent, id } = await startEnvelope();
+    const code = sent[0]!.text.match(/\b(\d{6})\b/)![1]!;
+    const wrong = code === "000000" ? "000001" : "000000";
+    const res = await postOtpCode(id, wrong);
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBeTruthy();
+    expect(json.code).toBe("invalid_otp");
+    const [row] = await db.select().from(otpChallenges).where(eq(otpChallenges.envelopeId, id));
+    expect(row!.attempts).toBe(1);
+  });
+
+  it("five OTP failures lock with 403", { timeout: 30_000 }, async () => {
+    const { db, sent, id } = await startEnvelope();
+    const code = sent[0]!.text.match(/\b(\d{6})\b/)![1]!;
+    const wrong = code === "000000" ? "000001" : "000000";
+    for (let i = 0; i < 4; i++) {
+      const res = await postOtpCode(id, wrong);
+      expect(res.status).toBe(400);
+      expect((await res.json()).code).toBe("invalid_otp");
+    }
+    const fifth = await postOtpCode(id, wrong);
+    expect(fifth.status).toBe(403);
+    const locked = await fifth.json();
+    expect(locked.error).toBeTruthy();
+    expect(locked.code).toBe("otp_locked");
+    const [row] = await db.select().from(otpChallenges).where(eq(otpChallenges.envelopeId, id));
+    expect(row!.attempts).toBe(5);
+    const sixth = await postOtpCode(id, wrong);
+    expect(sixth.status).toBe(403);
+    expect((await sixth.json()).code).toBe("otp_locked");
+  });
+
+  it("expired OTP challenge returns 410", async () => {
+    let at = new Date("2026-08-20T12:00:00Z");
+    const { sent, id } = await startEnvelope(() => at);
+    const code = sent[0]!.text.match(/\b(\d{6})\b/)![1]!;
+    at = new Date(at.getTime() + 11 * 60 * 1000);
+    const res = await postOtpCode(id, code);
+    expect(res.status).toBe(410);
+    const json = await res.json();
+    expect(json.error).toBeTruthy();
+    expect(json.code).toBe("otp_expired");
   });
 });
