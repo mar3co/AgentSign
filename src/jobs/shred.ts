@@ -1,0 +1,124 @@
+import { and, count, eq, lte, ne } from "drizzle-orm";
+import {
+  apiKeys,
+  auditEvents,
+  documents,
+  envelopes,
+  signers as signersTable,
+} from "../db/schema.js";
+import { logEvent, type AuditDb } from "../lib/audit.js";
+import { inviteEmail, type Mailer } from "../lib/email.js";
+import { objectKey, type BlobStore } from "../lib/storage.js";
+import { newSigningToken } from "../lib/tokens.js";
+
+const KINDS = ["original", "sealed", "certificate"] as const;
+const REMIND_AFTER_MS = 3 * 86_400_000;
+const MAX_REMINDERS = 2;
+
+/** Hard-delete blobs, null document paths, tombstone, expire tmp keys. */
+export async function purgeEnvelope(
+  db: AuditDb,
+  store: BlobStore,
+  envelopeId: string,
+  now: Date,
+  opts?: { redact?: boolean },
+): Promise<void> {
+  for (const kind of KINDS) {
+    await store.delete(objectKey(envelopeId, kind));
+  }
+  await db
+    .update(documents)
+    .set({ storagePath: "" })
+    .where(eq(documents.envelopeId, envelopeId));
+  await db
+    .update(envelopes)
+    .set({ status: "deleted" })
+    .where(eq(envelopes.id, envelopeId));
+  await db
+    .update(apiKeys)
+    .set({ expiresAt: now })
+    .where(and(eq(apiKeys.envelopeId, envelopeId), eq(apiKeys.kind, "tmp")));
+  if (opts?.redact) {
+    await db
+      .update(envelopes)
+      .set({ senderEmail: "redacted" })
+      .where(eq(envelopes.id, envelopeId));
+    await db
+      .update(signersTable)
+      .set({ email: "redacted" })
+      .where(eq(signersTable.envelopeId, envelopeId));
+  }
+  await logEvent(db, { envelopeId, event: "deleted" });
+}
+
+/** Envelopes whose shred_at has passed; skip already deleted. */
+export async function shredDue(
+  db: AuditDb,
+  store: BlobStore,
+  now: Date,
+): Promise<void> {
+  const due = await db
+    .select()
+    .from(envelopes)
+    .where(and(lte(envelopes.shredAt, now), ne(envelopes.status, "deleted")));
+  for (const envelope of due) {
+    await purgeEnvelope(db, store, envelope.id, now, { redact: true });
+  }
+}
+
+/** Re-invite pending signers at most twice, 3 days apart, before expires_at. */
+export async function remindDue(
+  db: AuditDb,
+  mailer: Mailer,
+  now: Date,
+): Promise<void> {
+  const pending = await db
+    .select()
+    .from(envelopes)
+    .where(eq(envelopes.status, "pending"));
+  for (const envelope of pending) {
+    if (envelope.expiresAt.getTime() <= now.getTime()) continue;
+    const rows = await db
+      .select()
+      .from(signersTable)
+      .where(eq(signersTable.envelopeId, envelope.id));
+    for (const signer of rows) {
+      if (signer.signedAt || signer.declinedAt || !signer.sentAt) continue;
+      if (now.getTime() - signer.sentAt.getTime() < REMIND_AFTER_MS) continue;
+      if (
+        signer.remindedAt &&
+        now.getTime() - signer.remindedAt.getTime() < REMIND_AFTER_MS
+      ) {
+        continue;
+      }
+      const [n] = await db
+        .select({ n: count() })
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.signerId, signer.id),
+            eq(auditEvents.event, "reminded"),
+          ),
+        );
+      if (Number(n?.n ?? 0) >= MAX_REMINDERS) continue;
+
+      const token = newSigningToken();
+      await db
+        .update(signersTable)
+        .set({ tokenHash: token.hash, remindedAt: now })
+        .where(eq(signersTable.id, signer.id));
+      const invite = inviteEmail({
+        signUrl: `/s/${token.raw}`,
+        senderEmail: envelope.senderEmail,
+        title: envelope.title,
+        expiresAt: envelope.expiresAt,
+      });
+      await mailer.sendMail({ to: signer.email, ...invite });
+      await logEvent(db, {
+        envelopeId: envelope.id,
+        signerId: signer.id,
+        event: "reminded",
+      });
+    }
+  }
+}

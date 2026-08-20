@@ -7,6 +7,8 @@ const root = dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   test: {
     environment: "node",
+    // PGlite pushSchema is slow when many files create DBs in parallel.
+    testTimeout: 30_000,
   },
   resolve: {
     alias: {
