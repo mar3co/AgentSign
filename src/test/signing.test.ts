@@ -18,7 +18,8 @@ import { minimalPdf } from "./pdf.js";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { documents, envelopes, signers as signersTable } from "../db/schema.js";
+import { randomUUID } from "node:crypto";
+import { accounts, documents, envelopes, signers as signersTable } from "../db/schema.js";
 
 const png = Uint8Array.from(
   Buffer.from(
@@ -245,5 +246,45 @@ describe("signing ceremony", () => {
     expect(screen.getByRole("button", { name: /finish/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /decline/i })).toBeTruthy();
     expect(screen.queryByText(/Keep it in a cabinet/i)).toBeNull();
+  });
+
+  it("leaves envelope pending and returns 500 if complete throws", { timeout: 30_000 }, async () => {
+    const { db, store, id, token } = await startVerified();
+    setDeps({ p12: Buffer.from("not-a-pkcs12"), p12Passphrase: "nope" });
+    const consent = await postConsent(consentRequest(token), {
+      params: Promise.resolve({ token }),
+    });
+    expect(consent.status).toBe(200);
+    const sign = await postSign(signRequest(token), {
+      params: Promise.resolve({ token }),
+    });
+    expect(sign.status).toBe(500);
+    const [env] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    expect(env!.status).toBe("pending");
+    expect(await store.get(objectKey(id, "sealed"))).toBeNull();
+    const [row] = await db.select().from(signersTable).where(eq(signersTable.envelopeId, id));
+    expect(row!.signedAt).toBeNull();
+  });
+
+  it("sets shred_at from PRO_KEEP_DAYS when the envelope user is pro", { timeout: 60_000 }, async () => {
+    const frozen = new Date("2026-08-20T12:00:00Z");
+    const { db, store, id, token } = await startVerified({ now: () => frozen });
+    const userId = randomUUID();
+    await db.insert(accounts).values({ userId, plan: "pro" });
+    await db.update(envelopes).set({ userId }).where(eq(envelopes.id, id));
+    setDeps({ p12: makeDevP12("test"), p12Passphrase: "test" });
+    const consent = await postConsent(consentRequest(token), {
+      params: Promise.resolve({ token }),
+    });
+    expect(consent.status).toBe(200);
+    const sign = await postSign(signRequest(token), {
+      params: Promise.resolve({ token }),
+    });
+    expect(sign.status).toBe(200);
+    const [env] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    expect(env!.status).toBe("completed");
+    expect(env!.shredAt.getTime()).toBe(frozen.getTime() + 365 * 86_400_000);
+    expect(env!.shredAt.getTime()).not.toBe(frozen.getTime() + 7 * 86_400_000);
+    expect(await store.get(objectKey(id, "sealed"))).not.toBeNull();
   });
 });
