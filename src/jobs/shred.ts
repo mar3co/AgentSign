@@ -14,13 +14,12 @@ const KINDS = ["original", "sealed", "certificate"] as const;
 const REMIND_AFTER_MS = 3 * 86_400_000;
 const MAX_REMINDERS = 2;
 
-/** Hard-delete blobs, null document paths, tombstone, expire tmp keys. */
+/** Hard-delete blobs, null document paths, tombstone, expire tmp keys, redact emails. */
 export async function purgeEnvelope(
   db: AuditDb,
   store: BlobStore,
   envelopeId: string,
   now: Date,
-  opts?: { redact?: boolean },
 ): Promise<void> {
   for (const kind of KINDS) {
     await store.delete(objectKey(envelopeId, kind));
@@ -31,22 +30,16 @@ export async function purgeEnvelope(
     .where(eq(documents.envelopeId, envelopeId));
   await db
     .update(envelopes)
-    .set({ status: "deleted" })
+    .set({ status: "deleted", senderEmail: "redacted" })
     .where(eq(envelopes.id, envelopeId));
+  await db
+    .update(signersTable)
+    .set({ email: "redacted" })
+    .where(eq(signersTable.envelopeId, envelopeId));
   await db
     .update(apiKeys)
     .set({ expiresAt: now })
     .where(and(eq(apiKeys.envelopeId, envelopeId), eq(apiKeys.kind, "tmp")));
-  if (opts?.redact) {
-    await db
-      .update(envelopes)
-      .set({ senderEmail: "redacted" })
-      .where(eq(envelopes.id, envelopeId));
-    await db
-      .update(signersTable)
-      .set({ email: "redacted" })
-      .where(eq(signersTable.envelopeId, envelopeId));
-  }
   await logEvent(db, { envelopeId, event: "deleted" });
 }
 
@@ -61,7 +54,7 @@ export async function shredDue(
     .from(envelopes)
     .where(and(lte(envelopes.shredAt, now), ne(envelopes.status, "deleted")));
   for (const envelope of due) {
-    await purgeEnvelope(db, store, envelope.id, now, { redact: true });
+    await purgeEnvelope(db, store, envelope.id, now);
   }
 }
 

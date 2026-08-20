@@ -14,7 +14,12 @@ import { minimalPdf } from "./pdf.js";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { auditEvents, documents } from "../db/schema.js";
+import {
+  auditEvents,
+  documents,
+  envelopes,
+  signers as signersTable,
+} from "../db/schema.js";
 
 const png = Uint8Array.from(
   Buffer.from(
@@ -196,5 +201,13 @@ describe("GET/DELETE envelope", () => {
 
     const docs = await db.select().from(documents).where(eq(documents.envelopeId, id));
     expect(docs.every((d) => !d.storagePath)).toBe(true);
+
+    const [env] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    expect(env!.senderEmail).toBe("redacted");
+    const [signer] = await db
+      .select()
+      .from(signersTable)
+      .where(eq(signersTable.envelopeId, id));
+    expect(signer!.email).toBe("redacted");
   });
 });
