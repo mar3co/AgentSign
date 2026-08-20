@@ -27,8 +27,17 @@ export function CabinetClient() {
           if (!cancelled) setError(body?.error ?? "Could not load envelopes.");
           return;
         }
-        const json = (await res.json()) as { envelopes: CabinetEnvelope[] };
-        if (!cancelled) setEnvelopes(json.envelopes);
+        const json = (await res.json()) as {
+          envelopes: Array<CabinetEnvelope & { can_delete?: boolean }>;
+        };
+        if (!cancelled) {
+          setEnvelopes(
+            json.envelopes.map((e) => ({
+              ...e,
+              canDelete: Boolean(e.can_delete),
+            })),
+          );
+        }
       } catch {
         if (!cancelled) setError("Could not load envelopes.");
       }
@@ -50,5 +59,17 @@ export function CabinetClient() {
     return <p className="text-base text-muted-foreground">Loading…</p>;
   }
 
-  return <CabinetList envelopes={envelopes} />;
+  async function onVoid(id: string) {
+    const res = await fetch(`/v1/envelopes/${id}`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+    if (!res.ok) {
+      setError("Could not void envelope.");
+      return;
+    }
+    setEnvelopes((prev) => (prev ?? []).filter((e) => e.id !== id));
+  }
+
+  return <CabinetList envelopes={envelopes} onVoid={onVoid} />;
 }

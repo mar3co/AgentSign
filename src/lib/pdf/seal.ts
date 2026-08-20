@@ -23,6 +23,10 @@ export async function sealPdf(
   // Object streams hide ByteRange placeholders from @signpdf's byte patcher.
   const withPlaceholder = await pdfDoc.save({ useObjectStreams: false });
   const signer = new P12Signer(p12, { passphrase });
-  const signed = await signpdf.sign(withPlaceholder, signer);
+  const client =
+    typeof (signpdf as { sign?: unknown }).sign === "function"
+      ? signpdf
+      : (signpdf as { default: typeof signpdf }).default;
+  const signed = await client.sign(withPlaceholder, signer);
   return Uint8Array.from(signed);
 }

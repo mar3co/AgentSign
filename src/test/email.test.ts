@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { createTestDb } from "./db.js";
 import { createFsStore } from "../lib/storage.js";
@@ -13,7 +13,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { auditEvents, signers as signersTable } from "../db/schema.js";
-import type { MailMessage } from "../lib/email.js";
+import { createMailer, type MailMessage } from "../lib/email.js";
 import { getSigningState } from "../routes/signing.js";
 
 const png = Uint8Array.from(
@@ -234,5 +234,23 @@ describe("email templates", () => {
     expect(rows[0]!.sentAt).not.toBeNull();
     expect(rows[1]!.sentAt).not.toBeNull();
     expect(rows[0]!.tokenHash).toBe(janeHashBefore);
+  });
+
+  it("dev mailer does not log OTP digits or signing URLs", async () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const mailer = createMailer();
+      await mailer.sendMail({
+        to: "shop@example.com",
+        subject: "Your Sign code",
+        text: "Your verification code is 123456. Sign at http://localhost:3000/s/tokensecret",
+      });
+      const dumped = spy.mock.calls.map((c) => c.map(String).join(" ")).join("\n");
+      expect(dumped).not.toContain("123456");
+      expect(dumped).not.toContain("tokensecret");
+      expect(dumped).not.toContain("/s/");
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

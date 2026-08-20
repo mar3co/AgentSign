@@ -116,6 +116,70 @@ describe("POST /v1/envelopes", () => {
     expect(JSON.stringify(json)).not.toMatch(/20/);
   });
 
+  it("voided envelopes still count toward the free send cap", { timeout: 60_000 }, async () => {
+    const db = await createTestDb();
+    const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+    const frozen = new Date("2026-08-20T12:00:00Z");
+    setDeps({
+      db,
+      store,
+      mailer: { sendMail: async () => {} },
+      now: () => frozen,
+    });
+    const pdf = await minimalPdf();
+    async function postOnce() {
+      const body = new FormData();
+      body.set("title", "Repair authorization");
+      body.set("sender_email", "voidcap@example.com");
+      body.set("signers", JSON.stringify([{ name: "Jane", email: "jane@example.com" }]));
+      body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
+      return postEnvelope(new Request("http://sign.test/v1/envelopes", { method: "POST", body }));
+    }
+    const first = await postOnce();
+    expect(first.status).toBe(201);
+    const { id } = (await first.json()) as { id: string };
+    await db.update(envelopes).set({ status: "deleted" }).where(eq(envelopes.id, id));
+    for (let i = 0; i < 19; i++) {
+      expect((await postOnce()).status).toBe(201);
+    }
+    const over = await postOnce();
+    expect(over.status).toBe(429);
+  });
+
+  it("OTP mail failure still returns the tmp key", async () => {
+    const db = await createTestDb();
+    const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+    const sent: { to: string; subject: string; text: string }[] = [];
+    let failAfterOtp = false;
+    setDeps({
+      db,
+      store,
+      mailer: {
+        sendMail: async (m) => {
+          if (failAfterOtp) throw new Error("resend down");
+          sent.push(m);
+        },
+      },
+    });
+    const pdf = await minimalPdf();
+    const body = new FormData();
+    body.set("title", "Repair authorization");
+    body.set("sender_email", "shop@example.com");
+    body.set("signers", JSON.stringify([{ name: "Jane", email: "jane@example.com" }]));
+    body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
+    const created = await postEnvelope(
+      new Request("http://sign.test/v1/envelopes", { method: "POST", body }),
+    );
+    const { id } = (await created.json()) as { id: string };
+    const code = sent[0]!.text.match(/\b(\d{6})\b/)![1]!;
+    failAfterOtp = true;
+    const verify = await postOtpCode(id, code);
+    expect(verify.status).toBe(200);
+    const done = (await verify.json()) as { key: string; signers: { sign_url: string | null }[] };
+    expect(done.key).toMatch(/^sign_tmp_/);
+    expect(done.signers[0]!.sign_url).toMatch(/^\/s\//);
+  });
+
   it("wrong OTP increments attempts and returns invalid_otp", async () => {
     const { db, sent, id } = await startEnvelope();
     const code = sent[0]!.text.match(/\b(\d{6})\b/)![1]!;

@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { createElement } from "react";
 import { describe, it, expect } from "vitest";
 import { eq } from "drizzle-orm";
 import { render, screen } from "@testing-library/react";
@@ -11,7 +12,10 @@ import { POST as postConsent } from "../../app/s/[token]/consent/route.js";
 import { POST as postSign } from "../../app/s/[token]/sign/route.js";
 import { POST as postDecline } from "../../app/s/[token]/decline/route.js";
 import { GET as getPdf } from "../../app/v1/envelopes/[id]/pdf/route.js";
+import { GET as getCeremonyPdf } from "../../app/s/[token]/pdf/route.js";
 import { getSigningState } from "../routes/signing.js";
+import { SigningCeremony } from "../../app/s/[token]/signing-ceremony.js";
+import { PDFDocument } from "pdf-lib";
 import SigningPage from "../../app/s/[token]/page.js";
 import { makeDevP12 } from "../lib/pdf/devP12.js";
 import { newSigningToken } from "../lib/tokens.js";
@@ -75,6 +79,7 @@ async function startVerified(opts?: {
   expect(verify.status).toBe(200);
   const done = (await verify.json()) as {
     id: string;
+    key: string;
     signers: { email: string; sign_url: string | null }[];
   };
   return {
@@ -82,6 +87,7 @@ async function startVerified(opts?: {
     store,
     sent,
     id: done.id,
+    key: done.key,
     signers: done.signers,
     tokens: done.signers
       .filter((s) => s.sign_url)
@@ -211,6 +217,12 @@ describe("signing ceremony", () => {
   });
 
   it("unknown token is 404, expired is 410, sequential wait is 409", { timeout: 30_000 }, async () => {
+    const db = await createTestDb();
+    setDeps({
+      db,
+      store: createFsStore(await mkdtemp(join(tmpdir(), "sign-"))),
+      mailer: { sendMail: async () => {} },
+    });
     const missing = await getSigningState("not-a-real-token");
     expect(missing.status).toBe(404);
 
@@ -305,5 +317,208 @@ describe("signing ceremony", () => {
     expect(env!.shredAt.getTime()).toBe(frozen.getTime() + 365 * 86_400_000);
     expect(env!.shredAt.getTime()).not.toBe(frozen.getTime() + 7 * 86_400_000);
     expect(await store.get(objectKey(id, "sealed"))).not.toBeNull();
+  });
+
+  it("sets shred_at from PRO_KEEP_DAYS when a signer account is pro", { timeout: 60_000 }, async () => {
+    const frozen = new Date("2026-08-20T12:00:00Z");
+    const { db, id, token } = await startVerified({ now: () => frozen });
+    const userId = randomUUID();
+    await db.insert(accounts).values({
+      userId,
+      email: "jane@example.com",
+      plan: "pro",
+    });
+    setDeps({ p12: makeDevP12("test"), p12Passphrase: "test" });
+    expect(
+      (await postConsent(consentRequest(token), { params: Promise.resolve({ token }) })).status,
+    ).toBe(200);
+    expect(
+      (await postSign(signRequest(token), { params: Promise.resolve({ token }) })).status,
+    ).toBe(200);
+    const [env] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    expect(env!.shredAt.getTime()).toBe(frozen.getTime() + 365 * 86_400_000);
+  });
+
+  it("tmp key still fetches the PDF after a late complete until shred_at", { timeout: 60_000 }, async () => {
+    let at = new Date("2026-08-20T12:00:00Z");
+    const { id, token, key } = await startVerified({ now: () => at });
+    setDeps({ p12: makeDevP12("test"), p12Passphrase: "test" });
+    at = new Date(at.getTime() + 6 * 86_400_000);
+    const consent = await postConsent(consentRequest(token), {
+      params: Promise.resolve({ token }),
+    });
+    expect(consent.status).toBe(200);
+    const sign = await postSign(signRequest(token), {
+      params: Promise.resolve({ token }),
+    });
+    expect(sign.status).toBe(200);
+    at = new Date(at.getTime() + 2 * 86_400_000);
+    const pdf = await getPdf(
+      new Request(`http://sign.test/v1/envelopes/${id}/pdf`, {
+        headers: { authorization: `Bearer ${key}` },
+      }),
+      { params: Promise.resolve({ id }) },
+    );
+    expect(pdf.status).toBe(200);
+    at = new Date(at.getTime() + 6 * 86_400_000);
+    const gone = await getPdf(
+      new Request(`http://sign.test/v1/envelopes/${id}/pdf`, {
+        headers: { authorization: `Bearer ${key}` },
+      }),
+      { params: Promise.resolve({ id }) },
+    );
+    expect(gone.status).toBeGreaterThanOrEqual(400);
+  });
+
+  it("completion mail throw still returns 200 completed", { timeout: 60_000 }, async () => {
+    let failMail = false;
+    const db = await createTestDb();
+    const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+    const sent: { to: string; subject: string; text: string }[] = [];
+    setDeps({
+      db,
+      store,
+      mailer: {
+        sendMail: async (m) => {
+          if (failMail) throw new Error("resend down");
+          sent.push(m);
+        },
+      },
+      p12: makeDevP12("test"),
+      p12Passphrase: "test",
+    });
+    const pdf = await minimalPdf();
+    const body = new FormData();
+    body.set("title", "Repair authorization");
+    body.set("sender_email", "shop@example.com");
+    body.set("signers", JSON.stringify([{ name: "Jane", email: "jane@example.com" }]));
+    body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
+    const created = await postEnvelope(
+      new Request("http://sign.test/v1/envelopes", { method: "POST", body }),
+    );
+    const { id } = (await created.json()) as { id: string };
+    const code = sent[0]!.text.match(/\b(\d{6})\b/)![1]!;
+    const verify = await postOtp(
+      new Request(`http://sign.test/v1/envelopes/${id}/otp`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code }),
+      }),
+      { params: Promise.resolve({ id }) },
+    );
+    const done = (await verify.json()) as {
+      signers: { sign_url: string | null }[];
+    };
+    const token = tokenFromUrl(done.signers[0]!.sign_url!);
+    await postConsent(consentRequest(token), { params: Promise.resolve({ token }) });
+    failMail = true;
+    const sign = await postSign(signRequest(token), {
+      params: Promise.resolve({ token }),
+    });
+    expect(sign.status).toBe(200);
+    const json = (await sign.json()) as { status: string };
+    expect(json.status).toBe("completed");
+    const [env] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    expect(env!.status).toBe("completed");
+  });
+
+  it("guessable pending:{id}:{index} token is not a signing link", { timeout: 30_000 }, async () => {
+    const db = await createTestDb();
+    const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+    setDeps({
+      db,
+      store,
+      mailer: { sendMail: async () => {} },
+    });
+    const pdf = await minimalPdf();
+    const body = new FormData();
+    body.set("title", "Repair authorization");
+    body.set("sender_email", "shop@example.com");
+    body.set("signers", JSON.stringify([{ name: "Jane", email: "jane@example.com" }]));
+    body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
+    const created = await postEnvelope(
+      new Request("http://sign.test/v1/envelopes", { method: "POST", body }),
+    );
+    const { id } = (await created.json()) as { id: string };
+    const guess = await getSigningState(`pending:${id}:0`);
+    expect(guess.status).toBe(404);
+  });
+
+  it("two sequential signers each appear on the sealed PDF", { timeout: 60_000 }, async () => {
+    const { store, id, token, sent } = await startVerified({
+      signers: [
+        { name: "Jane", email: "jane@example.com" },
+        { name: "Bob", email: "bob@example.com" },
+      ],
+    });
+    setDeps({ p12: makeDevP12("test"), p12Passphrase: "test" });
+    expect(
+      (await postConsent(consentRequest(token), { params: Promise.resolve({ token }) })).status,
+    ).toBe(200);
+    const before = sent.length;
+    expect(
+      (await postSign(signRequest(token), { params: Promise.resolve({ token }) })).status,
+    ).toBe(200);
+    const bobInvites = sent.slice(before).filter((m) => m.to === "bob@example.com");
+    const bobMatch = bobInvites[0]!.text.match(/\/s\/([A-Za-z0-9_-]+)/);
+    const bob = bobMatch![1]!;
+    expect(
+      (await postConsent(consentRequest(bob), { params: Promise.resolve({ token: bob }) })).status,
+    ).toBe(200);
+    expect(
+      (await postSign(signRequest(bob), { params: Promise.resolve({ token: bob }) })).status,
+    ).toBe(200);
+    const sealed = await store.get(objectKey(id, "sealed"));
+    const sealedDoc = await PDFDocument.load(sealed!);
+    expect(sealedDoc.getPageCount()).toBe(3);
+  });
+
+  it("ceremony GET /s/:token/pdf returns sealed after complete; signer token still 401 on /v1 pdf", { timeout: 60_000 }, async () => {
+    const { id, token } = await startVerified();
+    const early = await getCeremonyPdf(
+      new Request(`http://sign.test/s/${token}/pdf`),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(early.status).toBeGreaterThanOrEqual(400);
+    setDeps({ p12: makeDevP12("test"), p12Passphrase: "test" });
+    expect(
+      (await postConsent(consentRequest(token), { params: Promise.resolve({ token }) })).status,
+    ).toBe(200);
+    expect(
+      (await postSign(signRequest(token), { params: Promise.resolve({ token }) })).status,
+    ).toBe(200);
+    const pdf = await getCeremonyPdf(
+      new Request(`http://sign.test/s/${token}/pdf`),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(pdf.status).toBe(200);
+    expect(pdf.headers.get("content-type")).toMatch(/pdf/);
+    const v1 = await getPdf(
+      new Request(`http://sign.test/v1/envelopes/${id}/pdf`, {
+        headers: { authorization: `Bearer ${token}` },
+      }),
+      { params: Promise.resolve({ id }) },
+    );
+    expect(v1.status).toBe(401);
+  });
+
+  it("done screen Download is a link to the ceremony PDF", () => {
+    render(
+      createElement(SigningCeremony, {
+        token: "tok_1",
+        consentText: "I agree",
+        state: {
+          title: "Repair authorization",
+          signerName: "Jane",
+          signerEmail: "jane@example.com",
+          sequentialWait: false,
+          expiresAt: new Date().toISOString(),
+          shredAt: new Date().toISOString(),
+          signed: true,
+        },
+      }),
+    );
+    const link = screen.getByRole("link", { name: /download/i });
+    expect(link.getAttribute("href")).toBe("/s/tok_1/pdf");
   });
 });

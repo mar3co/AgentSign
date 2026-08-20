@@ -12,6 +12,7 @@ import { auditEvents, envelopes } from "../db/schema.js";
 import { setDeps } from "../lib/deps.js";
 import { makeDevP12 } from "../lib/pdf/devP12.js";
 import { createFsStore } from "../lib/storage.js";
+import { webhookUrlError } from "../lib/webhooks.js";
 import { createTestDb } from "./db.js";
 import { minimalPdf } from "./pdf.js";
 
@@ -65,6 +66,7 @@ async function startVerified(opts: {
     fetch: opts.fetch ?? fakeFetch,
     p12: makeDevP12("test"),
     p12Passphrase: "test",
+    lookup: async () => [{ address: "93.184.216.34", family: 4 }],
   });
   const pdf = await minimalPdf();
   const body = new FormData();
@@ -136,7 +138,9 @@ describe("envelope.completed webhook", () => {
       expect(typeof created.webhook_secret).toBe("string");
       const [row] = await db.select().from(envelopes).where(eq(envelopes.id, created.id));
       expect(row!.webhookUrl).toBe("https://example.com/hook");
-      expect(row!.webhookSecretHash).toBe(created.webhook_secret);
+      expect(row!.webhookSecretHash).not.toBe(created.webhook_secret);
+      expect(row!.webhookSecretHash).toMatch(/^enc:/);
+      expect(row!.webhookSecretHash).not.toContain(created.webhook_secret);
 
       const { done, sign } = await verifyAndSign(created.id, sent);
       expect(sign.status).toBe(200);
@@ -228,4 +232,24 @@ describe("envelope.completed webhook", () => {
       expect(events.some((e) => e.event === "webhook_sent")).toBe(false);
     },
   );
+
+  it("rejects IPv6 loopback, mapped IPv4, and ULA webhook URLs", async () => {
+    for (const url of [
+      "https://[::1]/hook",
+      "https://[::ffff:127.0.0.1]/hook",
+      "https://[::ffff:10.0.0.1]/hook",
+      "https://[::ffff:169.254.169.254]/hook",
+      "https://[fc00::1]/hook",
+      "https://[fe80::1]/hook",
+    ]) {
+      expect(await webhookUrlError(url), url).toBeTruthy();
+    }
+  });
+
+  it("rejects a hostname that resolves to loopback", async () => {
+    setDeps({
+      lookup: async () => [{ address: "127.0.0.1", family: 4 }],
+    });
+    expect(await webhookUrlError("https://evil.example/hook")).toBeTruthy();
+  });
 });

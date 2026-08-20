@@ -198,6 +198,45 @@ describe("live keys", () => {
     const qerr = (await queryKey.json()) as { error: string; code: string };
     expect(qerr.error).toBeTruthy();
     expect(qerr.code).toBeTruthy();
+    expect(body.envelopes.find((e) => e.id === created.id)).toMatchObject({
+      can_delete: true,
+    });
+  });
+
+  it("live-key send binds sender_email to the account", { timeout: 60_000 }, async () => {
+    const db = await createTestDb();
+    const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+    const sent: { to: string; subject: string; text: string }[] = [];
+    const { adapter, userFor } = createFakeAuth();
+    setDeps({
+      db,
+      store,
+      auth: adapter,
+      mailer: { sendMail: async (m) => { sent.push(m); } },
+    });
+    const cookie = await magicCookie("shop@example.com");
+    const minted = await postKeys(
+      new Request("http://sign.test/v1/keys", {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    const { key } = (await minted.json()) as { key: string };
+    const res = await postEnvelope(
+      new Request("http://sign.test/v1/envelopes", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}` },
+        body: await envelopeForm("impostor@example.com"),
+      }),
+    );
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as { id: string };
+    const [row] = await db.select().from(envelopes).where(eq(envelopes.id, created.id));
+    expect(row!.senderEmail).toBe("shop@example.com");
+    expect(row!.userId).toBe(userFor("shop@example.com").id);
+    expect(sent.some((m) => m.text.includes("impostor@example.com"))).toBe(false);
+    expect(sent.some((m) => /shop@example.com asked you to sign/i.test(m.text))).toBe(true);
   });
 
   it("claiming attaches a prior one-off with the same sender_email", { timeout: 60_000 }, async () => {
@@ -395,6 +434,18 @@ describe("live keys", () => {
     expect(sentAfter!.shredAt.getTime()).toBe(expected);
     expect(signedAfter!.shredAt.getTime()).toBe(expected);
     expect(unrelated.shredAt.getTime()).toBe(signedAt.getTime() + 7 * 86_400_000);
+
+    const tmp = {
+      kind: "tmp" as const,
+      prefix: "sign_tmp_xxxx",
+      tokenHash: "hash-tmp",
+      envelopeId: sentEnv!.id,
+      expiresAt: new Date(signedAt.getTime() + 7 * 86_400_000),
+    };
+    await db.insert(apiKeys).values(tmp);
+    await extendKeep(db, userId);
+    const [tmpAfter] = await db.select().from(apiKeys).where(eq(apiKeys.tokenHash, "hash-tmp"));
+    expect(tmpAfter!.expiresAt.getTime()).toBe(expected);
   });
 
   it("live key GET/PDF allows envelopes the user sent or signed; DELETE is 403 unless sender", { timeout: 60_000 }, async () => {

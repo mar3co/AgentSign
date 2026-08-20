@@ -8,7 +8,7 @@ import {
 } from "../db/schema.js";
 import { logEvent, type AuditDb } from "../lib/audit.js";
 import { reminderEmail, type Mailer } from "../lib/email.js";
-import { objectKey, type BlobStore } from "../lib/storage.js";
+import { appearanceKey, objectKey, type BlobStore } from "../lib/storage.js";
 
 const KINDS = ["original", "sealed", "certificate"] as const;
 const REMIND_AFTER_MS = 3 * 86_400_000;
@@ -23,6 +23,13 @@ export async function purgeEnvelope(
 ): Promise<void> {
   for (const kind of KINDS) {
     await store.delete(objectKey(envelopeId, kind));
+  }
+  const signerRows = await db
+    .select()
+    .from(signersTable)
+    .where(eq(signersTable.envelopeId, envelopeId));
+  for (const signer of signerRows) {
+    await store.delete(appearanceKey(envelopeId, signer.id));
   }
   await db
     .update(documents)

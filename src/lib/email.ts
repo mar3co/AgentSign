@@ -37,13 +37,7 @@ export function createMailer(): Mailer {
   if (!env.RESEND_API_KEY) {
     return {
       async sendMail(message) {
-        console.log(
-          "[mail]",
-          message.to,
-          message.subject,
-          message.text.slice(0, 120),
-          message.attachments?.map((a) => a.filename) ?? [],
-        );
+        console.log("[mail]", message.to, message.subject);
       },
     };
   }

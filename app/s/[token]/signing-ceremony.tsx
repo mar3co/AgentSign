@@ -62,9 +62,12 @@ export function SigningCeremony({
             <p className="text-base">
               Download this. We delete it on {when}.
             </p>
-            <Button className="h-11 w-full text-base" type="button">
+            <a
+              className="inline-flex h-11 w-full items-center justify-center rounded-lg bg-primary text-base font-medium text-primary-foreground"
+              href={`/s/${token}/pdf`}
+            >
               Download
-            </Button>
+            </a>
             <a
               className="text-base underline"
               href={`/login?email=${email}&next=/envelopes`}

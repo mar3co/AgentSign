@@ -11,6 +11,11 @@ export function newSigningToken(): { raw: string; hash: string } {
   return { raw, hash: hashSigningToken(raw) };
 }
 
+/** Hash with no corresponding raw token — pre-invite placeholder, not a URL. */
+export function placeholderSigningTokenHash(): string {
+  return sha256Hex(randomBytes(32).toString("hex"));
+}
+
 function newApiKey(kind: "tmp" | "live"): {
   raw: string;
   prefix: string;

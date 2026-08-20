@@ -38,7 +38,14 @@ export function makeDevP12(passphrase: string): Buffer {
   return Buffer.from(der, "binary");
 }
 
-/** Production sets P12_PATH; otherwise generate a throwaway dev cert. */
+function allowDevP12(): boolean {
+  if (process.env.VITEST) return true;
+  if (process.env.NODE_ENV === "test") return true;
+  if (process.env.VERCEL) return false;
+  return false;
+}
+
+/** Production sets P12_PATH; tests may generate a throwaway cert. */
 export function loadSigningP12(): { p12: Buffer; passphrase: string } {
   const env = getEnv();
   if (env.P12_PATH) {
@@ -46,6 +53,9 @@ export function loadSigningP12(): { p12: Buffer; passphrase: string } {
       p12: readFileSync(env.P12_PATH),
       passphrase: env.P12_PASSPHRASE,
     };
+  }
+  if (!allowDevP12()) {
+    throw new Error("P12_PATH is required");
   }
   const passphrase = env.P12_PASSPHRASE || "dev";
   return { p12: makeDevP12(passphrase), passphrase };

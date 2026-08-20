@@ -32,6 +32,7 @@ export function LoginForm({ email, next }: { email: string; next: string }) {
       });
       const json = (await res.json().catch(() => null)) as {
         error?: string;
+        next?: string;
       } | null;
       if (!res.ok) {
         setError(json?.error ?? "Could not continue.");
@@ -39,7 +40,7 @@ export function LoginForm({ email, next }: { email: string; next: string }) {
       }
       if (after === "magic") setMessage("Check your email for a link.");
       else if (after === "signup") setMessage("Confirm your email, then log in.");
-      else window.location.href = next || "/";
+      else window.location.href = json?.next || "/";
     } catch {
       setError("Could not continue.");
     } finally {

@@ -23,8 +23,12 @@ import {
 } from "../lib/keys.js";
 import { newOtp } from "../lib/otp.js";
 import { objectKey, type BlobStore } from "../lib/storage.js";
-import { newSigningToken } from "../lib/tokens.js";
-import { newWebhookSecret, webhookUrlError } from "../lib/webhooks.js";
+import { newSigningToken, placeholderSigningTokenHash } from "../lib/tokens.js";
+import {
+  newWebhookSecret,
+  sealWebhookSecret,
+  webhookUrlError,
+} from "../lib/webhooks.js";
 import { getEnv } from "../env.js";
 import { purgeEnvelope } from "../jobs/shred.js";
 
@@ -102,25 +106,34 @@ async function inviteFirstSigner(
     .update(signersTable)
     .set({ tokenHash: token.hash, sentAt: at })
     .where(eq(signersTable.id, first.id));
-  await mailer.sendMail({
-    to: first.email,
-    ...inviteEmail({
-      signUrl,
-      senderEmail: envelope.senderEmail,
-      title: envelope.title,
-      expiresAt: envelope.expiresAt,
-    }),
-  });
-  await logEvent(db, {
-    envelopeId: envelope.id,
-    signerId: first.id,
-    event: "sent",
-  });
-  await logEvent(db, {
-    envelopeId: envelope.id,
-    signerId: first.id,
-    event: "emailed",
-  });
+  try {
+    await mailer.sendMail({
+      to: first.email,
+      ...inviteEmail({
+        signUrl,
+        senderEmail: envelope.senderEmail,
+        title: envelope.title,
+        expiresAt: envelope.expiresAt,
+      }),
+    });
+    await logEvent(db, {
+      envelopeId: envelope.id,
+      signerId: first.id,
+      event: "sent",
+    });
+    await logEvent(db, {
+      envelopeId: envelope.id,
+      signerId: first.id,
+      event: "emailed",
+    });
+  } catch (err) {
+    await logEvent(db, {
+      envelopeId: envelope.id,
+      signerId: first.id,
+      event: "emailed_failed",
+      payload: { error: err instanceof Error ? err.message : "mail_failed" },
+    });
+  }
 }
 
 export async function createEnvelope(req: Request): Promise<Response> {
@@ -136,7 +149,7 @@ export async function createEnvelope(req: Request): Promise<Response> {
   }
 
   const title = String(form.get("title") ?? "").trim();
-  const senderEmail = String(form.get("sender_email") ?? "").trim().toLowerCase();
+  let senderEmail = String(form.get("sender_email") ?? "").trim().toLowerCase();
   const signersField = form.get("signers");
   const file = form.get("file");
 
@@ -173,7 +186,7 @@ export async function createEnvelope(req: Request): Promise<Response> {
   let webhookUrl: string | null = null;
   let webhookSecret: string | null = null;
   if (webhookField) {
-    const blocked = webhookUrlError(webhookField);
+    const blocked = await webhookUrlError(webhookField);
     if (blocked) return jsonError(400, blocked, "invalid_webhook_url");
     webhookUrl = webhookField;
     webhookSecret = newWebhookSecret();
@@ -205,6 +218,13 @@ export async function createEnvelope(req: Request): Promise<Response> {
       return jsonError(401, "Unauthorized", "unauthorized");
     }
     liveUserId = key.userId;
+    const [liveAccount] = await db
+      .select()
+      .from(accounts)
+      .where(eq(accounts.userId, liveUserId));
+    if (liveAccount?.email) {
+      senderEmail = liveAccount.email.trim().toLowerCase();
+    }
   }
 
   if (liveUserId) {
@@ -222,7 +242,6 @@ export async function createEnvelope(req: Request): Promise<Response> {
               eq(envelopes.userId, liveUserId),
               eq(envelopes.senderEmail, senderEmail),
             ),
-            ne(envelopes.status, "deleted"),
             gte(envelopes.createdAt, windowStart),
           ),
         );
@@ -237,7 +256,6 @@ export async function createEnvelope(req: Request): Promise<Response> {
       .where(
         and(
           eq(envelopes.senderEmail, senderEmail),
-          ne(envelopes.status, "deleted"),
           gte(envelopes.createdAt, windowStart),
         ),
       );
@@ -262,7 +280,7 @@ export async function createEnvelope(req: Request): Promise<Response> {
       shredAt: expiresAt,
       sha256: documentHash,
       webhookUrl,
-      webhookSecretHash: webhookSecret,
+      webhookSecretHash: webhookSecret ? sealWebhookSecret(webhookSecret) : null,
       createdAt: at,
     })
     .returning();
@@ -282,7 +300,7 @@ export async function createEnvelope(req: Request): Promise<Response> {
       name: s.name,
       email: s.email.trim().toLowerCase(),
       signingOrder: i + 1,
-      tokenHash: sha256Hex(`pending:${envelope.id}:${i}`),
+      tokenHash: placeholderSigningTokenHash(),
     })),
   );
 
@@ -428,7 +446,12 @@ function iso(d: Date | null): string | null {
 }
 
 function keyExpired(authed: Extract<Authed, { ok: true }>): boolean {
-  return authed.via === "key" && authed.key.expiresAt.getTime() <= now().getTime();
+  if (authed.via !== "key") return false;
+  const keyDead = authed.key.expiresAt.getTime() <= now().getTime();
+  if (authed.key.kind === "tmp") {
+    return keyDead || authed.envelope.shredAt.getTime() <= now().getTime();
+  }
+  return keyDead;
 }
 
 export async function listEnvelopes(req: Request): Promise<Response> {
@@ -493,6 +516,7 @@ export async function listEnvelopes(req: Request): Promise<Response> {
       created_at: e.createdAt.toISOString(),
       expires_at: e.expiresAt.toISOString(),
       shred_at: e.shredAt.toISOString(),
+      can_delete: Boolean(e.userId && e.userId === userId),
     })),
   });
 }

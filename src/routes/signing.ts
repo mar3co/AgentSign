@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "../db/client.js";
 import {
@@ -20,9 +20,11 @@ import {
 import { sha256Hex } from "../lib/hash.js";
 import { completeEnvelopePdf } from "../lib/pdf/complete.js";
 import { loadSigningP12 } from "../lib/pdf/devP12.js";
-import { objectKey, type BlobStore } from "../lib/storage.js";
+import type { SignatureAppearance } from "../lib/pdf/appendSignaturePage.js";
+import { appearanceKey, objectKey, type BlobStore } from "../lib/storage.js";
 import { hashSigningToken, newSigningToken } from "../lib/tokens.js";
 import { fireEnvelopeCompleted } from "../lib/webhooks.js";
+import { syncTmpKeyExpiry } from "../lib/keys.js";
 
 export const CONSENT_TEXT =
   "I agree to sign this document electronically. I consent to receiving and storing records electronically. My signature is intended to be as binding as a handwritten signature under applicable law, including ESIGN and UETA. This is not legal advice. This is not a notary service.";
@@ -221,6 +223,9 @@ export async function postSign(req: Request, token: string): Promise<Response> {
     return jsonError(400, "A PNG signature is required", "invalid_png");
   }
   const png = new Uint8Array(await file.arrayBuffer());
+  if (png.byteLength > 1_000_000) {
+    return jsonError(400, "Signature image is too large", "invalid_png");
+  }
 
   const ip = clientIp(req) ?? signer.ip;
   const ua = req.headers.get("user-agent") ?? signer.ua;
@@ -237,17 +242,35 @@ export async function postSign(req: Request, token: string): Promise<Response> {
     if (!original) {
       return jsonError(500, "Original document missing", "missing_original");
     }
+    const appearances: SignatureAppearance[] = [];
+    for (const s of allSigners) {
+      if (s.id === signer.id) {
+        appearances.push({
+          png,
+          name: signer.name,
+          email: signer.email,
+          signedAt: at,
+        });
+        continue;
+      }
+      if (!s.signedAt) continue;
+      const prior = await store.get(appearanceKey(envelope.id, s.id));
+      if (!prior) {
+        return jsonError(500, "Prior signature missing", "missing_appearance");
+      }
+      appearances.push({
+        png: prior,
+        name: s.name,
+        email: s.email,
+        signedAt: s.signedAt,
+      });
+    }
     const { p12, passphrase } = signingP12();
     let result: Awaited<ReturnType<typeof completeEnvelopePdf>>;
     try {
       result = await completeEnvelopePdf({
         original,
-        appearance: {
-          png,
-          name: signer.name,
-          email: signer.email,
-          signedAt: at,
-        },
+        appearances,
         p12,
         passphrase,
         meta: {
@@ -273,12 +296,23 @@ export async function postSign(req: Request, token: string): Promise<Response> {
     }
 
     let keepDays = Number(getEnv().FREE_KEEP_DAYS);
+    const proDays = Number(getEnv().PRO_KEEP_DAYS);
     if (envelope.userId) {
       const [account] = await db
         .select()
         .from(accounts)
         .where(eq(accounts.userId, envelope.userId));
-      if (account?.plan === "pro") keepDays = Number(getEnv().PRO_KEEP_DAYS);
+      if (account?.plan === "pro") keepDays = proDays;
+    }
+    const emails = new Set(
+      allSigners.map((s) => s.email.trim().toLowerCase()).filter(Boolean),
+    );
+    if (emails.size > 0) {
+      const signerAccounts = await db
+        .select()
+        .from(accounts)
+        .where(inArray(accounts.email, [...emails]));
+      if (signerAccounts.some((a) => a.plan === "pro")) keepDays = proDays;
     }
     const shredAt = new Date(at.getTime() + keepDays * 86_400_000);
     const sealedPath = objectKey(envelope.id, "sealed");
@@ -315,6 +349,7 @@ export async function postSign(req: Request, token: string): Promise<Response> {
       ip: ip ?? undefined,
       ua: ua ?? undefined,
     });
+    await syncTmpKeyExpiry(db, envelope.id, shredAt);
 
     const mailer = requireMailer();
     const attachments = completionAttachments(result.sealed, result.certificate);
@@ -323,36 +358,55 @@ export async function postSign(req: Request, token: string): Promise<Response> {
       ...allSigners.map((s) => s.email),
     ]);
     for (const to of recipients) {
-      const body = completionEmail({
-        to,
-        title: envelope.title,
-        shredAt,
-        includeAttachments: Boolean(attachments),
-      });
-      await mailer.sendMail({
-        to,
-        subject: body.subject,
-        text: body.text,
-        attachments,
-      });
-      await logEvent(db, {
-        envelopeId: envelope.id,
-        event: "emailed",
-        payload: { to, kind: "completion" },
-      });
+      try {
+        const body = completionEmail({
+          to,
+          title: envelope.title,
+          shredAt,
+          includeAttachments: Boolean(attachments),
+        });
+        await mailer.sendMail({
+          to,
+          subject: body.subject,
+          text: body.text,
+          attachments,
+        });
+        await logEvent(db, {
+          envelopeId: envelope.id,
+          event: "emailed",
+          payload: { to, kind: "completion" },
+        });
+      } catch (err) {
+        await logEvent(db, {
+          envelopeId: envelope.id,
+          event: "emailed_failed",
+          payload: {
+            to,
+            error: err instanceof Error ? err.message : "mail_failed",
+          },
+        });
+      }
     }
 
-    await fireEnvelopeCompleted(
-      db,
-      envelope,
-      {
-        event: "envelope.completed",
-        id: envelope.id,
-        status: "completed",
-        sha256: result.sha256,
-        shred_at: shredAt,
-      },
-    );
+    try {
+      await fireEnvelopeCompleted(
+        db,
+        envelope,
+        {
+          event: "envelope.completed",
+          id: envelope.id,
+          status: "completed",
+          sha256: result.sha256,
+          shred_at: shredAt,
+        },
+      );
+    } catch (err) {
+      await logEvent(db, {
+        envelopeId: envelope.id,
+        event: "webhook_failed",
+        payload: { error: err instanceof Error ? err.message : "webhook_failed" },
+      });
+    }
     return Response.json({
       status: "completed",
       shred_at: shredAt.toISOString(),
@@ -360,6 +414,7 @@ export async function postSign(req: Request, token: string): Promise<Response> {
     });
   }
 
+  await store.put(appearanceKey(envelope.id, signer.id), png);
   await db
     .update(signersTable)
     .set({ signedAt: at, ip, ua })
@@ -388,20 +443,54 @@ export async function postSign(req: Request, token: string): Promise<Response> {
       title: envelope.title,
       expiresAt: envelope.expiresAt,
     });
-    await mailer.sendMail({ to: next.email, ...invite });
-    await logEvent(db, {
-      envelopeId: envelope.id,
-      signerId: next.id,
-      event: "sent",
-    });
-    await logEvent(db, {
-      envelopeId: envelope.id,
-      signerId: next.id,
-      event: "emailed",
-    });
+    try {
+      await mailer.sendMail({ to: next.email, ...invite });
+      await logEvent(db, {
+        envelopeId: envelope.id,
+        signerId: next.id,
+        event: "sent",
+      });
+      await logEvent(db, {
+        envelopeId: envelope.id,
+        signerId: next.id,
+        event: "emailed",
+      });
+    } catch (err) {
+      await logEvent(db, {
+        envelopeId: envelope.id,
+        signerId: next.id,
+        event: "emailed_failed",
+        payload: { error: err instanceof Error ? err.message : "mail_failed" },
+      });
+    }
   }
 
   return Response.json({ status: "pending" });
+}
+
+export async function getCeremonyPdf(token: string): Promise<Response> {
+  const loaded = await loadSigner(token);
+  if (!loaded.ok) return loaded.error;
+  const { signer, envelope } = loaded;
+  if (!signer.signedAt && !signer.declinedAt) {
+    return jsonError(409, "Envelope is not completed", "not_completed");
+  }
+  if (envelope.status !== "completed") {
+    return jsonError(409, "Envelope is not completed", "not_completed");
+  }
+  const store = requireStore();
+  if (!store) return storeUnavailableResponse();
+  const bytes = await store.get(objectKey(envelope.id, "sealed"));
+  if (!bytes) {
+    return jsonError(410, "Envelope has been deleted", "deleted");
+  }
+  return new Response(bytes, {
+    status: 200,
+    headers: {
+      "content-type": "application/pdf",
+      "content-disposition": `attachment; filename="${envelope.id}.pdf"`,
+    },
+  });
 }
 
 export async function postDecline(

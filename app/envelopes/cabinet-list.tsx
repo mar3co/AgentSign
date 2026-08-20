@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -12,9 +13,16 @@ export type CabinetEnvelope = {
   id: string;
   title: string;
   status: string;
+  canDelete?: boolean;
 };
 
-export function CabinetList({ envelopes }: { envelopes: CabinetEnvelope[] }) {
+export function CabinetList({
+  envelopes,
+  onVoid,
+}: {
+  envelopes: CabinetEnvelope[];
+  onVoid?: (id: string) => void;
+}) {
   return (
     <Card>
       <CardHeader>
@@ -34,8 +42,26 @@ export function CabinetList({ envelopes }: { envelopes: CabinetEnvelope[] }) {
                 className="flex items-baseline justify-between gap-3 border-b border-border pb-3 last:border-b-0 last:pb-0"
               >
                 <span className="text-base font-medium">{env.title}</span>
-                <span className="shrink-0 text-sm text-muted-foreground">
-                  {env.status}
+                <span className="flex shrink-0 items-center gap-3">
+                  <span className="text-sm text-muted-foreground">
+                    {env.status}
+                  </span>
+                  <a
+                    className="text-sm underline"
+                    href={`/v1/envelopes/${env.id}/pdf`}
+                  >
+                    Download
+                  </a>
+                  {env.canDelete ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-8 text-sm"
+                      onClick={() => onVoid?.(env.id)}
+                    >
+                      Void
+                    </Button>
+                  ) : null}
                 </span>
               </li>
             ))}

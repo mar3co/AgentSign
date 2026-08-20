@@ -107,5 +107,18 @@ export async function extendKeep(db: AuditDb, userId: string): Promise<void> {
     const keep = new Date(completedAt.getTime() + proDays * 86_400_000);
     const shredAt = keep.getTime() > minKeep.getTime() ? keep : minKeep;
     await db.update(envelopes).set({ shredAt }).where(eq(envelopes.id, envelope.id));
+    await syncTmpKeyExpiry(db, envelope.id, shredAt);
   }
+}
+
+/** Tmp keys die with shred_at, not the original signing window. */
+export async function syncTmpKeyExpiry(
+  db: AuditDb,
+  envelopeId: string,
+  shredAt: Date,
+): Promise<void> {
+  await db
+    .update(apiKeys)
+    .set({ expiresAt: shredAt })
+    .where(and(eq(apiKeys.envelopeId, envelopeId), eq(apiKeys.kind, "tmp")));
 }

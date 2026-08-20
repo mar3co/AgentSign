@@ -1,7 +1,9 @@
 import { getDb } from "../db/client.js";
+import { appOrigin, getEnv } from "../env.js";
 import { getAuth } from "../lib/auth/supabase.js";
 import { getDeps } from "../lib/deps.js";
 import { claimSends, ensureAccount } from "../lib/keys.js";
+import { safeNext } from "../lib/safeNext.js";
 import type { AuditDb } from "../lib/audit.js";
 
 function jsonError(status: number, error: string, code: string): Response {
@@ -13,12 +15,16 @@ function requireDb(): AuditDb {
 }
 
 function originOf(req: Request): string {
+  const env = getEnv();
+  if (env.APP_URL || env.APP_ORIGIN) return appOrigin();
   return new URL(req.url).origin;
 }
 
-function safeNext(next: string | null | undefined): string {
-  if (!next || !next.startsWith("/") || next.startsWith("//")) return "/";
-  return next;
+function cookieHeaders(cookies: string[] | undefined, extra?: string): Headers {
+  const headers = new Headers();
+  if (extra) headers.append("set-cookie", extra);
+  for (const c of cookies ?? []) headers.append("set-cookie", c);
+  return headers;
 }
 
 export async function postLogin(req: Request): Promise<Response> {
@@ -40,7 +46,7 @@ export async function postLogin(req: Request): Promise<Response> {
     const db = requireDb();
     await ensureAccount(db, result.user);
     await claimSends(db, result.user.id, result.user.email);
-    return new Response(JSON.stringify({ ok: true }), {
+    return new Response(JSON.stringify({ ok: true, next: safeNext(body.next) }), {
       status: 200,
       headers: {
         "content-type": "application/json",
@@ -50,8 +56,12 @@ export async function postLogin(req: Request): Promise<Response> {
   }
   const next = safeNext(body.next);
   const emailRedirectTo = `${originOf(req)}/auth/callback?next=${encodeURIComponent(next)}`;
-  await auth.sendMagicLink({ email, emailRedirectTo });
-  return Response.json({ ok: true });
+  const mailed = await auth.sendMagicLink({ email, emailRedirectTo });
+  const pkceCookies =
+    mailed && typeof mailed === "object" ? mailed.cookies : undefined;
+  const headers = cookieHeaders(pkceCookies);
+  headers.set("content-type", "application/json");
+  return new Response(JSON.stringify({ ok: true }), { status: 200, headers });
 }
 
 export async function postSignup(req: Request): Promise<Response> {
@@ -77,8 +87,10 @@ export async function getLoginOAuth(
 ): Promise<Response> {
   const next = safeNext(new URL(req.url).searchParams.get("next"));
   const redirectTo = `${originOf(req)}/auth/callback?next=${encodeURIComponent(next)}`;
-  const { url } = await getAuth().startOAuth({ provider, redirectTo });
-  return new Response(null, { status: 302, headers: { location: url } });
+  const started = await getAuth().startOAuth({ provider, redirectTo });
+  const headers = cookieHeaders(started.cookies);
+  headers.set("location", started.url);
+  return new Response(null, { status: 302, headers });
 }
 
 export async function getAuthCallback(req: Request): Promise<Response> {
@@ -86,7 +98,7 @@ export async function getAuthCallback(req: Request): Promise<Response> {
   const code = url.searchParams.get("code");
   const next = safeNext(url.searchParams.get("next"));
   if (!code) return jsonError(400, "Missing code", "invalid_request");
-  const exchanged = await getAuth().exchangeCode(code);
+  const exchanged = await getAuth().exchangeCode(code, req.headers.get("cookie"));
   if (!exchanged) return jsonError(401, "Unauthorized", "unauthorized");
   const db = requireDb();
   await ensureAccount(db, exchanged.user);

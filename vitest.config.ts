@@ -11,6 +11,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    setupFiles: ["./src/test/setup.ts"],
     // setDeps is process-global; parallel files race the shared DB handle.
     fileParallelism: false,
     // PGlite pushSchema is slow when many files create DBs in parallel.

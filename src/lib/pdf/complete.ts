@@ -10,7 +10,8 @@ export type CompleteMeta = Omit<CertificateInfo, "sha256">;
 
 export type CompleteEnvelopeInput = {
   original: Uint8Array;
-  appearance: SignatureAppearance;
+  appearance?: SignatureAppearance;
+  appearances?: SignatureAppearance[];
   p12: Buffer;
   passphrase: string;
   meta: CompleteMeta;
@@ -25,11 +26,19 @@ export type CompleteEnvelopeResult = {
 export async function completeEnvelopePdf({
   original,
   appearance,
+  appearances,
   p12,
   passphrase,
   meta,
 }: CompleteEnvelopeInput): Promise<CompleteEnvelopeResult> {
-  const withPage = await appendSignaturePage(original, appearance);
+  const pages = appearances ?? (appearance ? [appearance] : []);
+  if (pages.length === 0) {
+    throw new Error("At least one signature appearance is required");
+  }
+  let withPage = original;
+  for (const next of pages) {
+    withPage = await appendSignaturePage(withPage, next);
+  }
   const sealed = await sealPdf(withPage, p12, passphrase);
   const sha256 = sha256Hex(sealed);
   const certificate = await buildCertificate({ ...meta, sha256 });

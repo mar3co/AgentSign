@@ -44,4 +44,51 @@ describe("completeEnvelopePdf", () => {
     expect(certDoc.getPageCount()).toBe(1);
     expect(Buffer.from(result.certificate).includes(Buffer.from(result.sha256))).toBe(true);
   });
+
+  it("appends one signature page per appearance then seals", async () => {
+    const p12 = makeDevP12("test");
+    const original = await minimalPdf();
+    const result = await completeEnvelopePdf({
+      original,
+      appearances: [
+        { png, name: "Jane", email: "jane@example.com", signedAt: new Date() },
+        { png, name: "Bob", email: "bob@example.com", signedAt: new Date() },
+      ],
+      p12,
+      passphrase: "test",
+      meta: {
+        envelopeId: "00000000-0000-0000-0000-000000000002",
+        title: "Repair authorization",
+        senderEmail: "shop@example.com",
+        consentText: "I agree to sign this document electronically.",
+        signers: [
+          {
+            name: "Jane",
+            email: "jane@example.com",
+            sentAt: new Date(),
+            openedAt: new Date(),
+            consentedAt: new Date(),
+            signedAt: new Date(),
+            declinedAt: null,
+            ip: "1.2.3.4",
+            ua: "test",
+          },
+          {
+            name: "Bob",
+            email: "bob@example.com",
+            sentAt: new Date(),
+            openedAt: new Date(),
+            consentedAt: new Date(),
+            signedAt: new Date(),
+            declinedAt: null,
+            ip: "1.2.3.4",
+            ua: "test",
+          },
+        ],
+      },
+    });
+    const sealedDoc = await PDFDocument.load(result.sealed);
+    expect(sealedDoc.getPageCount()).toBe(3);
+    expect(result.sha256).toBe(sha256Hex(result.sealed));
+  });
 });

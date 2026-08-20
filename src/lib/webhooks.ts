@@ -1,5 +1,7 @@
-import { createHmac, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from "node:crypto";
+import { lookup as dnsLookup } from "node:dns/promises";
 import { isIP } from "node:net";
+import { getEnv } from "../env.js";
 import { logEvent, type AuditDb } from "./audit.js";
 import { getDeps } from "./deps.js";
 
@@ -20,13 +22,54 @@ export type EnvelopeCompletedPayload = {
   shred_at: Date;
 };
 
-/** HMAC key returned once as webhook_secret; stored in webhook_secret_hash. */
+/** HMAC key returned once as webhook_secret; stored encrypted at rest. */
 export function newWebhookSecret(): string {
   return randomBytes(32).toString("hex");
 }
 
+function kek(): Buffer {
+  const env = getEnv();
+  const material = env.CRON_SECRET || env.APP_URL || "sign-dev-webhook-kek";
+  return createHash("sha256").update(material).digest();
+}
+
+export function sealWebhookSecret(raw: string): string {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", kek(), iv);
+  const enc = Buffer.concat([cipher.update(raw, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `enc:${iv.toString("hex")}:${tag.toString("hex")}:${enc.toString("hex")}`;
+}
+
+export function openWebhookSecret(stored: string): string {
+  if (!stored.startsWith("enc:")) return stored;
+  const parts = stored.split(":");
+  if (parts.length !== 4) return stored;
+  const [, ivH, tagH, dataH] = parts;
+  const decipher = createDecipheriv("aes-256-gcm", kek(), Buffer.from(ivH!, "hex"));
+  decipher.setAuthTag(Buffer.from(tagH!, "hex"));
+  return Buffer.concat([
+    decipher.update(Buffer.from(dataH!, "hex")),
+    decipher.final(),
+  ]).toString("utf8");
+}
+
 function normalizeHost(host: string): string {
-  return host.replace(/\.$/, "").toLowerCase();
+  let h = host.replace(/\.$/, "").toLowerCase();
+  if (h.startsWith("[") && h.endsWith("]")) h = h.slice(1, -1);
+  return h;
+}
+
+function mappedIpv4(host: string): string | null {
+  const lower = host.toLowerCase();
+  if (!lower.startsWith("::ffff:")) return null;
+  const rest = lower.slice("::ffff:".length);
+  if (isIP(rest) === 4) return rest;
+  const m = rest.match(/^([0-9a-f]+):([0-9a-f]+)$/i);
+  if (!m) return null;
+  const hi = parseInt(m[1]!, 16);
+  const lo = parseInt(m[2]!, 16);
+  return `${(hi >> 8) & 255}.${hi & 255}.${(lo >> 8) & 255}.${lo & 255}`;
 }
 
 function isBlockedIpv4(host: string): boolean {
@@ -46,6 +89,8 @@ function isBlockedIpv4(host: string): boolean {
 }
 
 function isBlockedIp(host: string): boolean {
+  const mapped = mappedIpv4(host);
+  if (mapped) return isBlockedIpv4(mapped);
   const version = isIP(host);
   if (version === 4) return isBlockedIpv4(host);
   if (version === 6) {
@@ -59,8 +104,20 @@ function isBlockedIp(host: string): boolean {
   return false;
 }
 
+async function resolveHost(host: string): Promise<{ address: string; family: number }[]> {
+  if (isIP(host)) return [{ address: host, family: isIP(host) }];
+  const custom = getDeps().lookup;
+  if (custom) return custom(host);
+  try {
+    const rows = await dnsLookup(host, { all: true, verbatim: true });
+    return rows.map((r) => ({ address: r.address, family: r.family }));
+  } catch {
+    return [];
+  }
+}
+
 /** Reject non-https, localhost, private/link-local/metadata targets (SSRF). */
-export function webhookUrlError(url: string): string | null {
+export async function webhookUrlError(url: string): Promise<string | null> {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -74,6 +131,12 @@ export function webhookUrlError(url: string): string | null {
     return "Webhook URL is not allowed";
   }
   if (isBlockedIp(host)) return "Webhook URL is not allowed";
+  const resolved = await resolveHost(host);
+  if (resolved.length === 0) return "Webhook URL is not allowed";
+  for (const row of resolved) {
+    const addr = normalizeHost(row.address);
+    if (isBlockedIp(addr)) return "Webhook URL is not allowed";
+  }
   return null;
 }
 
@@ -108,7 +171,7 @@ export async function fireEnvelopeCompleted(
   payload: EnvelopeCompletedPayload,
 ): Promise<void> {
   if (!envelope.webhookUrl || !envelope.webhookSecretHash) return;
-  const blocked = webhookUrlError(envelope.webhookUrl);
+  const blocked = await webhookUrlError(envelope.webhookUrl);
   if (blocked) {
     await logEvent(db, {
       envelopeId: envelope.id,
@@ -127,11 +190,8 @@ export async function fireEnvelopeCompleted(
   };
   const rawBody = JSON.stringify(body);
   const timestamp = String(Math.floor(now().getTime() / 1000));
-  const signature = webhookSignature(
-    envelope.webhookSecretHash,
-    timestamp,
-    rawBody,
-  );
+  const secret = openWebhookSecret(envelope.webhookSecretHash);
+  const signature = webhookSignature(secret, timestamp, rawBody);
 
   try {
     const res = await doFetch(envelope.webhookUrl, {

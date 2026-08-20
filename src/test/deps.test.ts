@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { POST as postEnvelope } from "../../app/v1/envelopes/route.js";
 import { resetEnvCache } from "../env.js";
-import { resolveStoreFromEnv, setDeps } from "../lib/deps.js";
+import { getDeps, resetDeps, resolveStoreFromEnv, setDeps } from "../lib/deps.js";
 import { objectKey } from "../lib/storage.js";
 import { createTestDb } from "./db.js";
 import { minimalPdf } from "./pdf.js";
@@ -131,5 +131,24 @@ describe("BlobStore composition root", () => {
         expect(json.code).toBe("storage_unconfigured");
       },
     );
+  });
+
+  it("ignores STORAGE_DIR when VERCEL is set", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "sign-vercel-"));
+    try {
+      await withEnv({ STORAGE_DIR: dir, VERCEL: "1" }, async () => {
+        expect(resolveStoreFromEnv()).toBeUndefined();
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("resetDeps drops leftover now/auth/stripe", () => {
+    const frozen = new Date("2020-01-01T00:00:00Z");
+    setDeps({ now: () => frozen });
+    expect(getDeps().now?.().toISOString()).toBe(frozen.toISOString());
+    resetDeps();
+    expect(getDeps().now).toBeUndefined();
   });
 });

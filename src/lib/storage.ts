@@ -10,6 +10,10 @@ export function objectKey(envelopeId: string, kind: ObjectKind): string {
   return `${envelopeId}/${kind}.pdf`;
 }
 
+export function appearanceKey(envelopeId: string, signerId: string): string {
+  return `${envelopeId}/appearance/${signerId}.png`;
+}
+
 export { createFsStore } from "./storage/fs.js";
 export {
   createSupabaseStore,

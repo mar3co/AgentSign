@@ -151,28 +151,45 @@ export async function verifyEnvelopeOtp(
       title: envelope.title,
       expiresAt: envelope.expiresAt,
     });
-    await mailer.sendMail({ to: first.email, ...invite });
-    await db
-      .update(signersTable)
-      .set({ sentAt: at })
-      .where(eq(signersTable.id, first.id));
-    await logEvent(db, {
-      envelopeId: envelope.id,
-      signerId: first.id,
-      event: "sent",
-    });
-    await logEvent(db, {
-      envelopeId: envelope.id,
-      signerId: first.id,
-      event: "emailed",
-    });
+    try {
+      await mailer.sendMail({ to: first.email, ...invite });
+      await db
+        .update(signersTable)
+        .set({ sentAt: at })
+        .where(eq(signersTable.id, first.id));
+      await logEvent(db, {
+        envelopeId: envelope.id,
+        signerId: first.id,
+        event: "sent",
+      });
+      await logEvent(db, {
+        envelopeId: envelope.id,
+        signerId: first.id,
+        event: "emailed",
+      });
+    } catch (err) {
+      await logEvent(db, {
+        envelopeId: envelope.id,
+        signerId: first.id,
+        event: "emailed_failed",
+        payload: { error: err instanceof Error ? err.message : "mail_failed" },
+      });
+    }
   }
 
-  const live = sendLiveEmail({
-    title: envelope.title,
-    tmpKeyShownInResponse: true,
-  });
-  await mailer.sendMail({ to: envelope.senderEmail, ...live });
+  try {
+    const live = sendLiveEmail({
+      title: envelope.title,
+      tmpKeyShownInResponse: true,
+    });
+    await mailer.sendMail({ to: envelope.senderEmail, ...live });
+  } catch (err) {
+    await logEvent(db, {
+      envelopeId: envelope.id,
+      event: "emailed_failed",
+      payload: { error: err instanceof Error ? err.message : "mail_failed" },
+    });
+  }
 
   return Response.json({
     id: envelope.id,

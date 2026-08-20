@@ -1,3 +1,4 @@
+import { safeNext } from "../../src/lib/safeNext.js";
 import { LoginForm } from "./login-form";
 
 export const runtime = "nodejs";
@@ -17,7 +18,7 @@ export default async function LoginPage({
         </a>
       </header>
       <main className="flex flex-1 flex-col">
-        <LoginForm email={sp.email ?? ""} next={sp.next ?? ""} />
+        <LoginForm email={sp.email ?? ""} next={safeNext(sp.next)} />
       </main>
       <footer className="pb-4 text-center text-sm text-muted-foreground">
         Sign

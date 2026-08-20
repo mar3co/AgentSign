@@ -19,6 +19,7 @@ export type Deps = {
   p12?: Buffer;
   p12Passphrase?: string;
   fetch?: typeof fetch;
+  lookup?: (hostname: string) => Promise<{ address: string; family: number }[]>;
 };
 
 let deps: Deps = {};
@@ -26,6 +27,11 @@ let deps: Deps = {};
 /** Merge-replace injected test/prod deps; does not boot Supabase. */
 export function setDeps(next: Deps): void {
   deps = { ...deps, ...next };
+}
+
+/** Drop the process-global bag so tests do not inherit another file's clock. */
+export function resetDeps(): void {
+  deps = {};
 }
 
 /**
@@ -36,7 +42,8 @@ export function setDeps(next: Deps): void {
 export function resolveStoreFromEnv(): BlobStore | undefined {
   const env = getEnv();
   const dir = env.STORAGE_DIR.trim();
-  if (dir) return createFsStore(dir);
+  // Function filesystem is ephemeral on Vercel; never prefer STORAGE_DIR there.
+  if (dir && !process.env.VERCEL) return createFsStore(dir);
   if (process.env.VITEST) return undefined;
   if (env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY) {
     const client = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {

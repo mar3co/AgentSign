@@ -197,6 +197,48 @@ describe("login", () => {
     await mintWithCookie(cookie);
   });
 
+  it("password login sanitizes an absolute next URL", async () => {
+    const db = await createTestDb();
+    const fake = createFakeAuth();
+    setDeps({ db, auth: fake.adapter });
+    await postSignup(
+      new Request("http://sign.test/signup", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          email: "shop@example.com",
+          password: "correct-horse",
+        }),
+      }),
+    );
+    const login = await postLogin(
+      new Request("http://sign.test/login/session", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          email: "shop@example.com",
+          password: "correct-horse",
+          next: "https://evil.example",
+        }),
+      }),
+    );
+    expect(login.status).toBe(200);
+    const json = (await login.json()) as { ok: boolean; next: string };
+    expect(json.next).toBe("/");
+  });
+
+  it("login page does not put an absolute next on OAuth links", async () => {
+    const ui = await LoginPage({
+      searchParams: Promise.resolve({
+        email: "jane@example.com",
+        next: "https://evil.example",
+      }),
+    });
+    const html = renderToStaticMarkup(ui);
+    expect(html).not.toContain("https://evil.example");
+    expect(html).not.toMatch(/next=https/);
+  });
+
   it("Google OAuth start yields a session that can mint a live key", async () => {
     const db = await createTestDb();
     const fake = createFakeAuth();
