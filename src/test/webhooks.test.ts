@@ -136,7 +136,7 @@ describe("envelope.completed webhook", () => {
       expect(typeof created.webhook_secret).toBe("string");
       const [row] = await db.select().from(envelopes).where(eq(envelopes.id, created.id));
       expect(row!.webhookUrl).toBe("https://example.com/hook");
-      expect(row!.webhookSecretHash).toBeTruthy();
+      expect(row!.webhookSecretHash).toBe(created.webhook_secret);
 
       const { done, sign } = await verifyAndSign(created.id, sent);
       expect(sign.status).toBe(200);
@@ -183,6 +183,20 @@ describe("envelope.completed webhook", () => {
     const json = (await res.json()) as { error: string; code: string };
     expect(json.error).toBeTruthy();
     expect(json.code).toBeTruthy();
+  });
+
+  it("rejects https loopback, localhost, and private webhook URLs with 400", async () => {
+    for (const url of [
+      "https://127.0.0.1/hook",
+      "https://localhost/hook",
+      "https://192.168.0.1/hook",
+    ]) {
+      const { res } = await startVerified({ webhookUrl: url });
+      expect(res.status, url).toBe(400);
+      const json = (await res.json()) as { error: string; code: string };
+      expect(json.error, url).toBeTruthy();
+      expect(json.code, url).toBeTruthy();
+    }
   });
 
   it(

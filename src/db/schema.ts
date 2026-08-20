@@ -59,6 +59,7 @@ export const envelopes = pgTable("envelopes", {
   expiresAt: timestamptz("expires_at").notNull(),
   shredAt: timestamptz("shred_at").notNull(),
   webhookUrl: text("webhook_url"),
+  /** HMAC key shown once as webhook_secret. Column name is historical. */
   webhookSecretHash: text("webhook_secret_hash"),
   sha256: text("sha256"),
   createdAt: timestamptz("created_at").notNull().defaultNow(),

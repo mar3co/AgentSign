@@ -173,7 +173,7 @@ export async function createEnvelope(req: Request): Promise<Response> {
 
   const webhookField = String(form.get("webhook_url") ?? "").trim();
   let webhookUrl: string | null = null;
-  let webhookSecret: { raw: string; hash: string } | null = null;
+  let webhookSecret: string | null = null;
   if (webhookField) {
     const blocked = webhookUrlError(webhookField);
     if (blocked) return jsonError(400, blocked, "invalid_webhook_url");
@@ -263,7 +263,7 @@ export async function createEnvelope(req: Request): Promise<Response> {
       shredAt: expiresAt,
       sha256: documentHash,
       webhookUrl,
-      webhookSecretHash: webhookSecret?.raw ?? null,
+      webhookSecretHash: webhookSecret,
       createdAt: at,
     })
     .returning();
@@ -293,7 +293,7 @@ export async function createEnvelope(req: Request): Promise<Response> {
       {
         id: envelope.id,
         status: "pending",
-        ...(webhookSecret ? { webhook_secret: webhookSecret.raw } : {}),
+        ...(webhookSecret ? { webhook_secret: webhookSecret } : {}),
       },
       { status: 201 },
     );
@@ -312,7 +312,7 @@ export async function createEnvelope(req: Request): Promise<Response> {
     {
       id: envelope.id,
       status: "pending_sender",
-      ...(webhookSecret ? { webhook_secret: webhookSecret.raw } : {}),
+      ...(webhookSecret ? { webhook_secret: webhookSecret } : {}),
     },
     { status: 201 },
   );

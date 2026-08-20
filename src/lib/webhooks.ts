@@ -1,6 +1,5 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { isIP } from "node:net";
-import { sha256Hex } from "./hash.js";
 import { logEvent, type AuditDb } from "./audit.js";
 import { getDeps } from "./deps.js";
 
@@ -21,9 +20,9 @@ export type EnvelopeCompletedPayload = {
   shred_at: Date;
 };
 
-export function newWebhookSecret(): { raw: string; hash: string } {
-  const raw = randomBytes(32).toString("hex");
-  return { raw, hash: sha256Hex(raw) };
+/** HMAC key returned once as webhook_secret; stored in webhook_secret_hash. */
+export function newWebhookSecret(): string {
+  return randomBytes(32).toString("hex");
 }
 
 function normalizeHost(host: string): string {
