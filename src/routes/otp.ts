@@ -114,17 +114,22 @@ export async function verifyEnvelopeOtp(
     .where(eq(signersTable.envelopeId, envelope.id));
   signerRows.sort((a, b) => a.signingOrder - b.signingOrder);
 
-  const outSigners: { email: string; sign_url: string }[] = [];
-  const rawById = new Map<string, string>();
+  // Mint a real signing token only for signer 1; later signers keep pending placeholders.
+  const outSigners: { email: string; sign_url: string | null }[] = [];
+  let firstSignUrl: string | null = null;
   for (const row of signerRows) {
-    const token = newSigningToken();
-    await db
-      .update(signersTable)
-      .set({ tokenHash: token.hash })
-      .where(eq(signersTable.id, row.id));
-    const signUrl = `/s/${token.raw}`;
-    rawById.set(row.id, signUrl);
-    outSigners.push({ email: row.email, sign_url: signUrl });
+    if (row.signingOrder === 1) {
+      const token = newSigningToken();
+      const signUrl = `/s/${token.raw}`;
+      await db
+        .update(signersTable)
+        .set({ tokenHash: token.hash })
+        .where(eq(signersTable.id, row.id));
+      firstSignUrl = signUrl;
+      outSigners.push({ email: row.email, sign_url: signUrl });
+    } else {
+      outSigners.push({ email: row.email, sign_url: null });
+    }
   }
 
   const tmp = newTmpKey();
@@ -139,10 +144,9 @@ export async function verifyEnvelopeOtp(
 
   const mailer = requireMailer();
   const first = signerRows[0];
-  if (first) {
-    const signUrl = rawById.get(first.id)!;
+  if (first && firstSignUrl) {
     const invite = inviteEmail({
-      signUrl,
+      signUrl: firstSignUrl,
       senderEmail: envelope.senderEmail,
       title: envelope.title,
       expiresAt: envelope.expiresAt,

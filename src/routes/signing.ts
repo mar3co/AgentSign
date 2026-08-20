@@ -378,7 +378,8 @@ export async function postSign(req: Request, token: string): Promise<Response> {
   });
 
   const next = allSigners.find((s) => s.signingOrder === signer.signingOrder + 1);
-  if (next && !next.signedAt && !next.declinedAt) {
+  // First mint + invite only; never rotate a token that was already sent.
+  if (next && !next.signedAt && !next.declinedAt && !next.sentAt) {
     const mailer = requireMailer();
     const token = newSigningToken();
     const signUrl = `/s/${token.raw}`;

@@ -14,6 +14,7 @@ import { GET as getPdf } from "../../app/v1/envelopes/[id]/pdf/route.js";
 import { getSigningState } from "../routes/signing.js";
 import SigningPage from "../../app/s/[token]/page.js";
 import { makeDevP12 } from "../lib/pdf/devP12.js";
+import { newSigningToken } from "../lib/tokens.js";
 import { minimalPdf } from "./pdf.js";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -74,15 +75,18 @@ async function startVerified(opts?: {
   expect(verify.status).toBe(200);
   const done = (await verify.json()) as {
     id: string;
-    signers: { email: string; sign_url: string }[];
+    signers: { email: string; sign_url: string | null }[];
   };
   return {
     db,
     store,
     sent,
     id: done.id,
-    tokens: done.signers.map((s) => tokenFromUrl(s.sign_url)),
-    token: tokenFromUrl(done.signers[0]!.sign_url),
+    signers: done.signers,
+    tokens: done.signers
+      .filter((s) => s.sign_url)
+      .map((s) => tokenFromUrl(s.sign_url!)),
+    token: tokenFromUrl(done.signers[0]!.sign_url!),
   };
 }
 
@@ -225,13 +229,28 @@ describe("signing ceremony", () => {
     const gone = await getSigningState(expired.token);
     expect(gone.status).toBe(410);
 
-    const { tokens } = await startVerified({
+    const seq = await startVerified({
       signers: [
         { name: "Jane", email: "jane@example.com" },
         { name: "Bob", email: "bob@example.com" },
       ],
     });
-    const wait = await getSigningState(tokens[1]!);
+    expect(seq.signers[0]!.sign_url).toMatch(/^\/s\//);
+    expect(seq.signers[1]!.sign_url == null || seq.signers[1]!.sign_url === "").toBe(
+      true,
+    );
+    // Defense-in-depth: if a later signer somehow has a token before prior signs, wait.
+    const bobEarly = newSigningToken();
+    const bobRows = await seq.db
+      .select()
+      .from(signersTable)
+      .where(eq(signersTable.envelopeId, seq.id));
+    bobRows.sort((a, b) => a.signingOrder - b.signingOrder);
+    await seq.db
+      .update(signersTable)
+      .set({ tokenHash: bobEarly.hash })
+      .where(eq(signersTable.id, bobRows[1]!.id));
+    const wait = await getSigningState(bobEarly.raw);
     expect(wait.status).toBe(409);
     const body = (await wait.json()) as { error: string };
     expect(body.error).toBe("Waiting on previous signer.");

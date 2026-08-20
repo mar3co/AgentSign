@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { auditEvents, signers as signersTable } from "../db/schema.js";
 import type { MailMessage } from "../lib/email.js";
+import { getSigningState } from "../routes/signing.js";
 
 const png = Uint8Array.from(
   Buffer.from(
@@ -74,7 +75,7 @@ async function verifyOtp(id: string, code: string) {
   expect(verify.status).toBe(200);
   return (await verify.json()) as {
     id: string;
-    signers: { email: string; sign_url: string }[];
+    signers: { email: string; sign_url: string | null }[];
   };
 }
 
@@ -187,7 +188,26 @@ describe("email templates", () => {
     expect(sent.some((m) => m.to === "jane@example.com")).toBe(true);
     expect(sent.some((m) => m.to === "bob@example.com")).toBe(false);
 
-    const jane = tokenFromUrl(done.signers[0]!.sign_url);
+    expect(done.signers).toHaveLength(2);
+    expect(done.signers[0]!.email).toBe("jane@example.com");
+    expect(done.signers[0]!.sign_url).toMatch(/^\/s\//);
+    expect(done.signers[1]!.email).toBe("bob@example.com");
+    expect(done.signers[1]!.sign_url == null || done.signers[1]!.sign_url === "").toBe(
+      true,
+    );
+
+    const janeUrl = done.signers[0]!.sign_url!;
+    const jane = tokenFromUrl(janeUrl);
+    const rowsBefore = await db
+      .select()
+      .from(signersTable)
+      .where(eq(signersTable.envelopeId, id));
+    rowsBefore.sort((a, b) => a.signingOrder - b.signingOrder);
+    const janeHashBefore = rowsBefore[0]!.tokenHash;
+
+    const opened = await getSigningState(jane);
+    expect(opened.status).toBe(200);
+
     await postConsent(consentRequest(jane), { params: Promise.resolve({ token: jane }) });
     const before = sent.length;
     const sign = await postSign(signRequest(jane), {
@@ -197,8 +217,13 @@ describe("email templates", () => {
 
     const bobInvites = sent.slice(before).filter((m) => m.to === "bob@example.com");
     expect(bobInvites.length).toBe(1);
-    expect(bobInvites[0]!.text).toMatch(/\/s\/[A-Za-z0-9_-]+/);
+    const bobMatch = bobInvites[0]!.text.match(/\/s\/([A-Za-z0-9_-]+)/);
+    expect(bobMatch).toBeTruthy();
+    const bobToken = bobMatch![1]!;
     expect(bobInvites[0]!.text).toMatch(/If you were not expecting this, contact the sender/i);
+
+    const bobState = await getSigningState(bobToken);
+    expect(bobState.status).toBe(200);
 
     const rows = await db
       .select()
@@ -207,5 +232,6 @@ describe("email templates", () => {
     rows.sort((a, b) => a.signingOrder - b.signingOrder);
     expect(rows[0]!.sentAt).not.toBeNull();
     expect(rows[1]!.sentAt).not.toBeNull();
+    expect(rows[0]!.tokenHash).toBe(janeHashBefore);
   });
 });
