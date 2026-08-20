@@ -5,6 +5,10 @@ import { defineConfig } from "vitest/config";
 const root = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
+  // tsconfig uses jsx: preserve for Next; Vitest still needs the automatic runtime.
+  esbuild: {
+    jsx: "automatic",
+  },
   test: {
     environment: "node",
     // setDeps is process-global; parallel files race the shared DB handle.
