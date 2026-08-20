@@ -142,6 +142,7 @@ export const apiKeys = pgTable("api_keys", {
 
 export const accounts = pgTable("accounts", {
   userId: uuid("user_id").primaryKey(),
+  email: text("email"),
   stripeCustomerId: text("stripe_customer_id").unique(),
   plan: text("plan", { enum: accountPlan }).notNull().default("free"),
   currentPeriodEnd: timestamptz("current_period_end"),

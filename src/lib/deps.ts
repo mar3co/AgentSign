@@ -1,3 +1,4 @@
+import type { AuthAdapter } from "./auth/supabase.js";
 import type { AuditDb } from "./audit.js";
 import type { Mailer } from "./email.js";
 import type { BlobStore } from "./storage.js";
@@ -7,7 +8,7 @@ export type Deps = {
   store?: BlobStore;
   mailer?: Mailer;
   now?: () => Date;
-  auth?: unknown;
+  auth?: AuthAdapter;
   stripe?: unknown;
   p12?: Buffer;
   p12Passphrase?: string;
