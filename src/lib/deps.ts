@@ -9,6 +9,8 @@ export type Deps = {
   now?: () => Date;
   auth?: unknown;
   stripe?: unknown;
+  p12?: Buffer;
+  p12Passphrase?: string;
 };
 
 let deps: Deps = {};
