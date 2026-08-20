@@ -27,7 +27,7 @@ export default function UpgradePage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <form action="/upgrade" method="POST" className="flex flex-col gap-4">
+            <form action="/upgrade/checkout" method="POST" className="flex flex-col gap-4">
               <Button className="h-11 w-full text-base" type="submit">
                 Keep this a year
               </Button>

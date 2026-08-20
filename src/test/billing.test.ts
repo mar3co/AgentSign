@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import UpgradePage from "../../app/upgrade/page.js";
-import { POST as postUpgrade } from "../../app/upgrade/route.js";
+import { POST as postUpgrade } from "../../app/upgrade/checkout/route.js";
 import { POST as postStripe } from "../../app/internal/stripe/route.js";
 import { POST as postLogin } from "../../app/login/session/route.js";
 import { GET as getAuthCallback } from "../../app/auth/callback/route.js";
@@ -119,13 +119,13 @@ function withStripeEnv(run: () => Promise<void>) {
 }
 
 describe("Stripe Checkout Pro", () => {
-  it("upgrade page Keep this a year posts to /upgrade", () => {
+  it("upgrade page Keep this a year posts to /upgrade/checkout", () => {
     const html = renderToStaticMarkup(createElement(UpgradePage));
     expect(html).toMatch(/Keep this a year/i);
-    expect(html).toContain('action="/upgrade"');
+    expect(html).toContain('action="/upgrade/checkout"');
   });
 
-  it("unauthenticated POST /upgrade is 401", async () => {
+  it("unauthenticated POST /upgrade/checkout is 401", async () => {
     await withStripeEnv(async () => {
       const db = await createTestDb();
       setDeps({
@@ -136,7 +136,7 @@ describe("Stripe Checkout Pro", () => {
         },
       });
       const res = await postUpgrade(
-        new Request("http://sign.test/upgrade", { method: "POST" }),
+        new Request("http://sign.test/upgrade/checkout", { method: "POST" }),
       );
       expect(res.status).toBe(401);
       const json = (await res.json()) as { error: string; code: string };
@@ -145,7 +145,7 @@ describe("Stripe Checkout Pro", () => {
     });
   });
 
-  it("session POST /upgrade redirects 303 to Checkout URL", async () => {
+  it("session POST /upgrade/checkout redirects 303 to Checkout URL", async () => {
     await withStripeEnv(async () => {
       const db = await createTestDb();
       const fake = createFakeAuth();
@@ -164,7 +164,7 @@ describe("Stripe Checkout Pro", () => {
       const cookie = await magicCookie("shop@example.com");
       const user = fake.userFor("shop@example.com");
       const res = await postUpgrade(
-        new Request("http://sign.test/upgrade", {
+        new Request("http://sign.test/upgrade/checkout", {
           method: "POST",
           headers: { cookie },
         }),

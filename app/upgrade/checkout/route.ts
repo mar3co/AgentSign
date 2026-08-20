@@ -1,4 +1,4 @@
-import { postUpgrade } from "../../src/routes/stripe.js";
+import { postUpgrade } from "../../../src/routes/stripe.js";
 
 export const runtime = "nodejs";
 
