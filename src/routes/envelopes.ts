@@ -13,7 +13,7 @@ import {
 import { logEvent, type AuditDb } from "../lib/audit.js";
 import type { AuthUser } from "../lib/auth/supabase.js";
 import { getAuth } from "../lib/auth/supabase.js";
-import { getDeps } from "../lib/deps.js";
+import { getDeps, storeUnavailableResponse } from "../lib/deps.js";
 import { createMailer, inviteEmail, otpEmail, type Mailer } from "../lib/email.js";
 import { sha256Hex } from "../lib/hash.js";
 import {
@@ -55,10 +55,8 @@ function requireDb(): AuditDb {
   return getDeps().db ?? getDb();
 }
 
-function requireStore(): BlobStore {
-  const store = getDeps().store;
-  if (!store) throw new Error("store is not configured");
-  return store;
+function requireStore(): BlobStore | null {
+  return getDeps().store ?? null;
 }
 
 function requireMailer(): Mailer {
@@ -183,6 +181,7 @@ export async function createEnvelope(req: Request): Promise<Response> {
 
   const db = requireDb();
   const store = requireStore();
+  if (!store) return storeUnavailableResponse();
   const mailer = requireMailer();
   const at = now();
   const env = getEnv();
@@ -322,7 +321,14 @@ type EnvelopeRow = typeof envelopes.$inferSelect;
 type ApiKeyRow = typeof apiKeys.$inferSelect;
 
 type Authed =
-  | { ok: true; db: AuditDb; envelope: EnvelopeRow; via: "key"; key: ApiKeyRow }
+  | {
+      ok: true;
+      db: AuditDb;
+      envelope: EnvelopeRow;
+      via: "key";
+      key: ApiKeyRow;
+      canDelete: boolean;
+    }
   | {
       ok: true;
       db: AuditDb;
@@ -355,11 +361,36 @@ async function authorizeEnvelope(req: Request, envelopeId: string): Promise<Auth
       return { ok: false, response: jsonError(404, "Envelope not found", "not_found") };
     }
     if (key.kind === "live") {
-      if (!key.userId || !envelope.userId || key.userId !== envelope.userId) {
+      if (!key.userId) {
         return { ok: false, response: jsonError(401, "Unauthorized", "unauthorized") };
       }
+      const isSender = Boolean(envelope.userId && envelope.userId === key.userId);
+      let isSigner = false;
+      if (!isSender) {
+        const [account] = await db
+          .select()
+          .from(accounts)
+          .where(eq(accounts.userId, key.userId));
+        const email = account?.email?.trim().toLowerCase();
+        if (email) {
+          const [signed] = await db
+            .select()
+            .from(signersTable)
+            .where(
+              and(
+                eq(signersTable.envelopeId, envelopeId),
+                eq(signersTable.email, email),
+              ),
+            );
+          isSigner = Boolean(signed);
+        }
+      }
+      if (!isSender && !isSigner) {
+        return { ok: false, response: jsonError(401, "Unauthorized", "unauthorized") };
+      }
+      return { ok: true, db, envelope, via: "key", key, canDelete: isSender };
     }
-    return { ok: true, db, envelope, via: "key", key };
+    return { ok: true, db, envelope, via: "key", key, canDelete: true };
   }
 
   const cookie = req.headers.get("cookie");
@@ -521,6 +552,7 @@ export async function getEnvelopePdf(req: Request, envelopeId: string): Promise<
     return jsonError(409, "Envelope is not completed", "not_completed");
   }
   const store = requireStore();
+  if (!store) return storeUnavailableResponse();
   const bytes = await store.get(objectKey(envelope.id, "sealed"));
   if (!bytes) {
     return jsonError(410, "Envelope has been deleted", "deleted");
@@ -538,7 +570,7 @@ export async function deleteEnvelope(req: Request, envelopeId: string): Promise<
   if (!envelopeId) return jsonError(400, "Envelope id is required", "invalid_request");
   const authed = await authorizeEnvelope(req, envelopeId);
   if (!authed.ok) return authed.response;
-  if (authed.via === "session" && !authed.canDelete) {
+  if (!authed.canDelete) {
     return jsonError(403, "Signers cannot void this envelope", "forbidden");
   }
   const { db, envelope } = authed;
@@ -549,6 +581,7 @@ export async function deleteEnvelope(req: Request, envelopeId: string): Promise<
     return jsonError(409, "Envelope is already deleted", "invalid_state");
   }
   const store = requireStore();
+  if (!store) return storeUnavailableResponse();
   const at = now();
   await purgeEnvelope(db, store, envelope.id, at);
   return Response.json({ id: envelope.id, status: "deleted", message: "Void." });

@@ -204,6 +204,7 @@ describe("remindDue and shredDue", () => {
     expect(reminders[0]!.text).toContain("shop@example.com");
     expect(reminders[0]!.text).toContain("2026-08-27");
     expect(reminders[0]!.text).toMatch(/already sent/i);
+    expect(reminders[0]!.text).toContain("http://localhost:3000/");
     expect(reminders[0]!.text).not.toMatch(/\/s\//);
 
     const reminded = await signerHash(pending.db, pending.id);

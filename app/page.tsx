@@ -19,8 +19,12 @@ const CURL_EXAMPLE = `curl -F title=Repair\\ authorization \\
      -F file=@form.pdf \\
      http://localhost:3000/v1/envelopes`;
 
+type Done = { key: string; signUrl: string };
+
 export default function Home() {
   const [sent, setSent] = useState(false);
+  const [envelopeId, setEnvelopeId] = useState<string | null>(null);
+  const [done, setDone] = useState<Done | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -44,9 +48,52 @@ export default function Home() {
         setError(body?.error ?? "Could not send.");
         return;
       }
+      const json = (await res.json()) as { id?: string };
+      if (!json.id) {
+        setError("Could not send.");
+        return;
+      }
+      setEnvelopeId(json.id);
       setSent(true);
     } catch {
       setError("Could not send.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onOtp(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!envelopeId) return;
+    setError(null);
+    setBusy(true);
+    const form = e.currentTarget;
+    const data = new FormData(form);
+    const code = String(data.get("code") ?? "").trim();
+    try {
+      const res = await fetch(`/v1/envelopes/${envelopeId}/otp`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        setError(body?.error ?? "Could not verify.");
+        return;
+      }
+      const json = (await res.json()) as {
+        key?: string;
+        signers?: { sign_url?: string | null }[];
+      };
+      if (!json.key) {
+        setError("Could not verify.");
+        return;
+      }
+      setDone({ key: json.key, signUrl: json.signers?.[0]?.sign_url ?? "" });
+    } catch {
+      setError("Could not verify.");
     } finally {
       setBusy(false);
     }
@@ -62,10 +109,66 @@ export default function Home() {
       </header>
 
       <main className="flex flex-1 flex-col gap-6">
-        {sent ? (
+        {done ? (
           <Alert>
-            <AlertDescription>Check your email for a code.</AlertDescription>
+            <AlertDescription className="flex flex-col gap-2">
+              <p>Keep this key; it is shown once.</p>
+              <pre className="overflow-x-auto whitespace-pre-wrap text-xs">
+                {done.key}
+              </pre>
+              {done.signUrl ? (
+                <p>
+                  Signer:{" "}
+                  <a className="underline" href={done.signUrl}>
+                    {done.signUrl}
+                  </a>
+                </p>
+              ) : null}
+            </AlertDescription>
           </Alert>
+        ) : sent ? (
+          <>
+            <Alert>
+              <AlertDescription>Check your email for a code.</AlertDescription>
+            </Alert>
+            <Card>
+              <CardHeader>
+                <CardTitle>Enter your code</CardTitle>
+                <CardDescription>
+                  We emailed a 6-digit code. No login required.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <form className="flex flex-col gap-4" onSubmit={onOtp}>
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="code">Verification code</Label>
+                    <Input
+                      id="code"
+                      name="code"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      required
+                      maxLength={6}
+                      pattern="[0-9]{6}"
+                      className="h-11 text-base md:text-base"
+                    />
+                  </div>
+                  {error ? (
+                    <Alert variant="destructive">
+                      <AlertDescription>{error}</AlertDescription>
+                    </Alert>
+                  ) : null}
+                  <Button
+                    className="h-11 w-full text-base"
+                    type="submit"
+                    disabled={busy}
+                  >
+                    Verify
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+          </>
         ) : (
           <Card>
             <CardHeader>

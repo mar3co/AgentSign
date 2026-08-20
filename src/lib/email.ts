@@ -1,4 +1,4 @@
-import { getEnv } from "../env.js";
+import { absoluteUrl, appOrigin, getEnv } from "../env.js";
 
 export type MailAttachment = {
   filename: string;
@@ -92,7 +92,7 @@ export function inviteEmail(input: {
     text: [
       `${input.senderEmail} asked you to sign "${input.title}".`,
       ``,
-      `Sign here: ${input.signUrl}`,
+      `Sign here: ${absoluteUrl(input.signUrl)}`,
       ``,
       `This link expires on ${input.expiresAt.toISOString()}.`,
       ``,
@@ -115,6 +115,8 @@ export function reminderEmail(input: {
       `Use the unique signing link we already sent you.`,
       ``,
       `This link expires on ${input.expiresAt.toISOString()}.`,
+      ``,
+      `This request is from ${appOrigin()}/.`,
     ].join("\n"),
   };
 }
@@ -143,7 +145,9 @@ export function completionEmail(input: {
   includeAttachments: boolean;
 }): { subject: string; text: string } {
   const shred = input.shredAt.toISOString();
-  const login = `/login?email=${encodeURIComponent(input.to)}&next=/envelopes`;
+  const login = absoluteUrl(
+    `/login?email=${encodeURIComponent(input.to)}&next=/envelopes`,
+  );
   const lines = [
     `"${input.title}" is complete.`,
     ``,
@@ -159,7 +163,7 @@ export function completionEmail(input: {
     ``,
     `Keep it in a cabinet: ${login}`,
     ``,
-    `Keep this a year: /upgrade`,
+    `Keep this a year: ${absoluteUrl("/upgrade")}`,
   );
   return {
     subject: `Signed: ${input.title}`,

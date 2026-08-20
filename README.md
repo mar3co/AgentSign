@@ -27,7 +27,7 @@ License: **Apache-2.0** (`LICENSE`).
 
 ## Local run
 
-Copy `.env.example` to `.env` and fill what you need. A live Vercel or Supabase project is **not** required to develop or run tests — PGlite covers the suite; filesystem blob storage is used in tests via `STORAGE_DIR`.
+Copy `.env.example` to `.env` and fill what you need. A live Vercel or Supabase project is **not** required to develop or run tests — PGlite covers the suite; `STORAGE_DIR` is filesystem blobs for local dogfood (`pnpm dev`). Invite links in mail use `APP_URL` (default `http://localhost:3000`).
 
 Optional Postgres for a fuller local stack (compose file is yours if you add one):
 

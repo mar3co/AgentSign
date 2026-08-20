@@ -9,7 +9,7 @@ import {
 } from "../db/schema.js";
 import { getEnv } from "../env.js";
 import { logEvent, type AuditDb } from "../lib/audit.js";
-import { getDeps } from "../lib/deps.js";
+import { getDeps, storeUnavailableResponse } from "../lib/deps.js";
 import {
   completionAttachments,
   completionEmail,
@@ -39,10 +39,8 @@ function requireDb(): AuditDb {
   return getDeps().db ?? getDb();
 }
 
-function requireStore(): BlobStore {
-  const store = getDeps().store;
-  if (!store) throw new Error("store is not configured");
-  return store;
+function requireStore(): BlobStore | null {
+  return getDeps().store ?? null;
 }
 
 function requireMailer(): Mailer {
@@ -198,6 +196,7 @@ export async function postSign(req: Request, token: string): Promise<Response> {
   const { db, signer, envelope } = loaded;
   const at = now();
   const store = requireStore();
+  if (!store) return storeUnavailableResponse();
 
   if (envelope.expiresAt.getTime() <= at.getTime() && envelope.status === "pending") {
     return jsonError(410, "This link has expired", "expired");

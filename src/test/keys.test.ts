@@ -7,14 +7,26 @@ import { eq } from "drizzle-orm";
 import { POST as postKeys } from "../../app/v1/keys/route.js";
 import { GET as listEnvelopes, POST as postEnvelope } from "../../app/v1/envelopes/route.js";
 import { POST as postOtp } from "../../app/v1/envelopes/[id]/otp/route.js";
+import { DELETE as deleteEnvelope, GET as getEnvelope } from "../../app/v1/envelopes/[id]/route.js";
+import { GET as getPdf } from "../../app/v1/envelopes/[id]/pdf/route.js";
+import { POST as postConsent } from "../../app/s/[token]/consent/route.js";
+import { POST as postSign } from "../../app/s/[token]/sign/route.js";
 import { POST as postLogin } from "../../app/login/session/route.js";
 import { GET as getAuthCallback } from "../../app/auth/callback/route.js";
 import { accounts, apiKeys, envelopes } from "../db/schema.js";
 import { setDeps } from "../lib/deps.js";
 import { extendKeep } from "../lib/keys.js";
+import { makeDevP12 } from "../lib/pdf/devP12.js";
 import { createFsStore } from "../lib/storage.js";
 import { createTestDb } from "./db.js";
 import { minimalPdf } from "./pdf.js";
+
+const png = Uint8Array.from(
+  Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "base64",
+  ),
+);
 
 type AuthUser = { id: string; email: string };
 
@@ -383,5 +395,112 @@ describe("live keys", () => {
     expect(sentAfter!.shredAt.getTime()).toBe(expected);
     expect(signedAfter!.shredAt.getTime()).toBe(expected);
     expect(unrelated.shredAt.getTime()).toBe(signedAt.getTime() + 7 * 86_400_000);
+  });
+
+  it("live key GET/PDF allows envelopes the user sent or signed; DELETE is 403 unless sender", { timeout: 60_000 }, async () => {
+    const db = await createTestDb();
+    const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+    const sent: { to: string; subject: string; text: string }[] = [];
+    const { adapter } = createFakeAuth();
+    setDeps({
+      db,
+      store,
+      auth: adapter,
+      mailer: { sendMail: async (m) => { sent.push(m); } },
+      p12: makeDevP12("test"),
+      p12Passphrase: "test",
+    });
+
+    const shopCookie = await magicCookie("shop@example.com");
+    const shopMint = await postKeys(
+      new Request("http://sign.test/v1/keys", {
+        method: "POST",
+        headers: { cookie: shopCookie, "content-type": "application/json" },
+        body: JSON.stringify({ expires_in_days: 30 }),
+      }),
+    );
+    expect(shopMint.status).toBe(201);
+    const { key: shopKey } = (await shopMint.json()) as { key: string };
+
+    const created = await postEnvelope(
+      new Request("http://sign.test/v1/envelopes", {
+        method: "POST",
+        headers: { authorization: `Bearer ${shopKey}` },
+        body: await envelopeForm(),
+      }),
+    );
+    expect(created.status).toBe(201);
+    const { id } = (await created.json()) as { id: string };
+    const invite = sent.find((m) => m.to === "jane@example.com");
+    expect(invite).toBeTruthy();
+    const token = invite!.text.match(/\/s\/([A-Za-z0-9_-]+)/)![1]!;
+
+    const consent = await postConsent(
+      new Request(`http://sign.test/s/${token}/consent`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ consent: true }),
+      }),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(consent.status).toBe(200);
+    const sig = new FormData();
+    sig.set("png", new Blob([png], { type: "image/png" }), "sig.png");
+    const sign = await postSign(
+      new Request(`http://sign.test/s/${token}/sign`, { method: "POST", body: sig }),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(sign.status).toBe(200);
+
+    const janeCookie = await magicCookie("jane@example.com");
+    const janeMint = await postKeys(
+      new Request("http://sign.test/v1/keys", {
+        method: "POST",
+        headers: { cookie: janeCookie, "content-type": "application/json" },
+        body: JSON.stringify({ expires_in_days: 30 }),
+      }),
+    );
+    expect(janeMint.status).toBe(201);
+    const { key: janeKey } = (await janeMint.json()) as { key: string };
+
+    function bearer(key: string, url: string, method = "GET") {
+      return new Request(url, {
+        method,
+        headers: { authorization: `Bearer ${key}` },
+      });
+    }
+
+    const janeGet = await getEnvelope(
+      bearer(janeKey, `http://sign.test/v1/envelopes/${id}`),
+      { params: Promise.resolve({ id }) },
+    );
+    expect(janeGet.status).toBe(200);
+
+    const janePdf = await getPdf(
+      bearer(janeKey, `http://sign.test/v1/envelopes/${id}.pdf`),
+      { params: Promise.resolve({ id }) },
+    );
+    expect(janePdf.status).toBe(200);
+
+    const janeDel = await deleteEnvelope(
+      bearer(janeKey, `http://sign.test/v1/envelopes/${id}`, "DELETE"),
+      { params: Promise.resolve({ id }) },
+    );
+    expect(janeDel.status).toBe(403);
+    const forbidden = (await janeDel.json()) as { error: string; code: string };
+    expect(forbidden.error).toBeTruthy();
+    expect(forbidden.code).toBe("forbidden");
+
+    const shopGet = await getEnvelope(
+      bearer(shopKey, `http://sign.test/v1/envelopes/${id}`),
+      { params: Promise.resolve({ id }) },
+    );
+    expect(shopGet.status).toBe(200);
+
+    const shopPdf = await getPdf(
+      bearer(shopKey, `http://sign.test/v1/envelopes/${id}.pdf`),
+      { params: Promise.resolve({ id }) },
+    );
+    expect(shopPdf.status).toBe(200);
   });
 });

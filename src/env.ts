@@ -7,7 +7,9 @@ const envSchema = z.object({
   SUPABASE_ANON_KEY: z.string().default(""),
   SUPABASE_SERVICE_ROLE_KEY: z.string().default(""),
   STORAGE_BUCKET: z.string().default("envelopes"),
-  STORAGE_DIR: z.string().default("./var/blobs"),
+  STORAGE_DIR: z.string().default(""),
+  APP_URL: z.string().default(""),
+  APP_ORIGIN: z.string().default(""),
   RESEND_API_KEY: z.string().default(""),
   FROM_EMAIL: z.string().default("sign@localhost"),
   STRIPE_SECRET_KEY: z.string().default(""),
@@ -37,4 +39,17 @@ export function getEnv(): Env {
 
 export function resetEnvCache(): void {
   cached = undefined;
+}
+
+/** Public origin for mail CTAs. APP_URL, else APP_ORIGIN, else localhost. */
+export function appOrigin(): string {
+  const env = getEnv();
+  const raw = (env.APP_URL || env.APP_ORIGIN || "http://localhost:3000").trim();
+  return raw.replace(/\/+$/, "");
+}
+
+export function absoluteUrl(path: string): string {
+  if (/^https?:\/\//i.test(path)) return path;
+  const p = path.startsWith("/") ? path : `/${path}`;
+  return `${appOrigin()}${p}`;
 }

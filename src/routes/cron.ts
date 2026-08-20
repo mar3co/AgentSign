@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { getDb } from "../db/client.js";
 import { getEnv } from "../env.js";
-import { getDeps } from "../lib/deps.js";
+import { getDeps, storeUnavailableResponse } from "../lib/deps.js";
 import { createMailer, type Mailer } from "../lib/email.js";
 import type { BlobStore } from "../lib/storage.js";
 import { remindDue, shredDue } from "../jobs/shred.js";
@@ -14,10 +14,8 @@ function requireDb() {
   return getDeps().db ?? getDb();
 }
 
-function requireStore(): BlobStore {
-  const store = getDeps().store;
-  if (!store) throw new Error("store is not configured");
-  return store;
+function requireStore(): BlobStore | null {
+  return getDeps().store ?? null;
 }
 
 function requireMailer(): Mailer {
@@ -46,6 +44,7 @@ export async function runShredCron(req: Request): Promise<Response> {
   }
   const db = requireDb();
   const store = requireStore();
+  if (!store) return storeUnavailableResponse();
   const mailer = requireMailer();
   const at = now();
   await shredDue(db, store, at);

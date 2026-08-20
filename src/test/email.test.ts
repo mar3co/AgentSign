@@ -114,7 +114,8 @@ describe("email templates", () => {
     const invites = sent.slice(before).filter((m) => m.to === "jane@example.com");
     expect(invites.length).toBe(1);
     const invite = invites[0]!;
-    expect(invite.text).toContain(done.signers[0]!.sign_url);
+    expect(done.signers[0]!.sign_url).toMatch(/^\/s\//);
+    expect(invite.text).toContain(`http://localhost:3000${done.signers[0]!.sign_url}`);
     expect(invite.text).toContain("shop@example.com");
     expect(invite.text).toContain("Repair authorization");
     expect(invite.text).toMatch(/2026-08-27/);
@@ -152,10 +153,10 @@ describe("email templates", () => {
         expect(mail.text).toContain(`Download this. We delete it on ${shredAt}`);
         expect(mail.text).toContain("Keep it in a cabinet");
         expect(mail.text).toContain(
-          `/login?email=${encodeURIComponent(mail.to)}&next=/envelopes`,
+          `http://localhost:3000/login?email=${encodeURIComponent(mail.to)}&next=/envelopes`,
         );
         expect(mail.text).toContain("Keep this a year");
-        expect(mail.text).toContain("/upgrade");
+        expect(mail.text).toContain("http://localhost:3000/upgrade");
         expect(mail.attachments).toBeDefined();
         expect(mail.attachments).toHaveLength(2);
         const names = mail.attachments!.map((a) => a.filename).sort();

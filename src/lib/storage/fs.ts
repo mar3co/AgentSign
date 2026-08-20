@@ -2,7 +2,7 @@ import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { BlobStore } from "../storage.js";
 
-/** Filesystem blob store for tests only. Never use on Vercel function FS. */
+/** Filesystem blob store for tests and local dogfood. Never use on Vercel function FS. */
 export function createFsStore(rootDir: string): BlobStore {
   const pathFor = (key: string) => join(rootDir, key);
 
