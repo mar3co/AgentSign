@@ -34,6 +34,23 @@ describe("CabinetList", () => {
     expect(screen.queryByLabelText(/email me a link/i)).toBeNull();
   });
 
+  it("hides Download on pending rows", () => {
+    render(
+      createElement(CabinetList, {
+        envelopes: [
+          {
+            id: "env_pending",
+            title: "Repair authorization",
+            status: "pending",
+            canDelete: true,
+          },
+        ],
+      }),
+    );
+    expect(screen.queryByRole("link", { name: /download/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /void/i })).toBeTruthy();
+  });
+
   it("hides Void for envelopes the user only signed", () => {
     render(
       createElement(CabinetList, {

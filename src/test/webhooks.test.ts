@@ -246,6 +246,10 @@ describe("envelope.completed webhook", () => {
     }
   });
 
+  it("rejects expanded IPv6 loopback", async () => {
+    expect(await webhookUrlError("https://[0:0:0:0:0:0:0:1]/hook")).toBeTruthy();
+  });
+
   it("rejects a hostname that resolves to loopback", async () => {
     setDeps({
       lookup: async () => [{ address: "127.0.0.1", family: 4 }],

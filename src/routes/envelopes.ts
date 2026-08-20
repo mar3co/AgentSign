@@ -92,19 +92,19 @@ async function inviteFirstSigner(
     expiresAt: Date;
   },
   at: Date,
-): Promise<void> {
+): Promise<string | null> {
   const signerRows = await db
     .select()
     .from(signersTable)
     .where(eq(signersTable.envelopeId, envelope.id));
   signerRows.sort((a, b) => a.signingOrder - b.signingOrder);
   const first = signerRows[0];
-  if (!first) return;
+  if (!first) return null;
   const token = newSigningToken();
   const signUrl = `/s/${token.raw}`;
   await db
     .update(signersTable)
-    .set({ tokenHash: token.hash, sentAt: at })
+    .set({ tokenHash: token.hash })
     .where(eq(signersTable.id, first.id));
   try {
     await mailer.sendMail({
@@ -116,6 +116,10 @@ async function inviteFirstSigner(
         expiresAt: envelope.expiresAt,
       }),
     });
+    await db
+      .update(signersTable)
+      .set({ sentAt: at })
+      .where(eq(signersTable.id, first.id));
     await logEvent(db, {
       envelopeId: envelope.id,
       signerId: first.id,
@@ -134,6 +138,7 @@ async function inviteFirstSigner(
       payload: { error: err instanceof Error ? err.message : "mail_failed" },
     });
   }
+  return signUrl;
 }
 
 export async function createEnvelope(req: Request): Promise<Response> {
@@ -243,6 +248,7 @@ export async function createEnvelope(req: Request): Promise<Response> {
               eq(envelopes.senderEmail, senderEmail),
             ),
             gte(envelopes.createdAt, windowStart),
+            ne(envelopes.status, "pending_sender"),
           ),
         );
       if (Number(cap?.n ?? 0) >= limit) {
@@ -257,6 +263,7 @@ export async function createEnvelope(req: Request): Promise<Response> {
         and(
           eq(envelopes.senderEmail, senderEmail),
           gte(envelopes.createdAt, windowStart),
+          ne(envelopes.status, "pending_sender"),
         ),
       );
     if (Number(cap?.n ?? 0) >= limit) {
@@ -269,6 +276,15 @@ export async function createEnvelope(req: Request): Promise<Response> {
   const documentHash = sha256Hex(bytes);
   const live = Boolean(liveUserId);
 
+  let webhookSecretHash: string | null = null;
+  if (webhookSecret) {
+    try {
+      webhookSecretHash = sealWebhookSecret(webhookSecret);
+    } catch {
+      return jsonError(503, "Webhook encryption is not configured", "webhook_unconfigured");
+    }
+  }
+
   const [envelope] = await db
     .insert(envelopes)
     .values({
@@ -280,7 +296,7 @@ export async function createEnvelope(req: Request): Promise<Response> {
       shredAt: expiresAt,
       sha256: documentHash,
       webhookUrl,
-      webhookSecretHash: webhookSecret ? sealWebhookSecret(webhookSecret) : null,
+      webhookSecretHash,
       createdAt: at,
     })
     .returning();
@@ -305,11 +321,12 @@ export async function createEnvelope(req: Request): Promise<Response> {
   );
 
   if (live) {
-    await inviteFirstSigner(db, mailer, envelope, at);
+    const signUrl = await inviteFirstSigner(db, mailer, envelope, at);
     return Response.json(
       {
         id: envelope.id,
         status: "pending",
+        ...(signUrl ? { signers: [{ sign_url: signUrl }] } : {}),
         ...(webhookSecret ? { webhook_secret: webhookSecret } : {}),
       },
       { status: 201 },
@@ -322,8 +339,16 @@ export async function createEnvelope(req: Request): Promise<Response> {
     codeHash: otp.hash,
     expiresAt: new Date(at.getTime() + OTP_TTL_MS),
   });
-  await mailer.sendMail({ to: senderEmail, ...otpEmail(otp.digits) });
-  await logEvent(db, { envelopeId: envelope.id, event: "otp_sent" });
+  try {
+    await mailer.sendMail({ to: senderEmail, ...otpEmail(otp.digits) });
+    await logEvent(db, { envelopeId: envelope.id, event: "otp_sent" });
+  } catch (err) {
+    await logEvent(db, {
+      envelopeId: envelope.id,
+      event: "emailed_failed",
+      payload: { error: err instanceof Error ? err.message : "mail_failed" },
+    });
+  }
 
   return Response.json(
     {
@@ -577,15 +602,21 @@ export async function getEnvelopePdf(req: Request, envelopeId: string): Promise<
   }
   const store = requireStore();
   if (!store) return storeUnavailableResponse();
-  const bytes = await store.get(objectKey(envelope.id, "sealed"));
+  const kind =
+    new URL(req.url).searchParams.get("kind") === "certificate"
+      ? "certificate"
+      : "sealed";
+  const bytes = await store.get(objectKey(envelope.id, kind));
   if (!bytes) {
     return jsonError(410, "Envelope has been deleted", "deleted");
   }
-  return new Response(bytes, {
+  const filename =
+    kind === "certificate" ? `${envelope.id}-certificate.pdf` : `${envelope.id}.pdf`;
+  return new Response(Buffer.from(bytes), {
     status: 200,
     headers: {
       "content-type": "application/pdf",
-      "content-disposition": `attachment; filename="${envelope.id}.pdf"`,
+      "content-disposition": `attachment; filename="${filename}"`,
     },
   });
 }
@@ -607,6 +638,6 @@ export async function deleteEnvelope(req: Request, envelopeId: string): Promise<
   const store = requireStore();
   if (!store) return storeUnavailableResponse();
   const at = now();
-  await purgeEnvelope(db, store, envelope.id, at);
+  await purgeEnvelope(db, store, envelope.id, at, { force: true });
   return Response.json({ id: envelope.id, status: "deleted", message: "Void." });
 }

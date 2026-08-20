@@ -20,7 +20,23 @@ export async function purgeEnvelope(
   store: BlobStore,
   envelopeId: string,
   now: Date,
+  opts?: { force?: boolean },
 ): Promise<void> {
+  const [claimed] = await db
+    .update(envelopes)
+    .set({ status: "deleted", senderEmail: "redacted" })
+    .where(
+      opts?.force
+        ? and(eq(envelopes.id, envelopeId), ne(envelopes.status, "deleted"))
+        : and(
+            eq(envelopes.id, envelopeId),
+            lte(envelopes.shredAt, now),
+            ne(envelopes.status, "deleted"),
+          ),
+    )
+    .returning();
+  if (!claimed) return;
+
   for (const kind of KINDS) {
     await store.delete(objectKey(envelopeId, kind));
   }
@@ -35,10 +51,6 @@ export async function purgeEnvelope(
     .update(documents)
     .set({ storagePath: "" })
     .where(eq(documents.envelopeId, envelopeId));
-  await db
-    .update(envelopes)
-    .set({ status: "deleted", senderEmail: "redacted" })
-    .where(eq(envelopes.id, envelopeId));
   await db
     .update(signersTable)
     .set({ email: "redacted" })
@@ -110,7 +122,16 @@ export async function remindDue(
         title: envelope.title,
         expiresAt: envelope.expiresAt,
       });
-      await mailer.sendMail({ to: signer.email, ...reminder });
+      try {
+        await mailer.sendMail({ to: signer.email, ...reminder });
+      } catch (err) {
+        await logEvent(db, {
+          envelopeId: envelope.id,
+          signerId: signer.id,
+          event: "emailed_failed",
+          payload: { error: err instanceof Error ? err.message : "mail_failed" },
+        });
+      }
       await logEvent(db, {
         envelopeId: envelope.id,
         signerId: signer.id,

@@ -25,6 +25,33 @@ describe("production P12 and session cookie flags", () => {
     }
   });
 
+  it("loadSigningP12 mints a throwaway cert in next dev when P12_PATH is empty", () => {
+    const prevVitest = process.env.VITEST;
+    const prevNode = process.env.NODE_ENV;
+    const prevPath = process.env.P12_PATH;
+    const prevVercel = process.env.VERCEL;
+    delete process.env.VITEST;
+    delete process.env.VERCEL;
+    process.env.NODE_ENV = "development";
+    process.env.P12_PATH = "";
+    resetEnvCache();
+    try {
+      const loaded = loadSigningP12();
+      expect(loaded.p12.byteLength).toBeGreaterThan(0);
+      expect(loaded.passphrase).toBeTruthy();
+    } finally {
+      if (prevVitest === undefined) delete process.env.VITEST;
+      else process.env.VITEST = prevVitest;
+      if (prevNode === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = prevNode;
+      if (prevPath === undefined) delete process.env.P12_PATH;
+      else process.env.P12_PATH = prevPath;
+      if (prevVercel === undefined) delete process.env.VERCEL;
+      else process.env.VERCEL = prevVercel;
+      resetEnvCache();
+    }
+  });
+
   it("session cookies are Secure when APP_URL is https", () => {
     const prev = process.env.APP_URL;
     process.env.APP_URL = "https://sign.example";

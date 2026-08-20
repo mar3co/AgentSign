@@ -39,9 +39,10 @@ export function makeDevP12(passphrase: string): Buffer {
 }
 
 function allowDevP12(): boolean {
+  if (process.env.VERCEL) return false;
   if (process.env.VITEST) return true;
   if (process.env.NODE_ENV === "test") return true;
-  if (process.env.VERCEL) return false;
+  if (process.env.NODE_ENV !== "production") return true;
   return false;
 }
 

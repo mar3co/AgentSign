@@ -26,7 +26,7 @@ export async function sealPdf(
   const client =
     typeof (signpdf as { sign?: unknown }).sign === "function"
       ? signpdf
-      : (signpdf as { default: typeof signpdf }).default;
+      : (signpdf as unknown as { default: typeof signpdf }).default;
   const signed = await client.sign(withPlaceholder, signer);
   return Uint8Array.from(signed);
 }

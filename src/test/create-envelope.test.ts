@@ -107,6 +107,8 @@ describe("POST /v1/envelopes", () => {
     for (let i = 0; i < 20; i++) {
       const res = await postOnce();
       expect(res.status).toBe(201);
+      const { id } = (await res.json()) as { id: string };
+      await db.update(envelopes).set({ status: "pending" }).where(eq(envelopes.id, id));
     }
     const over = await postOnce();
     expect(over.status).toBe(429);
@@ -135,15 +137,61 @@ describe("POST /v1/envelopes", () => {
       body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
       return postEnvelope(new Request("http://sign.test/v1/envelopes", { method: "POST", body }));
     }
-    const first = await postOnce();
-    expect(first.status).toBe(201);
-    const { id } = (await first.json()) as { id: string };
-    await db.update(envelopes).set({ status: "deleted" }).where(eq(envelopes.id, id));
-    for (let i = 0; i < 19; i++) {
-      expect((await postOnce()).status).toBe(201);
+    for (let i = 0; i < 20; i++) {
+      const res = await postOnce();
+      expect(res.status).toBe(201);
+      const { id } = (await res.json()) as { id: string };
+      await db.update(envelopes).set({ status: "deleted" }).where(eq(envelopes.id, id));
     }
     const over = await postOnce();
     expect(over.status).toBe(429);
+  });
+
+  it("unverified pending_sender rows do not consume the free send cap", { timeout: 60_000 }, async () => {
+    const db = await createTestDb();
+    const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+    setDeps({
+      db,
+      store,
+      mailer: { sendMail: async () => {} },
+      now: () => new Date("2026-08-20T12:00:00Z"),
+    });
+    const pdf = await minimalPdf();
+    async function postOnce() {
+      const body = new FormData();
+      body.set("title", "Repair authorization");
+      body.set("sender_email", "unverified-cap@example.com");
+      body.set("signers", JSON.stringify([{ name: "Jane", email: "jane@example.com" }]));
+      body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
+      return postEnvelope(new Request("http://sign.test/v1/envelopes", { method: "POST", body }));
+    }
+    for (let i = 0; i < 21; i++) {
+      expect((await postOnce()).status).toBe(201);
+    }
+  });
+
+  it("create OTP mail throw still returns 201 pending_sender", async () => {
+    const db = await createTestDb();
+    const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+    setDeps({
+      db,
+      store,
+      mailer: { sendMail: async () => { throw new Error("resend down"); } },
+    });
+    const pdf = await minimalPdf();
+    const body = new FormData();
+    body.set("title", "Repair authorization");
+    body.set("sender_email", "shop@example.com");
+    body.set("signers", JSON.stringify([{ name: "Jane", email: "jane@example.com" }]));
+    body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
+    const res = await postEnvelope(
+      new Request("http://sign.test/v1/envelopes", { method: "POST", body }),
+    );
+    expect(res.status).toBe(201);
+    const json = (await res.json()) as { id: string; status: string };
+    expect(json.status).toBe("pending_sender");
+    const [row] = await db.select().from(envelopes).where(eq(envelopes.id, json.id));
+    expect(row!.status).toBe("pending_sender");
   });
 
   it("OTP mail failure still returns the tmp key", async () => {

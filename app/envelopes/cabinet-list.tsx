@@ -46,12 +46,22 @@ export function CabinetList({
                   <span className="text-sm text-muted-foreground">
                     {env.status}
                   </span>
-                  <a
-                    className="text-sm underline"
-                    href={`/v1/envelopes/${env.id}/pdf`}
-                  >
-                    Download
-                  </a>
+                  {env.status === "completed" ? (
+                    <>
+                      <a
+                        className="text-sm underline"
+                        href={`/v1/envelopes/${env.id}/pdf`}
+                      >
+                        Download
+                      </a>
+                      <a
+                        className="text-sm underline"
+                        href={`/v1/envelopes/${env.id}/pdf?kind=certificate`}
+                      >
+                        Certificate
+                      </a>
+                    </>
+                  ) : null}
                   {env.canDelete ? (
                     <Button
                       type="button"

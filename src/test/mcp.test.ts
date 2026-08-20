@@ -218,4 +218,33 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
       expect(pdfText.startsWith("%PDF")).toBe(true);
     },
   );
+
+  it("HTTP POST /mcp does not use SIGN_API_KEY when no Bearer is sent", async () => {
+    const prev = process.env.SIGN_API_KEY;
+    process.env.SIGN_API_KEY = "sign_live_should_not_count";
+    try {
+      const res = await postMcp(
+        new Request("http://sign.test/mcp", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+            "mcp-protocol-version": "2025-11-25",
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 3,
+            method: "tools/call",
+            params: { name: "status", arguments: { id: "00000000-0000-0000-0000-000000000001" } },
+          }),
+        }),
+      );
+      const body = await res.text();
+      expect(body.toLowerCase()).toMatch(/unauthor|api key|unauthorized|missing/);
+      expect(body).not.toContain("sign_live_should_not_count");
+    } finally {
+      if (prev === undefined) delete process.env.SIGN_API_KEY;
+      else process.env.SIGN_API_KEY = prev;
+    }
+  });
 });

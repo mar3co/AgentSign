@@ -1,9 +1,16 @@
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from "node:crypto";
 import { lookup as dnsLookup } from "node:dns/promises";
-import { isIP } from "node:net";
+import { BlockList, isIP } from "node:net";
 import { getEnv } from "../env.js";
 import { logEvent, type AuditDb } from "./audit.js";
 import { getDeps } from "./deps.js";
+
+const v6Blocks = new BlockList();
+v6Blocks.addAddress("::", "ipv6");
+v6Blocks.addAddress("::1", "ipv6");
+v6Blocks.addSubnet("fe80::", 10, "ipv6");
+v6Blocks.addSubnet("fc00::", 7, "ipv6");
+v6Blocks.addSubnet("::ffff:0:0", 96, "ipv6");
 
 const WEBHOOK_TIMEOUT_MS = 5_000;
 
@@ -27,26 +34,33 @@ export function newWebhookSecret(): string {
   return randomBytes(32).toString("hex");
 }
 
-function kek(): Buffer {
+function kek(): Buffer | null {
   const env = getEnv();
-  const material = env.CRON_SECRET || env.APP_URL || "sign-dev-webhook-kek";
+  const material = env.WEBHOOK_KEK.trim() || env.CRON_SECRET.trim();
+  if (!material) return null;
   return createHash("sha256").update(material).digest();
 }
 
 export function sealWebhookSecret(raw: string): string {
+  const key = kek();
+  if (!key) throw new Error("WEBHOOK_KEK or CRON_SECRET is required");
   const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", kek(), iv);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
   const enc = Buffer.concat([cipher.update(raw, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
   return `enc:${iv.toString("hex")}:${tag.toString("hex")}:${enc.toString("hex")}`;
 }
 
 export function openWebhookSecret(stored: string): string {
-  if (!stored.startsWith("enc:")) return stored;
+  if (!stored.startsWith("enc:")) {
+    throw new Error("webhook secret is not encrypted");
+  }
+  const key = kek();
+  if (!key) throw new Error("WEBHOOK_KEK or CRON_SECRET is required");
   const parts = stored.split(":");
-  if (parts.length !== 4) return stored;
+  if (parts.length !== 4) throw new Error("webhook secret is not encrypted");
   const [, ivH, tagH, dataH] = parts;
-  const decipher = createDecipheriv("aes-256-gcm", kek(), Buffer.from(ivH!, "hex"));
+  const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(ivH!, "hex"));
   decipher.setAuthTag(Buffer.from(tagH!, "hex"));
   return Buffer.concat([
     decipher.update(Buffer.from(dataH!, "hex")),
@@ -94,6 +108,7 @@ function isBlockedIp(host: string): boolean {
   const version = isIP(host);
   if (version === 4) return isBlockedIpv4(host);
   if (version === 6) {
+    if (v6Blocks.check(host, "ipv6")) return true;
     const h = host.toLowerCase();
     if (h === "::" || h === "::1") return true;
     if (h.startsWith("fe80:") || h.startsWith("fc") || h.startsWith("fd")) return true;
@@ -151,9 +166,40 @@ export function webhookSignature(
   return `sha256=${hex}`;
 }
 
-function doFetch(input: string, init: RequestInit): Promise<Response> {
-  const f = getDeps().fetch ?? globalThis.fetch;
-  return f(input, init);
+async function pinnedFetch(
+  input: string,
+  init: RequestInit,
+  addresses: { address: string; family: number }[],
+): Promise<Response> {
+  const injected = getDeps().fetch;
+  if (injected) return injected(input, init);
+  const { Agent, fetch: undiciFetch } = await import("undici");
+  const parsed = new URL(input);
+  const pinnedHost = normalizeHost(parsed.hostname);
+  const mapped = addresses.map((a) => ({
+    address: a.address,
+    family: (a.family === 6 ? 6 : 4) as 4 | 6,
+  }));
+  const agent = new Agent({
+    connect: {
+      lookup(hostname, _opts, cb) {
+        const h = normalizeHost(hostname);
+        if (h === pinnedHost || hostname === parsed.hostname) {
+          (cb as (err: Error | null, result: typeof mapped) => void)(null, mapped);
+          return;
+        }
+        cb(new Error("refusing unpinned lookup"), "", 4);
+      },
+    },
+  });
+  return undiciFetch(input, {
+    method: init.method,
+    headers: init.headers as Record<string, string>,
+    body: typeof init.body === "string" ? init.body : undefined,
+    redirect: "error",
+    signal: init.signal,
+    dispatcher: agent,
+  }) as unknown as Response;
 }
 
 function now(): Date {
@@ -190,11 +236,21 @@ export async function fireEnvelopeCompleted(
   };
   const rawBody = JSON.stringify(body);
   const timestamp = String(Math.floor(now().getTime() / 1000));
-  const secret = openWebhookSecret(envelope.webhookSecretHash);
-  const signature = webhookSignature(secret, timestamp, rawBody);
 
   try {
-    const res = await doFetch(envelope.webhookUrl, {
+    const secret = openWebhookSecret(envelope.webhookSecretHash);
+    const signature = webhookSignature(secret, timestamp, rawBody);
+    const parsed = new URL(envelope.webhookUrl);
+    const resolved = await resolveHost(normalizeHost(parsed.hostname));
+    if (resolved.length === 0 || resolved.some((row) => isBlockedIp(normalizeHost(row.address)))) {
+      await logEvent(db, {
+        envelopeId: envelope.id,
+        event: "webhook_failed",
+        payload: { error: "blocked_url" },
+      });
+      return;
+    }
+    const res = await pinnedFetch(envelope.webhookUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -204,7 +260,7 @@ export async function fireEnvelopeCompleted(
       body: rawBody,
       redirect: "error",
       signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
-    });
+    }, resolved);
     if (!res.ok) {
       await logEvent(db, {
         envelopeId: envelope.id,

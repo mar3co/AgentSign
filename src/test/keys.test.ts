@@ -163,8 +163,13 @@ describe("live keys", () => {
       }),
     );
     expect(res.status).toBe(201);
-    const created = (await res.json()) as { id: string; status: string };
+    const created = (await res.json()) as {
+      id: string;
+      status: string;
+      signers?: { sign_url?: string }[];
+    };
     expect(created.status).toBe("pending");
+    expect(created.signers?.[0]?.sign_url).toMatch(/^\/s\//);
     const otpMails = sent.slice(beforeMail).filter((m) =>
       /verification code/i.test(m.subject),
     );

@@ -31,6 +31,7 @@ function headerValue(
 function resolveKey(
   args: { api_key?: string },
   extra: Extra,
+  allowEnvKey: boolean,
 ): string | null {
   const fromArgs = args.api_key?.trim();
   if (fromArgs) return fromArgs;
@@ -41,6 +42,7 @@ function resolveKey(
     const token = auth.slice(7).trim();
     if (token) return token;
   }
+  if (!allowEnvKey) return null;
   const envKey = process.env.SIGN_API_KEY?.trim();
   return envKey || null;
 }
@@ -64,7 +66,8 @@ async function jsonOrText(res: Response): Promise<string> {
   return res.text();
 }
 
-export function createSignMcpServer(): McpServer {
+export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer {
+  const allowEnvKey = opts?.allowEnvKey === true;
   const server = new McpServer(
     { name: "sign", version: "0.1.0" },
     {
@@ -101,9 +104,9 @@ export function createSignMcpServer(): McpServer {
       form.set("title", args.title);
       form.set("sender_email", args.sender_email);
       form.set("signers", JSON.stringify(args.signers));
-      form.set("file", new Blob([bytes], { type: "application/pdf" }), "document.pdf");
+      form.set("file", new Blob([Buffer.from(bytes)], { type: "application/pdf" }), "document.pdf");
       const headers = new Headers();
-      const key = resolveKey(args, extra);
+      const key = resolveKey(args, extra, allowEnvKey);
       if (key) headers.set("authorization", `Bearer ${key}`);
       const res = await createEnvelope(
         new Request("http://sign.local/v1/envelopes", {
@@ -141,7 +144,7 @@ export function createSignMcpServer(): McpServer {
       },
     },
     async (args, extra) => {
-      const key = resolveKey(args, extra);
+      const key = resolveKey(args, extra, allowEnvKey);
       if (!key) {
         return toolText(
           JSON.stringify({ error: "Unauthorized", code: "unauthorized" }),
@@ -170,7 +173,7 @@ export function createSignMcpServer(): McpServer {
       },
     },
     async (args, extra) => {
-      const key = resolveKey(args, extra);
+      const key = resolveKey(args, extra, allowEnvKey);
       if (!key) {
         return toolText(
           JSON.stringify({ error: "Unauthorized", code: "unauthorized" }),
@@ -214,7 +217,7 @@ export async function handleMcpHttp(req: Request): Promise<Response> {
 }
 
 export async function runStdio(): Promise<void> {
-  const server = createSignMcpServer();
+  const server = createSignMcpServer({ allowEnvKey: true });
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }

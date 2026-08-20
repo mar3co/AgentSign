@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 import { createElement } from "react";
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect } from "vitest";
 import { eq } from "drizzle-orm";
-import { render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { createTestDb } from "./db.js";
 import { createFsStore, objectKey } from "../lib/storage.js";
 import { setDeps } from "../lib/deps.js";
@@ -122,6 +122,10 @@ function signRequest(token: string) {
 }
 
 describe("signing ceremony", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
   it("consent then sign completes and stores a sealed blob", { timeout: 60_000 }, async () => {
     const frozen = new Date("2026-08-20T12:00:00Z");
     const { db, store, id, token } = await startVerified({ now: () => frozen });
@@ -138,6 +142,7 @@ describe("signing ceremony", () => {
     expect(json.title).toBe("Repair authorization");
     expect(json.signerName).toBe("Jane");
     expect(json.sequentialWait).toBe(false);
+    expect((json as { status?: string }).status).toBe("pending");
 
     const consent = await postConsent(consentRequest(token), {
       params: Promise.resolve({ token }),
@@ -515,10 +520,120 @@ describe("signing ceremony", () => {
           expiresAt: new Date().toISOString(),
           shredAt: new Date().toISOString(),
           signed: true,
+          status: "completed",
         },
       }),
     );
     const link = screen.getByRole("link", { name: /download/i });
     expect(link.getAttribute("href")).toBe("/s/tok_1/pdf");
+    expect(screen.getByRole("link", { name: /certificate/i }).getAttribute("href")).toBe(
+      "/s/tok_1/pdf?kind=certificate",
+    );
+  });
+
+  it("non-last signer done screen has no Download", () => {
+    render(
+      createElement(SigningCeremony, {
+        token: "tok_mid",
+        consentText: "I agree",
+        state: {
+          title: "Repair authorization",
+          signerName: "Jane",
+          signerEmail: "jane@example.com",
+          sequentialWait: false,
+          expiresAt: new Date().toISOString(),
+          shredAt: new Date().toISOString(),
+          signed: true,
+          status: "pending",
+        },
+      }),
+    );
+    expect(screen.queryByRole("link", { name: /download/i })).toBeNull();
+    expect(screen.getByText(/next signer/i)).toBeTruthy();
+  });
+
+  it("decline mail throw still returns 200 declined", { timeout: 60_000 }, async () => {
+    const { token, db } = await startVerified();
+    await postConsent(consentRequest(token), { params: Promise.resolve({ token }) });
+    setDeps({
+      mailer: { sendMail: async () => { throw new Error("resend down"); } },
+    });
+    const res = await postDecline(
+      new Request(`http://sign.test/s/${token}/decline`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({}),
+      }),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json()) as { status: string }).toMatchObject({ status: "declined" });
+    const [env] = await db.select().from(envelopes);
+    expect(env!.status).toBe("declined");
+  });
+
+  it("rejects a non-PNG appearance before signed_at", { timeout: 60_000 }, async () => {
+    const { token, db } = await startVerified();
+    await postConsent(consentRequest(token), { params: Promise.resolve({ token }) });
+    const body = new FormData();
+    body.set("png", new Blob([new Uint8Array([1, 2, 3, 4])], { type: "image/png" }), "sig.png");
+    const res = await postSign(
+      new Request(`http://sign.test/s/${token}/sign`, { method: "POST", body }),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code: string }).code).toBe("invalid_png");
+    const [signer] = await db.select().from(signersTable);
+    expect(signer!.signedAt).toBeNull();
+  });
+
+  it("sequential invite mail throw leaves Jane unsigned so Finish can retry", { timeout: 60_000 }, async () => {
+    const sent: { to: string; subject: string; text: string }[] = [];
+    const { token, db, id } = await startVerified({
+      signers: [
+        { name: "Jane", email: "jane@example.com" },
+        { name: "Bob", email: "bob@example.com" },
+      ],
+    });
+    setDeps({
+      mailer: {
+        sendMail: async (m) => {
+          if (/please sign/i.test(m.subject) && /bob@example.com/i.test(m.to)) {
+            throw new Error("resend down");
+          }
+          sent.push(m);
+        },
+      },
+    });
+    await postConsent(consentRequest(token), { params: Promise.resolve({ token }) });
+    const sign = await postSign(signRequest(token), { params: Promise.resolve({ token }) });
+    expect(sign.status).toBe(503);
+    const rows = await db.select().from(signersTable).where(eq(signersTable.envelopeId, id));
+    rows.sort((a, b) => a.signingOrder - b.signingOrder);
+    expect(rows[0]!.signedAt).toBeNull();
+    expect(rows[1]!.sentAt).toBeNull();
+  });
+
+  it("GET ceremony and REST PDF serve the sibling certificate", { timeout: 60_000 }, async () => {
+    const { id, token, key } = await startVerified();
+    setDeps({ p12: makeDevP12("test"), p12Passphrase: "test" });
+    await postConsent(consentRequest(token), { params: Promise.resolve({ token }) });
+    const signed = await postSign(signRequest(token), { params: Promise.resolve({ token }) });
+    expect(signed.status).toBe(200);
+    const cert = await getCeremonyPdf(
+      new Request(`http://sign.test/s/${token}/pdf?kind=certificate`),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(cert.status).toBe(200);
+    expect(cert.headers.get("content-type")).toMatch(/pdf/);
+    const rest = await getPdf(
+      new Request(`http://sign.test/v1/envelopes/${id}/pdf?kind=certificate`, {
+        headers: { authorization: `Bearer ${key}` },
+      }),
+      { params: Promise.resolve({ id }) },
+    );
+    expect(rest.status).toBe(200);
+    const bytes = Buffer.from(await rest.arrayBuffer());
+    expect(bytes.includes(Buffer.from("Certificate of completion"))).toBe(true);
   });
 });

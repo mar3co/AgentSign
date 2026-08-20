@@ -25,6 +25,7 @@ export const auditEvent = [
   "consented",
   "signed",
   "emailed",
+  "emailed_failed",
   "otp_sent",
   "email_verified",
   "declined",

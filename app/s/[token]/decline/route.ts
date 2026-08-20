@@ -4,8 +4,8 @@ export const runtime = "nodejs";
 
 export async function POST(
   req: Request,
-  ctx?: { params: Promise<{ token: string }> },
+  ctx: { params: Promise<{ token: string }> },
 ): Promise<Response> {
-  const { token } = (await ctx?.params) ?? { token: "" };
+  const { token } = await ctx.params;
   return postDecline(req, token);
 }

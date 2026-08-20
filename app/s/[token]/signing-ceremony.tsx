@@ -20,6 +20,7 @@ export type CeremonyState = {
   shredAt?: string;
   signed?: boolean;
   declined?: boolean;
+  status?: string;
 };
 
 export function SigningCeremony({
@@ -33,6 +34,7 @@ export function SigningCeremony({
 }) {
   const [consented, setConsented] = useState(false);
   const [done, setDone] = useState(Boolean(state.signed));
+  const [completed, setCompleted] = useState(state.status === "completed");
   const [declined, setDeclined] = useState(Boolean(state.declined));
   const [shredAt, setShredAt] = useState(state.shredAt);
   const [error, setError] = useState<string | null>(null);
@@ -51,6 +53,21 @@ export function SigningCeremony({
   if (done) {
     const email = encodeURIComponent(state.signerEmail ?? "");
     const when = shredAt ?? state.shredAt ?? "";
+    if (!completed) {
+      return (
+        <main className="mx-auto max-w-md p-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Signed</CardTitle>
+              <CardDescription>{state.title}</CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4">
+              <p className="text-base">You&apos;re done. Waiting on the next signer.</p>
+            </CardContent>
+          </Card>
+        </main>
+      );
+    }
     return (
       <main className="mx-auto max-w-md p-4">
         <Card>
@@ -67,6 +84,12 @@ export function SigningCeremony({
               href={`/s/${token}/pdf`}
             >
               Download
+            </a>
+            <a
+              className="text-base underline"
+              href={`/s/${token}/pdf?kind=certificate`}
+            >
+              Certificate
             </a>
             <a
               className="text-base underline"
@@ -127,51 +150,61 @@ export function SigningCeremony({
     }
     setBusy(true);
     setError(null);
-    const consentRes = await fetch(`/s/${token}/consent`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ consent: true }),
-    });
-    if (!consentRes.ok) {
-      setBusy(false);
-      setError("Consent is required");
-      return;
-    }
-    const canvas = canvasRef.current;
-    const blob = await new Promise<Blob | null>((resolve) => {
-      if (!canvas || typeof canvas.toBlob !== "function") {
-        resolve(null);
+    try {
+      const consentRes = await fetch(`/s/${token}/consent`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ consent: true }),
+      });
+      if (!consentRes.ok) {
+        setError("Consent is required");
         return;
       }
-      canvas.toBlob((b) => resolve(b), "image/png");
-    });
-    const body = new FormData();
-    body.set("png", blob ?? new Blob([], { type: "image/png" }), "sig.png");
-    const signRes = await fetch(`/s/${token}/sign`, { method: "POST", body });
-    setBusy(false);
-    if (!signRes.ok) {
+      const canvas = canvasRef.current;
+      const blob = await new Promise<Blob | null>((resolve) => {
+        if (!canvas || typeof canvas.toBlob !== "function") {
+          resolve(null);
+          return;
+        }
+        canvas.toBlob((b) => resolve(b), "image/png");
+      });
+      const body = new FormData();
+      body.set("png", blob ?? new Blob([], { type: "image/png" }), "sig.png");
+      const signRes = await fetch(`/s/${token}/sign`, { method: "POST", body });
+      if (!signRes.ok) {
+        setError("Could not finish");
+        return;
+      }
+      const json = (await signRes.json()) as { shred_at?: string; status?: string };
+      if (json.shred_at) setShredAt(json.shred_at);
+      if (json.status === "completed") setCompleted(true);
+      setDone(true);
+    } catch {
       setError("Could not finish");
-      return;
+    } finally {
+      setBusy(false);
     }
-    const json = (await signRes.json()) as { shred_at?: string };
-    if (json.shred_at) setShredAt(json.shred_at);
-    setDone(true);
   }
 
   async function onDecline() {
     setBusy(true);
     setError(null);
-    const res = await fetch(`/s/${token}/decline`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({}),
-    });
-    setBusy(false);
-    if (!res.ok) {
+    try {
+      const res = await fetch(`/s/${token}/decline`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) {
+        setError("Could not decline");
+        return;
+      }
+      setDeclined(true);
+    } catch {
       setError("Could not decline");
-      return;
+    } finally {
+      setBusy(false);
     }
-    setDeclined(true);
   }
 
   return (

@@ -10,7 +10,7 @@ import {
   endText,
   setFontAndSize,
   showText,
-  translate,
+  moveText,
   pushGraphicsState,
   popGraphicsState,
 } from "pdf-lib";
@@ -52,8 +52,8 @@ function drawLiteralText(
       pushGraphicsState(),
       beginText(),
       setFontAndSize(fontKey, size),
-      translate(x, y),
-      showText(PDFString.of(text)),
+      moveText(x, y),
+      showText(PDFString.of(text) as never),
       endText(),
       popGraphicsState(),
     ],
@@ -88,9 +88,9 @@ export async function buildCertificate(
   info: CertificateInfo,
 ): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
-  const page = doc.addPage(PageSizes.Letter);
   const font = await doc.embedFont(StandardFonts.Helvetica);
-  const fontKey = page.node.newFontDictionary(font.name, font.ref);
+  let page = doc.addPage(PageSizes.Letter);
+  let fontKey = page.node.newFontDictionary(font.name, font.ref);
   const { height } = page.getSize();
   const margin = 72;
   const size = 11;
@@ -134,6 +134,11 @@ export async function buildCertificate(
         ? [raw]
         : wrapLine(raw, 90);
     for (const text of wrapped) {
+      if (y < margin) {
+        page = doc.addPage(PageSizes.Letter);
+        fontKey = page.node.newFontDictionary(font.name, font.ref);
+        y = height - margin;
+      }
       if (text) {
         drawLiteralText(doc, page, fontKey, text, margin, y, size);
       }

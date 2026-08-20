@@ -269,6 +269,41 @@ describe("remindDue and shredDue", () => {
     expect((await getSigningState(pending.token)).status).toBe(200);
   });
 
+  it("remindDue mail throw still writes reminded and continues the sweep", { timeout: 60_000 }, async () => {
+    let at = new Date("2026-08-20T12:00:00Z");
+    const pending = await startEnvelope({ now: () => at });
+    at = new Date(at.getTime() + 3 * DAY);
+    let throws = 0;
+    const mailer = {
+      sendMail: async () => {
+        throws += 1;
+        throw new Error("resend down");
+      },
+    };
+    await remindDue(pending.db, mailer, at);
+    expect(throws).toBe(1);
+    const audits = await pending.db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.envelopeId, pending.id));
+    expect(audits.filter((a) => a.event === "reminded")).toHaveLength(1);
+    expect(audits.filter((a) => a.event === "emailed_failed")).toHaveLength(1);
+  });
+
+  it("purgeEnvelope no-ops when shred_at moved forward", { timeout: 60_000 }, async () => {
+    const ctx = await startEnvelope({ now: () => new Date("2026-08-20T12:00:00Z") });
+    const later = new Date("2026-09-20T12:00:00Z");
+    await ctx.db
+      .update(envelopes)
+      .set({ shredAt: later, status: "completed" })
+      .where(eq(envelopes.id, ctx.id));
+    const { purgeEnvelope } = await import("../jobs/shred.js");
+    await purgeEnvelope(ctx.db, ctx.store, ctx.id, new Date("2026-08-21T12:00:00Z"));
+    const [row] = await ctx.db.select().from(envelopes).where(eq(envelopes.id, ctx.id));
+    expect(row!.status).toBe("completed");
+    expect(await ctx.store.get(objectKey(ctx.id, "original"))).toBeTruthy();
+  });
+
   it("GET /internal/shred requires CRON_SECRET and runs shredDue + remindDue", { timeout: 60_000 }, async () => {
     let at = new Date("2026-08-20T12:00:00Z");
     const ctx = await startEnvelope({ now: () => at });

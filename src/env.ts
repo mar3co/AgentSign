@@ -16,6 +16,7 @@ const envSchema = z.object({
   STRIPE_WEBHOOK_SECRET: z.string().default(""),
   STRIPE_PRICE_PRO: z.string().default(""),
   CRON_SECRET: z.string().default(""),
+  WEBHOOK_KEK: z.string().default(""),
   SIGNING_WINDOW_DAYS: z.string().default("7"),
   FREE_KEEP_DAYS: z.string().default("7"),
   PRO_KEEP_DAYS: z.string().default("365"),

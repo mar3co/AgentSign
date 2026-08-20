@@ -48,6 +48,7 @@ export default async function SigningPage({
     shredAt?: string;
     signed?: boolean;
     declined?: boolean;
+    status?: string;
   };
   return (
     <SigningCeremony token={token} state={state} consentText={CONSENT_TEXT} />

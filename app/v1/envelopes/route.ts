@@ -6,9 +6,6 @@ export async function GET(req: Request): Promise<Response> {
   return listEnvelopes(req);
 }
 
-export async function POST(
-  req: Request,
-  _ctx?: { params: Promise<{ id: string }> },
-): Promise<Response> {
+export async function POST(req: Request): Promise<Response> {
   return createEnvelope(req);
 }

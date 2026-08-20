@@ -90,5 +90,38 @@ describe("completeEnvelopePdf", () => {
     const sealedDoc = await PDFDocument.load(result.sealed);
     expect(sealedDoc.getPageCount()).toBe(3);
     expect(result.sha256).toBe(sha256Hex(result.sealed));
+    const latin1 = Buffer.from(result.sealed).toString("latin1");
+    expect(latin1).toMatch(/BT[\s\S]{0,80}Td[\s\S]{0,80}ET/);
+    expect(latin1).toContain("Jane");
+    expect(latin1).toContain("Bob");
+  });
+});
+
+describe("buildCertificate", () => {
+  it("paginates when many signers would run off Letter", async () => {
+    const { buildCertificate } = await import("../lib/pdf/certificate.js");
+    const signers = Array.from({ length: 5 }, (_, i) => ({
+      name: `Signer ${i + 1}`,
+      email: `s${i + 1}@example.com`,
+      sentAt: new Date(),
+      openedAt: new Date(),
+      consentedAt: new Date(),
+      signedAt: new Date(),
+      declinedAt: null,
+      ip: "1.2.3.4",
+      ua: "test",
+    }));
+    const bytes = await buildCertificate({
+      envelopeId: "00000000-0000-0000-0000-000000000005",
+      title: "Repair authorization",
+      senderEmail: "shop@example.com",
+      sha256: "a".repeat(64),
+      consentText: "I agree to sign this document electronically.",
+      signers,
+    });
+    const doc = await PDFDocument.load(bytes);
+    expect(doc.getPageCount()).toBeGreaterThan(1);
+    expect(Buffer.from(bytes).includes(Buffer.from("s5@example.com"))).toBe(true);
+    expect(Buffer.from(bytes).includes(Buffer.from("Not a notary"))).toBe(true);
   });
 });

@@ -37,6 +37,13 @@ function jsonError(status: number, error: string, code: string): Response {
   return Response.json({ error, code }, { status });
 }
 
+const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+function isPng(bytes: Uint8Array): boolean {
+  if (bytes.byteLength < PNG_MAGIC.length) return false;
+  return PNG_MAGIC.every((b, i) => bytes[i] === b);
+}
+
 function requireDb(): AuditDb {
   return getDeps().db ?? getDb();
 }
@@ -119,6 +126,10 @@ export async function getSigningState(
   const { db, signer, envelope } = loaded;
   const at = now();
 
+  if (envelope.status === "deleted") {
+    return jsonError(410, "This link has expired", "deleted");
+  }
+
   if (!signer.signedAt && envelope.expiresAt.getTime() <= at.getTime()) {
     return jsonError(410, "This link has expired", "expired");
   }
@@ -149,6 +160,7 @@ export async function getSigningState(
     shredAt: envelope.shredAt.toISOString(),
     signed: Boolean(signer.signedAt),
     declined: Boolean(signer.declinedAt),
+    status: envelope.status,
   });
 }
 
@@ -223,8 +235,8 @@ export async function postSign(req: Request, token: string): Promise<Response> {
     return jsonError(400, "A PNG signature is required", "invalid_png");
   }
   const png = new Uint8Array(await file.arrayBuffer());
-  if (png.byteLength > 1_000_000) {
-    return jsonError(400, "Signature image is too large", "invalid_png");
+  if (png.byteLength > 1_000_000 || !isPng(png)) {
+    return jsonError(400, "A PNG signature is required", "invalid_png");
   }
 
   const ip = clientIp(req) ?? signer.ip;
@@ -265,9 +277,10 @@ export async function postSign(req: Request, token: string): Promise<Response> {
         signedAt: s.signedAt,
       });
     }
-    const { p12, passphrase } = signingP12();
+    await store.put(appearanceKey(envelope.id, signer.id), png);
     let result: Awaited<ReturnType<typeof completeEnvelopePdf>>;
     try {
+      const { p12, passphrase } = signingP12();
       result = await completeEnvelopePdf({
         original,
         appearances,
@@ -320,28 +333,36 @@ export async function postSign(req: Request, token: string): Promise<Response> {
     await store.put(sealedPath, result.sealed);
     await store.put(certPath, result.certificate);
 
-    await db
-      .update(signersTable)
-      .set({ signedAt: at, ip, ua })
-      .where(eq(signersTable.id, signer.id));
-    await db
-      .update(envelopes)
-      .set({ status: "completed", sha256: result.sha256, shredAt })
-      .where(eq(envelopes.id, envelope.id));
-    await db.insert(documents).values([
-      {
-        envelopeId: envelope.id,
-        kind: "sealed",
-        storagePath: sealedPath,
-        documentHash: result.sha256,
-      },
-      {
-        envelopeId: envelope.id,
-        kind: "certificate",
-        storagePath: certPath,
-        documentHash: sha256Hex(result.certificate),
-      },
-    ]);
+    try {
+      await db.transaction(async (tx) => {
+        await tx
+          .update(signersTable)
+          .set({ signedAt: at, ip, ua })
+          .where(eq(signersTable.id, signer.id));
+        const [updated] = await tx
+          .update(envelopes)
+          .set({ status: "completed", sha256: result.sha256, shredAt })
+          .where(and(eq(envelopes.id, envelope.id), eq(envelopes.status, "pending")))
+          .returning();
+        if (!updated) throw new Error("complete_conflict");
+        await tx.insert(documents).values([
+          {
+            envelopeId: envelope.id,
+            kind: "sealed",
+            storagePath: sealedPath,
+            documentHash: result.sha256,
+          },
+          {
+            envelopeId: envelope.id,
+            kind: "certificate",
+            storagePath: certPath,
+            documentHash: sha256Hex(result.certificate),
+          },
+        ]);
+      });
+    } catch {
+      return jsonError(409, "Envelope is not awaiting signature", "invalid_state");
+    }
     await logEvent(db, {
       envelopeId: envelope.id,
       signerId: signer.id,
@@ -349,7 +370,11 @@ export async function postSign(req: Request, token: string): Promise<Response> {
       ip: ip ?? undefined,
       ua: ua ?? undefined,
     });
-    await syncTmpKeyExpiry(db, envelope.id, shredAt);
+    try {
+      await syncTmpKeyExpiry(db, envelope.id, shredAt);
+    } catch {
+      // envelope is already completed
+    }
 
     const mailer = requireMailer();
     const attachments = completionAttachments(result.sealed, result.certificate);
@@ -415,17 +440,6 @@ export async function postSign(req: Request, token: string): Promise<Response> {
   }
 
   await store.put(appearanceKey(envelope.id, signer.id), png);
-  await db
-    .update(signersTable)
-    .set({ signedAt: at, ip, ua })
-    .where(eq(signersTable.id, signer.id));
-  await logEvent(db, {
-    envelopeId: envelope.id,
-    signerId: signer.id,
-    event: "signed",
-    ip: ip ?? undefined,
-    ua: ua ?? undefined,
-  });
 
   const next = allSigners.find((s) => s.signingOrder === signer.signingOrder + 1);
   // First mint + invite only; never rotate a token that was already sent.
@@ -435,7 +449,7 @@ export async function postSign(req: Request, token: string): Promise<Response> {
     const signUrl = `/s/${token.raw}`;
     await db
       .update(signersTable)
-      .set({ tokenHash: token.hash, sentAt: at })
+      .set({ tokenHash: token.hash })
       .where(eq(signersTable.id, next.id));
     const invite = inviteEmail({
       signUrl,
@@ -445,6 +459,10 @@ export async function postSign(req: Request, token: string): Promise<Response> {
     });
     try {
       await mailer.sendMail({ to: next.email, ...invite });
+      await db
+        .update(signersTable)
+        .set({ sentAt: at })
+        .where(eq(signersTable.id, next.id));
       await logEvent(db, {
         envelopeId: envelope.id,
         signerId: next.id,
@@ -462,16 +480,32 @@ export async function postSign(req: Request, token: string): Promise<Response> {
         event: "emailed_failed",
         payload: { error: err instanceof Error ? err.message : "mail_failed" },
       });
+      return jsonError(503, "Could not email the next signer", "invite_failed");
     }
   }
+
+  await db
+    .update(signersTable)
+    .set({ signedAt: at, ip, ua })
+    .where(eq(signersTable.id, signer.id));
+  await logEvent(db, {
+    envelopeId: envelope.id,
+    signerId: signer.id,
+    event: "signed",
+    ip: ip ?? undefined,
+    ua: ua ?? undefined,
+  });
 
   return Response.json({ status: "pending" });
 }
 
-export async function getCeremonyPdf(token: string): Promise<Response> {
+export async function getCeremonyPdf(req: Request, token: string): Promise<Response> {
   const loaded = await loadSigner(token);
   if (!loaded.ok) return loaded.error;
   const { signer, envelope } = loaded;
+  if (envelope.status === "deleted") {
+    return jsonError(410, "Envelope has been deleted", "deleted");
+  }
   if (!signer.signedAt && !signer.declinedAt) {
     return jsonError(409, "Envelope is not completed", "not_completed");
   }
@@ -480,15 +514,21 @@ export async function getCeremonyPdf(token: string): Promise<Response> {
   }
   const store = requireStore();
   if (!store) return storeUnavailableResponse();
-  const bytes = await store.get(objectKey(envelope.id, "sealed"));
+  const kind =
+    new URL(req.url).searchParams.get("kind") === "certificate"
+      ? "certificate"
+      : "sealed";
+  const bytes = await store.get(objectKey(envelope.id, kind));
   if (!bytes) {
     return jsonError(410, "Envelope has been deleted", "deleted");
   }
-  return new Response(bytes, {
+  const filename =
+    kind === "certificate" ? `${envelope.id}-certificate.pdf` : `${envelope.id}.pdf`;
+  return new Response(Buffer.from(bytes), {
     status: 200,
     headers: {
       "content-type": "application/pdf",
-      "content-disposition": `attachment; filename="${envelope.id}.pdf"`,
+      "content-disposition": `attachment; filename="${filename}"`,
     },
   });
 }
@@ -548,12 +588,21 @@ export async function postDecline(
     ua,
     payload: reason ? { reason } : undefined,
   });
-  await mailer.sendMail({
-    to: envelope.senderEmail,
-    subject: `${signer.name} declined to sign ${envelope.title}`,
-    text: reason
-      ? `${signer.name} declined to sign "${envelope.title}". Reason: ${reason}`
-      : `${signer.name} declined to sign "${envelope.title}".`,
-  });
+  try {
+    await mailer.sendMail({
+      to: envelope.senderEmail,
+      subject: `${signer.name} declined to sign ${envelope.title}`,
+      text: reason
+        ? `${signer.name} declined to sign "${envelope.title}". Reason: ${reason}`
+        : `${signer.name} declined to sign "${envelope.title}".`,
+    });
+  } catch (err) {
+    await logEvent(db, {
+      envelopeId: envelope.id,
+      signerId: signer.id,
+      event: "emailed_failed",
+      payload: { error: err instanceof Error ? err.message : "mail_failed" },
+    });
+  }
   return Response.json({ status: "declined" });
 }
