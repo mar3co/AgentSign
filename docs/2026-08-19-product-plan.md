@@ -1,10 +1,11 @@
 # Sign — Product Plan
 
-**Working name:** Sign (final name TBD — see [name.md](./name.md))  
+**Name:** AgentSign (one word). See [name.md](./name.md).  
 **Date:** 2026-08-19  
-**Updated:** 2026-08-20  
-**Status:** Agreed direction. Auth, money, packaging, and cloud stack locked. No code.  
-**Repo:** `MAR3/sign`  
+**Updated:** 2026-08-21  
+**Status:** Agreed direction. v1 + v1.1 implemented locally. v1.2 agent parties spec locked.  
+**Repo:** [yohanmarshall/AgentSign](https://github.com/yohanmarshall/AgentSign)  
+**Host:** agentsign.co (Cloudflare). agentsign.net → 301.  
 **Not:** a suite SKU, an industry fork, or a private cloud for one company. This is its own product.
 
 ---
