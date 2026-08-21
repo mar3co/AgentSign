@@ -20,6 +20,9 @@ export default function EnvelopesPage() {
           >
             Branding
           </a>
+          <a className="text-sm text-muted-foreground underline" href="/team">
+            Team
+          </a>
           <a className="text-sm text-muted-foreground underline" href="/">
             Send a PDF
           </a>

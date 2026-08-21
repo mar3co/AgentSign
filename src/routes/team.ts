@@ -57,10 +57,14 @@ async function requireEntitledOwner(req: Request) {
   return gate;
 }
 
-function teamJson(cabinet: Awaited<ReturnType<typeof cabinetForUser>>) {
+function teamJson(
+  cabinet: Awaited<ReturnType<typeof cabinetForUser>>,
+  callerId: string,
+) {
   return {
     owner_email: cabinet.ownerEmail,
     entitled: cabinet.entitled,
+    role: callerId === cabinet.ownerUserId ? ("owner" as const) : ("member" as const),
     members: [
       {
         id: cabinet.ownerUserId,
@@ -101,7 +105,7 @@ async function sendInviteMail(email: string, rawToken: string): Promise<void> {
 export async function getTeam(req: Request): Promise<Response> {
   const gate = await requireTeamCaller(req);
   if (!gate.ok) return gate.response;
-  return Response.json(teamJson(gate.cabinet));
+  return Response.json(teamJson(gate.cabinet, gate.caller.user.id));
 }
 
 export async function inviteMember(req: Request): Promise<Response> {

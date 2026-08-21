@@ -8,7 +8,7 @@ import { GET as getAuthCallback } from "../../app/auth/callback/route.js";
 import { POST as postLogin } from "../../app/login/session/route.js";
 import { POST as postConsent } from "../../app/s/[token]/consent/route.js";
 import { POST as postSign } from "../../app/s/[token]/sign/route.js";
-import { POST as postAccept } from "../../app/team/accept/route.js";
+import { POST as postAccept } from "../../app/internal/team/accept/route.js";
 import { GET as listEnvelopes, POST as postEnvelope } from "../../app/v1/envelopes/route.js";
 import {
   DELETE as deleteEnvelope,

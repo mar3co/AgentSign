@@ -1,4 +1,4 @@
-import { acceptInvite } from "../../../src/routes/team.js";
+import { acceptInvite } from "../../../../src/routes/team.js";
 
 export const runtime = "nodejs";
 
