@@ -118,7 +118,7 @@ export const openapi = {
         type: "http",
         scheme: "bearer",
         description:
-          "sign_tmp_ (envelope-scoped) or sign_live_ (user-minted). Optional on POST /v1/envelopes. Branding, packets, and team require a session cookie or sign_live_ (never sign_tmp_).",
+          "sign_live_ (user-minted) or sign_tmp_ (envelope-scoped). POST /v1/envelopes: omit Authorization for a sender OTP one-off, or send sign_live_ to skip OTP. sign_tmp_ cannot create or list envelopes; it can GET/DELETE/PDF that envelope. List, branding, packets, and team need a session cookie or sign_live_ (never sign_tmp_).",
       },
     },
     schemas: {

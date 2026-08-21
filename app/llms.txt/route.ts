@@ -6,7 +6,7 @@ Sign is a signing primitive. Human always signs. Bearer keys authenticate the ca
 
 ## MCP tools
 
-- send — POST /v1/envelopes. PDF bytes (base64), not a public pdf_url. Optional Bearer tmp or live key. Without a key, send starts an OTP one-off; check sender email.
+- send — POST /v1/envelopes. PDF bytes (base64), not a public pdf_url. Optional Bearer sign_live_ key. Without a key, send starts an OTP one-off; check sender email. sign_tmp_ cannot send or list.
 - status — GET /v1/envelopes/{id}. Requires a tmp or live key.
 - download — GET /v1/envelopes/{id}.pdf. Requires a tmp or live key. Returns the sealed PDF after the human ceremony.
 

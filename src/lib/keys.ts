@@ -59,10 +59,14 @@ export async function claimSends(
   userId: string,
   email: string,
 ): Promise<void> {
-  await db
+  const claimed = await db
     .update(envelopes)
     .set({ userId })
-    .where(and(eq(envelopes.senderEmail, normEmail(email)), isNull(envelopes.userId)));
+    .where(and(eq(envelopes.senderEmail, normEmail(email)), isNull(envelopes.userId)))
+    .returning();
+  if (claimed.length === 0) return;
+  const cabinet = await cabinetForUser(db, userId);
+  if (cabinet.entitled) await extendKeep(db, userId);
 }
 
 /** Pro keep: completed envelopes this user sent or signed. Stripe webhook (Task 15). */

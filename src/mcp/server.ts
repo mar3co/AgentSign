@@ -81,7 +81,7 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
     {
       title: "Send envelope",
       description:
-        "Create and send a signing envelope (POST /v1/envelopes). Pass PDF bytes as base64, not a public pdf_url. Optional Bearer tmp or live key. Without a key, starts a sender OTP one-off — tell the operator to check sender email. Human always signs.",
+        "Create and send a signing envelope (POST /v1/envelopes). Pass PDF bytes as base64, not a public pdf_url. Optional Bearer sign_live_ key. Without a key, starts a sender OTP one-off — tell the operator to check sender email. sign_tmp_ cannot send or list. Human always signs.",
       inputSchema: {
         title: z.string().min(1),
         sender_email: z.string().min(1),

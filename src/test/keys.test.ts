@@ -559,4 +559,177 @@ describe("live keys", () => {
     );
     expect(shopPdf.status).toBe(200);
   });
+
+  it("OTP verify binds a matching Pro account so complete uses Pro keep", { timeout: 60_000 }, async () => {
+    const db = await createTestDb();
+    const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+    const sent: { to: string; subject: string; text: string }[] = [];
+    const frozen = new Date("2026-08-20T12:00:00Z");
+    const userId = randomUUID();
+    setDeps({
+      db,
+      store,
+      mailer: { sendMail: async (m) => { sent.push(m); } },
+      now: () => frozen,
+      p12: makeDevP12("test"),
+      p12Passphrase: "test",
+    });
+    await db.insert(accounts).values({
+      userId,
+      email: "shop@example.com",
+      plan: "pro",
+    });
+    const created = await postEnvelope(
+      new Request("http://sign.test/v1/envelopes", {
+        method: "POST",
+        body: await envelopeForm("shop@example.com"),
+      }),
+    );
+    const { id } = (await created.json()) as { id: string };
+    const code = sent[0]!.text.match(/\b(\d{6})\b/)![1]!;
+    const verify = await postOtp(
+      new Request(`http://sign.test/v1/envelopes/${id}/otp`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code }),
+      }),
+      { params: Promise.resolve({ id }) },
+    );
+    expect(verify.status).toBe(200);
+    const [bound] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    expect(bound!.userId).toBe(userId);
+
+    const done = (await verify.json()) as {
+      signers: { sign_url: string | null }[];
+    };
+    const token = done.signers[0]!.sign_url!.replace(/^\/s\//, "");
+    expect(
+      (await postConsent(
+        new Request(`http://sign.test/s/${token}/consent`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ consent: true }),
+        }),
+        { params: Promise.resolve({ token }) },
+      )).status,
+    ).toBe(200);
+    expect(
+      (await postSign(
+        new Request(`http://sign.test/s/${token}/sign`, {
+          method: "POST",
+          body: (() => {
+            const body = new FormData();
+            body.set("png", new Blob([png], { type: "image/png" }), "sig.png");
+            return body;
+          })(),
+        }),
+        { params: Promise.resolve({ token }) },
+      )).status,
+    ).toBe(200);
+    const [completed] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    expect(completed!.shredAt.getTime()).toBe(frozen.getTime() + 365 * 86_400_000);
+  });
+
+  it("Pro login claims a completed one-off and extends keep; live-key list claims later sends", { timeout: 60_000 }, async () => {
+    const db = await createTestDb();
+    const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+    const sent: { to: string; subject: string; text: string }[] = [];
+    const frozen = new Date("2026-08-20T12:00:00Z");
+    const { adapter, userFor } = createFakeAuth();
+    setDeps({
+      db,
+      store,
+      auth: adapter,
+      mailer: { sendMail: async (m) => { sent.push(m); } },
+      now: () => frozen,
+      p12: makeDevP12("test"),
+      p12Passphrase: "test",
+    });
+
+    const created = await postEnvelope(
+      new Request("http://sign.test/v1/envelopes", {
+        method: "POST",
+        body: await envelopeForm("shop@example.com"),
+      }),
+    );
+    const { id } = (await created.json()) as { id: string };
+    const code = sent[0]!.text.match(/\b(\d{6})\b/)![1]!;
+    const verify = await postOtp(
+      new Request(`http://sign.test/v1/envelopes/${id}/otp`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code }),
+      }),
+      { params: Promise.resolve({ id }) },
+    );
+    const done = (await verify.json()) as {
+      signers: { sign_url: string | null }[];
+    };
+    const token = done.signers[0]!.sign_url!.replace(/^\/s\//, "");
+    expect(
+      (await postConsent(
+        new Request(`http://sign.test/s/${token}/consent`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ consent: true }),
+        }),
+        { params: Promise.resolve({ token }) },
+      )).status,
+    ).toBe(200);
+    expect(
+      (await postSign(
+        new Request(`http://sign.test/s/${token}/sign`, {
+          method: "POST",
+          body: (() => {
+            const body = new FormData();
+            body.set("png", new Blob([png], { type: "image/png" }), "sig.png");
+            return body;
+          })(),
+        }),
+        { params: Promise.resolve({ token }) },
+      )).status,
+    ).toBe(200);
+    const [before] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    expect(before!.userId).toBeNull();
+    expect(before!.shredAt.getTime()).toBe(frozen.getTime() + 7 * 86_400_000);
+
+    const owner = userFor("shop@example.com");
+    await db.insert(accounts).values({
+      userId: owner.id,
+      email: owner.email,
+      plan: "pro",
+    });
+    const cookie = await magicCookie("shop@example.com");
+    const [kept] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    expect(kept!.userId).toBe(owner.id);
+    expect(kept!.shredAt.getTime()).toBe(frozen.getTime() + 365 * 86_400_000);
+
+    const minted = await postKeys(
+      new Request("http://sign.test/v1/keys", {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ expires_in_days: 30 }),
+      }),
+    );
+    expect(minted.status).toBe(201);
+    const keyJson = (await minted.json()) as { key: string };
+    const extra = await postEnvelope(
+      new Request("http://sign.test/v1/envelopes", {
+        method: "POST",
+        body: await envelopeForm("shop@example.com"),
+      }),
+    );
+    const extraJson = (await extra.json()) as { id: string };
+    const listed = await listEnvelopes(
+      new Request("http://sign.test/v1/envelopes", {
+        headers: { authorization: `Bearer ${keyJson.key}` },
+      }),
+    );
+    expect(listed.status).toBe(200);
+    const [claimedExtra] = await db
+      .select()
+      .from(envelopes)
+      .where(eq(envelopes.id, extraJson.id));
+    expect(claimedExtra!.userId).toBe(owner.id);
+  });
 });

@@ -621,6 +621,7 @@ export async function listEnvelopes(req: Request): Promise<Response> {
       .from(accounts)
       .where(eq(accounts.userId, key.userId));
     email = account?.email?.trim().toLowerCase() ?? null;
+    if (email) await claimSends(db, userId, email);
   } else {
     const cookie = req.headers.get("cookie");
     if (!cookie) return jsonError(401, "Unauthorized", "unauthorized");

@@ -1,12 +1,14 @@
-import { eq } from "drizzle-orm";
+import { and, count, eq, gte, ne } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "../db/client.js";
 import {
+  accounts,
   apiKeys,
   envelopes,
   otpChallenges,
   signers as signersTable,
 } from "../db/schema.js";
+import { getEnv } from "../env.js";
 import { logEvent } from "../lib/audit.js";
 import { loadBrand } from "../lib/branding.js";
 import { getDeps } from "../lib/deps.js";
@@ -101,13 +103,39 @@ export async function verifyEnvelopeOtp(
     return jsonError(400, "Invalid code", "invalid_otp");
   }
 
+  const env = getEnv();
+  const limit = Number(env.FREE_SEND_LIMIT);
+  const windowDays = Number(env.FREE_SEND_WINDOW_DAYS);
+  const windowStart = new Date(at.getTime() - windowDays * 86_400_000);
+  const [cap] = await db
+    .select({ n: count() })
+    .from(envelopes)
+    .where(
+      and(
+        eq(envelopes.senderEmail, envelope.senderEmail),
+        gte(envelopes.createdAt, windowStart),
+        ne(envelopes.status, "pending_sender"),
+      ),
+    );
+  if (Number(cap?.n ?? 0) >= limit) {
+    return jsonError(429, "Send limit reached. Try again later.", "send_limit");
+  }
+
+  const [owner] = await db
+    .select()
+    .from(accounts)
+    .where(eq(accounts.email, envelope.senderEmail));
+
   await db
     .update(otpChallenges)
     .set({ consumedAt: at })
     .where(eq(otpChallenges.id, challenge.id));
   await db
     .update(envelopes)
-    .set({ status: "pending" })
+    .set({
+      status: "pending",
+      ...(owner ? { userId: owner.userId } : {}),
+    })
     .where(eq(envelopes.id, envelope.id));
 
   const signerRows = await db
@@ -145,7 +173,11 @@ export async function verifyEnvelopeOtp(
   await logEvent(db, { envelopeId: envelope.id, event: "email_verified" });
 
   const mailer = requireMailer();
-  const brand = await loadBrand(db, envelope.userId, getDeps().store);
+  const brand = await loadBrand(
+    db,
+    owner?.userId ?? envelope.userId,
+    getDeps().store,
+  );
   const mailBrand = {
     displayName: brand.displayName,
     hasLogo: Boolean(brand.logoBytes),

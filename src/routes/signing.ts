@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "../db/client.js";
 import {
@@ -377,15 +377,21 @@ export async function postSign(req: Request, token: string): Promise<Response> {
     const shredAt = new Date(at.getTime() + keepDays * 86_400_000);
     const sealedPath = objectKey(envelope.id, "sealed");
     const certPath = objectKey(envelope.id, "certificate");
-    await store.put(sealedPath, result.sealed);
-    await store.put(certPath, result.certificate);
 
     try {
       await db.transaction(async (tx) => {
-        await tx
+        const [claimed] = await tx
           .update(signersTable)
           .set({ signedAt: at, ip, ua })
-          .where(eq(signersTable.id, signer.id));
+          .where(
+            and(
+              eq(signersTable.id, signer.id),
+              isNull(signersTable.signedAt),
+              isNull(signersTable.declinedAt),
+            ),
+          )
+          .returning();
+        if (!claimed) throw new Error("complete_conflict");
         const [updated] = await tx
           .update(envelopes)
           .set({ status: "completed", sha256: result.sha256, shredAt })
@@ -409,6 +415,32 @@ export async function postSign(req: Request, token: string): Promise<Response> {
       });
     } catch {
       return jsonError(409, "Envelope is not awaiting signature", "invalid_state");
+    }
+    try {
+      await store.put(sealedPath, result.sealed);
+      await store.put(certPath, result.certificate);
+    } catch {
+      await db
+        .update(envelopes)
+        .set({
+          status: "pending",
+          sha256: null,
+          shredAt: envelope.shredAt,
+        })
+        .where(eq(envelopes.id, envelope.id));
+      await db
+        .delete(documents)
+        .where(
+          and(
+            eq(documents.envelopeId, envelope.id),
+            inArray(documents.kind, ["sealed", "certificate"]),
+          ),
+        );
+      await db
+        .update(signersTable)
+        .set({ signedAt: null })
+        .where(eq(signersTable.id, signer.id));
+      return jsonError(500, "Failed to complete envelope", "complete_failed");
     }
     await logEvent(db, {
       envelopeId: envelope.id,
@@ -497,62 +529,80 @@ export async function postSign(req: Request, token: string): Promise<Response> {
 
   await store.put(appearanceKey(envelope.id, signer.id), png);
 
+  const [claimed] = await db
+    .update(signersTable)
+    .set({ signedAt: at, ip, ua })
+    .where(
+      and(
+        eq(signersTable.id, signer.id),
+        isNull(signersTable.signedAt),
+        isNull(signersTable.declinedAt),
+      ),
+    )
+    .returning();
+  if (!claimed) {
+    return jsonError(409, "Envelope is not awaiting signature", "invalid_state");
+  }
+
   const next = allSigners.find((s) => s.signingOrder === signer.signingOrder + 1);
   // First mint + invite only; never rotate a token that was already sent.
   if (next && !next.signedAt && !next.declinedAt && !next.sentAt) {
     const mailer = requireMailer();
     const token = newSigningToken();
     const signUrl = `/s/${token.raw}`;
-    await db
+    const [slot] = await db
       .update(signersTable)
       .set({ tokenHash: token.hash })
-      .where(eq(signersTable.id, next.id));
-    const brand = await loadBrand(db, envelope.userId, store);
-    const invite = inviteEmail({
-      signUrl,
-      senderEmail: envelope.senderEmail,
-      title: envelope.title,
-      expiresAt: envelope.expiresAt,
-      brand: {
-        displayName: brand.displayName,
-        hasLogo: Boolean(brand.logoBytes),
-      },
-    });
-    try {
-      await mailer.sendMail({
-        to: next.email,
-        ...invite,
-        attachments: brandMailAttachments(brand.logoBytes),
+      .where(and(eq(signersTable.id, next.id), isNull(signersTable.sentAt)))
+      .returning();
+    if (slot) {
+      const brand = await loadBrand(db, envelope.userId, store);
+      const invite = inviteEmail({
+        signUrl,
+        senderEmail: envelope.senderEmail,
+        title: envelope.title,
+        expiresAt: envelope.expiresAt,
+        brand: {
+          displayName: brand.displayName,
+          hasLogo: Boolean(brand.logoBytes),
+        },
       });
-      await db
-        .update(signersTable)
-        .set({ sentAt: at })
-        .where(eq(signersTable.id, next.id));
-      await logEvent(db, {
-        envelopeId: envelope.id,
-        signerId: next.id,
-        event: "sent",
-      });
-      await logEvent(db, {
-        envelopeId: envelope.id,
-        signerId: next.id,
-        event: "emailed",
-      });
-    } catch (err) {
-      await logEvent(db, {
-        envelopeId: envelope.id,
-        signerId: next.id,
-        event: "emailed_failed",
-        payload: { error: err instanceof Error ? err.message : "mail_failed" },
-      });
-      return jsonError(503, "Could not email the next signer", "invite_failed");
+      try {
+        await mailer.sendMail({
+          to: next.email,
+          ...invite,
+          attachments: brandMailAttachments(brand.logoBytes),
+        });
+        await db
+          .update(signersTable)
+          .set({ sentAt: at })
+          .where(eq(signersTable.id, next.id));
+        await logEvent(db, {
+          envelopeId: envelope.id,
+          signerId: next.id,
+          event: "sent",
+        });
+        await logEvent(db, {
+          envelopeId: envelope.id,
+          signerId: next.id,
+          event: "emailed",
+        });
+      } catch (err) {
+        await db
+          .update(signersTable)
+          .set({ signedAt: null, ip: signer.ip, ua: signer.ua })
+          .where(eq(signersTable.id, signer.id));
+        await logEvent(db, {
+          envelopeId: envelope.id,
+          signerId: next.id,
+          event: "emailed_failed",
+          payload: { error: err instanceof Error ? err.message : "mail_failed" },
+        });
+        return jsonError(503, "Could not email the next signer", "invite_failed");
+      }
     }
   }
 
-  await db
-    .update(signersTable)
-    .set({ signedAt: at, ip, ua })
-    .where(eq(signersTable.id, signer.id));
   await logEvent(db, {
     envelopeId: envelope.id,
     signerId: signer.id,
@@ -637,14 +687,30 @@ export async function postDecline(
 
   const ip = clientIp(req);
   const ua = req.headers.get("user-agent") ?? undefined;
-  await db
-    .update(signersTable)
-    .set({ declinedAt: at })
-    .where(eq(signersTable.id, signer.id));
-  await db
-    .update(envelopes)
-    .set({ status: "declined" })
-    .where(eq(envelopes.id, envelope.id));
+  try {
+    await db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(signersTable)
+        .set({ declinedAt: at, ip, ua })
+        .where(
+          and(
+            eq(signersTable.id, signer.id),
+            isNull(signersTable.signedAt),
+            isNull(signersTable.declinedAt),
+          ),
+        )
+        .returning();
+      if (!row) throw new Error("decline_conflict");
+      const [envRow] = await tx
+        .update(envelopes)
+        .set({ status: "declined" })
+        .where(and(eq(envelopes.id, envelope.id), eq(envelopes.status, "pending")))
+        .returning();
+      if (!envRow) throw new Error("decline_conflict");
+    });
+  } catch {
+    return jsonError(409, "Envelope is not awaiting signature", "invalid_state");
+  }
   await logEvent(db, {
     envelopeId: envelope.id,
     signerId: signer.id,

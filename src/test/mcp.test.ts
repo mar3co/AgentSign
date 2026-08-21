@@ -81,6 +81,12 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
     expect(text).toMatch(/send/);
     expect(text).toMatch(/There is no sign/);
     expect(text).toMatch(/\/v1\/packets/);
+    expect(text).not.toMatch(/Optional Bearer tmp or live key/);
+    expect(text).toMatch(/sign_tmp_/);
+    const bearer = openapi.components.securitySchemes.bearerAuth.description;
+    expect(bearer).not.toMatch(/Optional on POST \/v1\/envelopes/);
+    expect(bearer).toMatch(/sign_tmp_/);
+    expect(bearer.toLowerCase()).toMatch(/list/);
   });
 
   it("POST /mcp Streamable HTTP uses protocolVersion 2025-11-25 and lists three tools", async () => {

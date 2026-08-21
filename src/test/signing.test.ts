@@ -18,6 +18,7 @@ import { SigningCeremony } from "../../app/s/[token]/signing-ceremony.js";
 import { PDFDocument } from "pdf-lib";
 import SigningPage from "../../app/s/[token]/page.js";
 import { makeDevP12 } from "../lib/pdf/devP12.js";
+import { sha256Hex } from "../lib/hash.js";
 import { newSigningToken } from "../lib/tokens.js";
 import { minimalPdf } from "./pdf.js";
 import { mkdtemp } from "node:fs/promises";
@@ -635,5 +636,133 @@ describe("signing ceremony", () => {
     expect(rest.status).toBe(200);
     const bytes = Buffer.from(await rest.arrayBuffer());
     expect(bytes.includes(Buffer.from("Certificate of completion"))).toBe(true);
+  });
+
+  it("second last-signer Finish does not overwrite the committed sealed PDF", { timeout: 60_000 }, async () => {
+    const { db, store, id, token } = await startVerified();
+    setDeps({ p12: makeDevP12("test"), p12Passphrase: "test" });
+    expect(
+      (await postConsent(consentRequest(token), { params: Promise.resolve({ token }) })).status,
+    ).toBe(200);
+
+    const innerGet = store.get.bind(store);
+    let nested = false;
+    let nestedRes: Response | undefined;
+    setDeps({
+      store: {
+        put: store.put.bind(store),
+        delete: store.delete.bind(store),
+        async get(key: string) {
+          const val = await innerGet(key);
+          if (key === objectKey(id, "original") && !nested) {
+            nested = true;
+            nestedRes = await postSign(signRequest(token), {
+              params: Promise.resolve({ token }),
+            });
+          }
+          return val;
+        },
+      },
+    });
+
+    const first = await postSign(signRequest(token), {
+      params: Promise.resolve({ token }),
+    });
+    expect(nestedRes).toBeDefined();
+    const statuses = [first.status, nestedRes!.status].sort((a, b) => a - b);
+    expect(statuses).toEqual([200, 409]);
+    const [env] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    expect(env!.status).toBe("completed");
+    const sealed = await innerGet(objectKey(id, "sealed"));
+    expect(sealed).not.toBeNull();
+    expect(sha256Hex(sealed!)).toBe(env!.sha256);
+  });
+
+  it("decline after a concurrent complete leaves the envelope completed", { timeout: 60_000 }, async () => {
+    const { db, store, id, token } = await startVerified();
+    setDeps({ p12: makeDevP12("test"), p12Passphrase: "test" });
+    expect(
+      (await postConsent(consentRequest(token), { params: Promise.resolve({ token }) })).status,
+    ).toBe(200);
+
+    let release!: () => void;
+    const held = new Promise<void>((r) => {
+      release = r;
+    });
+    const body = new ReadableStream({
+      async pull(controller) {
+        await held;
+        controller.enqueue(new TextEncoder().encode("{}"));
+        controller.close();
+      },
+    });
+    const declineP = postDecline(
+      new Request(`http://sign.test/s/${token}/decline`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+        duplex: "half",
+      } as RequestInit),
+      { params: Promise.resolve({ token }) },
+    );
+    await new Promise((r) => setTimeout(r, 50));
+    const signed = await postSign(signRequest(token), {
+      params: Promise.resolve({ token }),
+    });
+    expect(signed.status).toBe(200);
+    release();
+    const decline = await declineP;
+    expect(decline.status).toBe(409);
+    const [env] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    expect(env!.status).toBe("completed");
+    const sealed = await store.get(objectKey(id, "sealed"));
+    expect(sealed).not.toBeNull();
+    expect(sha256Hex(sealed!)).toBe(env!.sha256);
+  });
+
+  it("concurrent first-signer Finish mails the next signer once", { timeout: 60_000 }, async () => {
+    const { db, store, id, token, sent } = await startVerified({
+      signers: [
+        { name: "Jane", email: "jane@example.com" },
+        { name: "Bob", email: "bob@example.com" },
+      ],
+    });
+    expect(
+      (await postConsent(consentRequest(token), { params: Promise.resolve({ token }) })).status,
+    ).toBe(200);
+
+    const innerPut = store.put.bind(store);
+    let nested = false;
+    let nestedRes: Response | undefined;
+    setDeps({
+      store: {
+        get: store.get.bind(store),
+        delete: store.delete.bind(store),
+        async put(key: string, bytes: Uint8Array) {
+          if (key.includes("/appearance/") && !nested) {
+            nested = true;
+            await innerPut(key, bytes);
+            nestedRes = await postSign(signRequest(token), {
+              params: Promise.resolve({ token }),
+            });
+            return;
+          }
+          return innerPut(key, bytes);
+        },
+      },
+    });
+
+    const first = await postSign(signRequest(token), {
+      params: Promise.resolve({ token }),
+    });
+    expect(nestedRes).toBeDefined();
+    const statuses = [first.status, nestedRes!.status].sort((a, b) => a - b);
+    expect(statuses).toEqual([200, 409]);
+    const bobInvites = sent.filter((m) => m.to === "bob@example.com");
+    expect(bobInvites).toHaveLength(1);
+    const rows = await db.select().from(signersTable).where(eq(signersTable.envelopeId, id));
+    rows.sort((a, b) => a.signingOrder - b.signingOrder);
+    expect(rows[0]!.signedAt).not.toBeNull();
+    expect(rows[1]!.sentAt).not.toBeNull();
   });
 });

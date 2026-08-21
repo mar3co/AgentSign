@@ -428,4 +428,61 @@ describe("POST /v1/envelopes", () => {
     expect(sent.some((m) => /please sign/i.test(m.subject))).toBe(false);
     expect(sent.some((m) => /verification code/i.test(m.subject))).toBe(true);
   });
+
+  it("OTP verify is 429 when 20 sends in the window already exist", { timeout: 60_000 }, async () => {
+    const db = await createTestDb();
+    const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+    const sent: { to: string; subject: string; text: string }[] = [];
+    const frozen = new Date("2026-08-20T12:00:00Z");
+    setDeps({
+      db,
+      store,
+      mailer: { sendMail: async (m) => { sent.push(m); } },
+      now: () => frozen,
+    });
+    const pdf = await minimalPdf();
+    async function postOnce() {
+      const body = new FormData();
+      body.set("title", "Repair authorization");
+      body.set("sender_email", "otp-cap@example.com");
+      body.set("signers", JSON.stringify([{ name: "Jane", email: "jane@example.com" }]));
+      body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
+      return postEnvelope(new Request("http://sign.test/v1/envelopes", { method: "POST", body }));
+    }
+    const ids: string[] = [];
+    for (let i = 0; i < 21; i++) {
+      const res = await postOnce();
+      expect(res.status).toBe(201);
+      const { id } = (await res.json()) as { id: string };
+      ids.push(id);
+    }
+    const codes = sent
+      .filter((m) => m.to === "otp-cap@example.com")
+      .map((m) => m.text.match(/\b(\d{6})\b/)![1]!);
+    expect(codes).toHaveLength(21);
+    for (let i = 0; i < 20; i++) {
+      const verify = await postOtp(
+        new Request(`http://sign.test/v1/envelopes/${ids[i]}/otp`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ code: codes[i] }),
+        }),
+        { params: Promise.resolve({ id: ids[i]! }) },
+      );
+      expect(verify.status).toBe(200);
+    }
+    const last = await postOtp(
+      new Request(`http://sign.test/v1/envelopes/${ids[20]}/otp`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code: codes[20] }),
+      }),
+      { params: Promise.resolve({ id: ids[20]! }) },
+    );
+    expect(last.status).toBe(429);
+    const json = (await last.json()) as { code: string };
+    expect(json.code).toBe("send_limit");
+    const [row] = await db.select().from(envelopes).where(eq(envelopes.id, ids[20]!));
+    expect(row!.status).toBe("pending_sender");
+  });
 });

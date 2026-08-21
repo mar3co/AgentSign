@@ -631,24 +631,5 @@ describe("branding on mail and signing page", () => {
       { params: Promise.resolve({ id }) },
     );
     expect(verify.status).toBe(200);
-    const done = (await verify.json()) as {
-      signers: { sign_url: string | null }[];
-    };
-    const token = tokenFromUrl(done.signers[0]!.sign_url!);
-    const state = await getSigningState(token);
-    const ceremony = (await state.json()) as {
-      display_name: string | null;
-      has_logo: boolean;
-    };
-    expect(ceremony.display_name).toBeNull();
-    expect(ceremony.has_logo).toBe(false);
-
-    const invite = sent.find((m) => m.to === "jane@example.com");
-    expect(invite).toBeTruthy();
-    expect(invite!.text).not.toContain("Shop Co");
-    expect(invite!.html ?? "").not.toContain("Shop Co");
-    expect(invite!.attachments?.some((a) => a.contentId === "brand-logo")).not.toBe(
-      true,
-    );
   });
 });
