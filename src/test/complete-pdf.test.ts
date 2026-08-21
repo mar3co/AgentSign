@@ -95,6 +95,60 @@ describe("completeEnvelopePdf", () => {
     expect(latin1).toContain("Jane");
     expect(latin1).toContain("Bob");
   });
+
+  it("seals an agent appearance without a PNG", async () => {
+    const p12 = makeDevP12("test");
+    const original = await minimalPdf();
+    const at = new Date("2026-08-21T12:00:00.000Z");
+    const result = await completeEnvelopePdf({
+      original,
+      appearances: [
+        {
+          kind: "agent",
+          name: "Grok Legal",
+          email: "shop@example.com",
+          signedAt: at,
+        },
+      ],
+      p12,
+      passphrase: "test",
+      meta: {
+        envelopeId: "00000000-0000-0000-0000-000000000003",
+        title: "Repair authorization",
+        senderEmail: "shop@example.com",
+        consentText: "I agree to sign this document electronically.",
+        signers: [
+          {
+            name: "Grok Legal",
+            email: "shop@example.com",
+            kind: "agent",
+            sentAt: null,
+            openedAt: null,
+            consentedAt: null,
+            signedAt: null,
+            declinedAt: null,
+            attestedAt: at,
+            attestMethod: "agent_key",
+            attestLabel: "agent_key:sign_agent_xxxx",
+            agentSlug: "grok-legal",
+            ip: null,
+            ua: null,
+          },
+        ],
+      },
+    });
+    const latin1 = Buffer.from(result.sealed).toString("latin1");
+    expect(latin1).toContain(
+      "Attested by Grok Legal for shop@example.com at 2026-08-21T12:00:00.000Z. Not an electronic signature.",
+    );
+    expect(latin1).toContain("No human electronic signature. Agent attestations only.");
+    const cert = Buffer.from(result.certificate).toString("latin1");
+    expect(cert).toContain("human_signatures: 0");
+    expect(cert).toContain("agent_attestations: 1");
+    expect(cert).toContain("No human electronic signature. Agent attestations only.");
+    expect(cert).not.toContain("Consent:");
+    expect(cert).not.toContain("Sent with AgentSign");
+  });
 });
 
 describe("buildCertificate", () => {

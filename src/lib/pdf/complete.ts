@@ -35,9 +35,24 @@ export async function completeEnvelopePdf({
   if (pages.length === 0) {
     throw new Error("At least one signature appearance is required");
   }
+  const humanSignatures = pages.filter(
+    (p) => (p.kind ?? "human") !== "agent",
+  ).length;
+  const agentAttestations = pages.filter((p) => p.kind === "agent").length;
+  const banner =
+    humanSignatures === 0
+      ? "No human electronic signature. Agent attestations only."
+      : undefined;
   let withPage = original;
   for (const next of pages) {
-    withPage = await appendSignaturePage(withPage, next);
+    const stamped: SignatureAppearance = {
+      ...next,
+      envelopeId: next.envelopeId ?? meta.envelopeId,
+      banner: next.banner ?? banner,
+      humanSignatures: next.humanSignatures ?? humanSignatures,
+      agentAttestations: next.agentAttestations ?? agentAttestations,
+    };
+    withPage = await appendSignaturePage(withPage, stamped);
   }
   const sealed = await sealPdf(withPage, p12, passphrase);
   const sha256 = sha256Hex(sealed);

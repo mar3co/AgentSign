@@ -25,6 +25,11 @@ export type CertificateSigner = {
   declinedAt: Date | null;
   ip: string | null;
   ua: string | null;
+  kind?: "human" | "agent";
+  attestedAt?: Date | null;
+  attestMethod?: string | null;
+  attestLabel?: string | null;
+  agentSlug?: string | null;
 };
 
 export type CertificateInfo = {
@@ -97,6 +102,17 @@ export async function buildCertificate(
   const line = 16;
   let y = height - margin;
 
+  const humanSignatures = info.signers.filter(
+    (s) => (s.kind ?? "human") !== "agent" && s.signedAt,
+  ).length;
+  const agentAttestations = info.signers.filter(
+    (s) => s.kind === "agent" && s.attestedAt,
+  ).length;
+  const anyHumanConsent = info.signers.some(
+    (s) => (s.kind ?? "human") !== "agent" && s.consentedAt,
+  );
+  const zeroHuman = humanSignatures === 0;
+
   const lines: string[] = [
     "Certificate of completion",
     "",
@@ -106,12 +122,32 @@ export async function buildCertificate(
     "",
     `SHA-256: ${info.sha256}`,
     "",
-    `Consent: ${info.consentText}`,
-    "All times UTC.",
+    `human_signatures: ${humanSignatures}`,
+    `agent_attestations: ${agentAttestations}`,
     "",
   ];
+  if (zeroHuman) {
+    lines.push(
+      "No human electronic signature. Agent attestations only.",
+      "",
+    );
+  }
+  if (anyHumanConsent) {
+    lines.push(`Consent: ${info.consentText}`);
+  }
+  lines.push("All times UTC.", "");
 
   for (const signer of info.signers) {
+    if (signer.kind === "agent") {
+      lines.push(
+        `Agent: ${signer.name} <${signer.email}>`,
+        `Agent slug: ${signer.agentSlug ?? "—"}`,
+        `Auth method: ${signer.attestLabel ?? signer.attestMethod ?? "—"}`,
+        `Attested: ${utc(signer.attestedAt ?? null)}`,
+        "",
+      );
+      continue;
+    }
     lines.push(
       `Signer: ${signer.name} <${signer.email}>`,
       `Auth method: Unique link sent to ${signer.email}`,

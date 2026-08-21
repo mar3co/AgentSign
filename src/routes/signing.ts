@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getDb } from "../db/client.js";
 import {
   accounts,
+  agents,
   documents,
   envelopes,
   signers as signersTable,
@@ -143,6 +144,7 @@ export async function buildCompleteAppearances(
     const isCurrent = s.id === currentId;
     if (s.kind === "agent") {
       appearances.push({
+        kind: "agent",
         name: s.name,
         email: s.email,
         signedAt: isCurrent ? at : (s.attestedAt ?? s.signedAt ?? at),
@@ -157,18 +159,11 @@ export async function buildCompleteAppearances(
         };
       }
       appearances.push({
+        kind: "human",
         png: currentPng,
         name: s.name,
         email: s.email,
         signedAt: at,
-      });
-      continue;
-    }
-    if (s.attestedAt && !s.signedAt) {
-      appearances.push({
-        name: s.name,
-        email: s.email,
-        signedAt: s.attestedAt,
       });
       continue;
     }
@@ -181,6 +176,7 @@ export async function buildCompleteAppearances(
       };
     }
     appearances.push({
+      kind: "human",
       png: prior,
       name: s.name,
       email: s.email,
@@ -226,42 +222,15 @@ export async function commitCompletedEnvelope(opts: {
     return jsonError(500, "Original document missing", "missing_original");
   }
 
-  let result: Awaited<ReturnType<typeof completeEnvelopePdf>>;
-  try {
-    const { p12, passphrase } = signingP12();
-    result = await completeEnvelopePdf({
-      original,
-      appearances,
-      p12,
-      passphrase,
-      meta: {
-        envelopeId: envelope.id,
-        title: envelope.title,
-        senderEmail: envelope.senderEmail,
-        consentText: CONSENT_TEXT,
-        signers: allSigners.map((s) => ({
-          name: s.name,
-          email: s.email,
-          sentAt: s.sentAt,
-          openedAt: s.openedAt,
-          consentedAt:
-            s.id === signer.id && claim === "sign" ? s.consentedAt ?? at : s.consentedAt,
-          signedAt: s.id === signer.id && claim === "sign" ? at : s.signedAt,
-          declinedAt: s.declinedAt,
-          ip: s.id === signer.id ? ip : s.ip,
-          ua: s.id === signer.id ? ua : s.ua,
-        })),
-      },
-    });
-  } catch {
-    return jsonError(500, "Failed to complete envelope", "complete_failed");
-  }
-
   let keepDays = Number(getEnv().FREE_KEEP_DAYS);
   const proDays = Number(getEnv().PRO_KEEP_DAYS);
+  let footer: string | undefined = "Sent with AgentSign";
   if (envelope.userId) {
     const cabinet = await cabinetForUser(db, envelope.userId);
-    if (cabinet.entitled) keepDays = proDays;
+    if (cabinet.entitled) {
+      keepDays = proDays;
+      footer = undefined;
+    }
   }
   const emails = new Set(
     allSigners.map((s) => s.email.trim().toLowerCase()).filter(Boolean),
@@ -272,6 +241,60 @@ export async function commitCompletedEnvelope(opts: {
       .from(accounts)
       .where(inArray(accounts.email, [...emails]));
     if (signerAccounts.some((a) => a.plan === "pro")) keepDays = proDays;
+  }
+
+  const agentIds = [
+    ...new Set(
+      allSigners
+        .map((s) => s.agentId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const slugByAgentId = new Map<string, string>();
+  if (agentIds.length > 0) {
+    const rows = await db.select().from(agents).where(inArray(agents.id, agentIds));
+    for (const row of rows) slugByAgentId.set(row.id, row.slug);
+  }
+
+  const pages = appearances.map((a) => (footer ? { ...a, footer } : a));
+
+  let result: Awaited<ReturnType<typeof completeEnvelopePdf>>;
+  try {
+    const { p12, passphrase } = signingP12();
+    result = await completeEnvelopePdf({
+      original,
+      appearances: pages,
+      p12,
+      passphrase,
+      meta: {
+        envelopeId: envelope.id,
+        title: envelope.title,
+        senderEmail: envelope.senderEmail,
+        consentText: CONSENT_TEXT,
+        signers: allSigners.map((s) => ({
+          name: s.name,
+          email: s.email,
+          kind: s.kind,
+          sentAt: s.sentAt,
+          openedAt: s.openedAt,
+          consentedAt:
+            s.id === signer.id && claim === "sign" ? s.consentedAt ?? at : s.consentedAt,
+          signedAt: s.id === signer.id && claim === "sign" ? at : s.signedAt,
+          declinedAt: s.declinedAt,
+          attestedAt:
+            s.id === signer.id && claim === "attest" ? at : s.attestedAt,
+          attestMethod:
+            s.id === signer.id && claim === "attest" ? attestMethod : s.attestMethod,
+          attestLabel:
+            s.id === signer.id && claim === "attest" ? attestLabel : s.attestLabel,
+          agentSlug: s.agentId ? slugByAgentId.get(s.agentId) ?? null : null,
+          ip: s.id === signer.id ? ip : s.ip,
+          ua: s.id === signer.id ? ua : s.ua,
+        })),
+      },
+    });
+  } catch {
+    return jsonError(500, "Failed to complete envelope", "complete_failed");
   }
   const shredAt = new Date(at.getTime() + keepDays * 86_400_000);
   const sealedPath = objectKey(envelope.id, "sealed");

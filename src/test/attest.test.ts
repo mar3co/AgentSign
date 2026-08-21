@@ -417,6 +417,13 @@ describe("POST /v1/envelopes/:id/attest", () => {
     expect(await store.get(`${id}/sealed.pdf`)).not.toBeNull();
     const docs = await db.select().from(documents).where(eq(documents.envelopeId, id));
     expect(docs.some((d) => d.kind === "sealed")).toBe(true);
+    const sealed = await store.get(`${id}/sealed.pdf`);
+    const cert = await store.get(`${id}/certificate.pdf`);
+    const banner = "No human electronic signature. Agent attestations only.";
+    expect(Buffer.from(sealed!).toString("latin1")).toContain(banner);
+    expect(Buffer.from(cert!).toString("latin1")).toContain(banner);
+    expect(Buffer.from(cert!).toString("latin1")).toContain("human_signatures: 0");
+    expect(Buffer.from(cert!).toString("latin1")).not.toContain("Sent with AgentSign");
   });
 
   it("concurrent double attest: one 200 one 409", { timeout: 60_000 }, async () => {
