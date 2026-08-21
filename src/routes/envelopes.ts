@@ -155,6 +155,110 @@ async function inviteFirstSigner(
   return signUrl;
 }
 
+export async function sendPreparedPdf(opts: {
+  title: string;
+  senderEmail: string;
+  userId: string;
+  signers: { name: string; email: string }[];
+  bytes: Uint8Array;
+  webhookUrl?: string | null;
+  webhookSecret?: string | null;
+}): Promise<Response> {
+  const db = requireDb();
+  const store = requireStore();
+  if (!store) return storeUnavailableResponse();
+  const mailer = requireMailer();
+  const at = now();
+  const env = getEnv();
+  const senderEmail = opts.senderEmail.trim().toLowerCase();
+  const limit = Number(env.FREE_SEND_LIMIT);
+  const windowDays = Number(env.FREE_SEND_WINDOW_DAYS);
+  const windowStart = new Date(at.getTime() - windowDays * 86_400_000);
+
+  const [account] = await db
+    .select()
+    .from(accounts)
+    .where(eq(accounts.userId, opts.userId));
+  if (account?.plan !== "pro") {
+    const [cap] = await db
+      .select({ n: count() })
+      .from(envelopes)
+      .where(
+        and(
+          or(
+            eq(envelopes.userId, opts.userId),
+            eq(envelopes.senderEmail, senderEmail),
+          ),
+          gte(envelopes.createdAt, windowStart),
+          ne(envelopes.status, "pending_sender"),
+        ),
+      );
+    if (Number(cap?.n ?? 0) >= limit) {
+      return jsonError(429, "Send limit reached. Try again later.", "send_limit");
+    }
+  }
+
+  const signingDays = Number(env.SIGNING_WINDOW_DAYS);
+  const expiresAt = new Date(at.getTime() + signingDays * 86_400_000);
+  const documentHash = sha256Hex(opts.bytes);
+  const webhookUrl = opts.webhookUrl ?? null;
+  const webhookSecret = opts.webhookSecret ?? null;
+
+  let webhookSecretHash: string | null = null;
+  if (webhookSecret) {
+    try {
+      webhookSecretHash = sealWebhookSecret(webhookSecret);
+    } catch {
+      return jsonError(503, "Webhook encryption is not configured", "webhook_unconfigured");
+    }
+  }
+
+  const [envelope] = await db
+    .insert(envelopes)
+    .values({
+      title: opts.title,
+      senderEmail,
+      userId: opts.userId,
+      status: "pending",
+      expiresAt,
+      shredAt: expiresAt,
+      sha256: documentHash,
+      webhookUrl,
+      webhookSecretHash,
+      createdAt: at,
+    })
+    .returning();
+
+  const storagePath = objectKey(envelope.id, "original");
+  await store.put(storagePath, opts.bytes);
+  await db.insert(documents).values({
+    envelopeId: envelope.id,
+    kind: "original",
+    storagePath,
+    documentHash,
+  });
+  await db.insert(signersTable).values(
+    opts.signers.map((s, i) => ({
+      envelopeId: envelope.id,
+      name: s.name,
+      email: s.email.trim().toLowerCase(),
+      signingOrder: i + 1,
+      tokenHash: placeholderSigningTokenHash(),
+    })),
+  );
+
+  const signUrl = await inviteFirstSigner(db, mailer, envelope, at);
+  return Response.json(
+    {
+      id: envelope.id,
+      status: "pending",
+      ...(signUrl ? { signers: [{ sign_url: signUrl }] } : {}),
+      ...(webhookSecret ? { webhook_secret: webhookSecret } : {}),
+    },
+    { status: 201 },
+  );
+}
+
 export async function createEnvelope(req: Request): Promise<Response> {
   if (hasApiKeyQuery(req)) {
     return jsonError(401, "Unauthorized", "unauthorized");
@@ -244,62 +348,37 @@ export async function createEnvelope(req: Request): Promise<Response> {
     if (liveAccount?.email) {
       senderEmail = liveAccount.email.trim().toLowerCase();
     }
-  } else {
-    // Session cookie is a live send (pending + invite), same as sign_live_.
-    const cookie = req.headers.get("cookie");
-    if (cookie) {
-      const user = await getAuth().userFromCookie(cookie);
-      if (user) {
-        await ensureAccount(db, user);
-        liveUserId = user.id;
-        senderEmail = user.email.trim().toLowerCase();
-      }
-    }
   }
 
   if (liveUserId) {
-    const [account] = await db
-      .select()
-      .from(accounts)
-      .where(eq(accounts.userId, liveUserId));
-    if (account?.plan !== "pro") {
-      const [cap] = await db
-        .select({ n: count() })
-        .from(envelopes)
-        .where(
-          and(
-            or(
-              eq(envelopes.userId, liveUserId),
-              eq(envelopes.senderEmail, senderEmail),
-            ),
-            gte(envelopes.createdAt, windowStart),
-            ne(envelopes.status, "pending_sender"),
-          ),
-        );
-      if (Number(cap?.n ?? 0) >= limit) {
-        return jsonError(429, "Send limit reached. Try again later.", "send_limit");
-      }
-    }
-  } else {
-    const [cap] = await db
-      .select({ n: count() })
-      .from(envelopes)
-      .where(
-        and(
-          eq(envelopes.senderEmail, senderEmail),
-          gte(envelopes.createdAt, windowStart),
-          ne(envelopes.status, "pending_sender"),
-        ),
-      );
-    if (Number(cap?.n ?? 0) >= limit) {
-      return jsonError(429, "Send limit reached. Try again later.", "send_limit");
-    }
+    return sendPreparedPdf({
+      title,
+      senderEmail,
+      userId: liveUserId,
+      signers: parsedSigners,
+      bytes,
+      webhookUrl,
+      webhookSecret,
+    });
+  }
+
+  const [cap] = await db
+    .select({ n: count() })
+    .from(envelopes)
+    .where(
+      and(
+        eq(envelopes.senderEmail, senderEmail),
+        gte(envelopes.createdAt, windowStart),
+        ne(envelopes.status, "pending_sender"),
+      ),
+    );
+  if (Number(cap?.n ?? 0) >= limit) {
+    return jsonError(429, "Send limit reached. Try again later.", "send_limit");
   }
 
   const signingDays = Number(env.SIGNING_WINDOW_DAYS);
   const expiresAt = new Date(at.getTime() + signingDays * 86_400_000);
   const documentHash = sha256Hex(bytes);
-  const live = Boolean(liveUserId);
 
   let webhookSecretHash: string | null = null;
   if (webhookSecret) {
@@ -316,7 +395,7 @@ export async function createEnvelope(req: Request): Promise<Response> {
       title,
       senderEmail,
       userId: liveUserId,
-      status: live ? "pending" : "pending_sender",
+      status: "pending_sender",
       expiresAt,
       shredAt: expiresAt,
       sha256: documentHash,
@@ -344,19 +423,6 @@ export async function createEnvelope(req: Request): Promise<Response> {
       tokenHash: placeholderSigningTokenHash(),
     })),
   );
-
-  if (live) {
-    const signUrl = await inviteFirstSigner(db, mailer, envelope, at);
-    return Response.json(
-      {
-        id: envelope.id,
-        status: "pending",
-        ...(signUrl ? { signers: [{ sign_url: signUrl }] } : {}),
-        ...(webhookSecret ? { webhook_secret: webhookSecret } : {}),
-      },
-      { status: 201 },
-    );
-  }
 
   const otp = await newOtp();
   await db.insert(otpChallenges).values({

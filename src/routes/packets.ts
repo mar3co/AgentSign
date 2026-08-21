@@ -13,7 +13,7 @@ import { requireCaller } from "../lib/caller.js";
 import { getDeps, storeUnavailableResponse } from "../lib/deps.js";
 import { PACKET_CAP } from "../lib/entitlement.js";
 import { objectKey } from "../lib/storage.js";
-import { createEnvelope } from "./envelopes.js";
+import { sendPreparedPdf } from "./envelopes.js";
 
 const PDF_MAX_BYTES = 20 * 1024 * 1024;
 
@@ -431,23 +431,11 @@ export async function sendPacket(
   const bytes = await store.get(loaded.packet.storagePath);
   if (!bytes) return jsonError(404, "Packet not found", "not_found");
 
-  const form = new FormData();
-  form.set("title", loaded.packet.title);
-  form.set("sender_email", gate.caller.user.email);
-  form.set("signers", JSON.stringify(parsed));
-  form.set("file", new Blob([bytes], { type: "application/pdf" }), "packet.pdf");
-
-  const headers = new Headers();
-  const authorization = req.headers.get("authorization");
-  const cookie = req.headers.get("cookie");
-  if (authorization) headers.set("authorization", authorization);
-  if (cookie) headers.set("cookie", cookie);
-
-  return createEnvelope(
-    new Request("http://sign.local/v1/envelopes", {
-      method: "POST",
-      headers,
-      body: form,
-    }),
-  );
+  return sendPreparedPdf({
+    title: loaded.packet.title,
+    senderEmail: gate.caller.user.email,
+    userId: gate.caller.user.id,
+    signers: parsed,
+    bytes,
+  });
 }
