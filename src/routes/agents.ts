@@ -57,7 +57,7 @@ async function readJson(req: Request): Promise<unknown> {
 }
 
 async function requireAgentApi(req: Request, write: boolean) {
-  const caller = await requireCaller(req);
+  const caller = await requireCaller(req, { allowOauth: false });
   if (!caller.ok) return caller;
   if (!(await flagOn("agent_parties"))) {
     return {
@@ -243,6 +243,16 @@ export async function putAgentWebhook(req: Request, id: string): Promise<Respons
   }
   const webhook = await resolveWebhookUrl((body as { webhook_url?: unknown }).webhook_url);
   if (!webhook.ok) return webhook.response;
+  const clear = (body as { clear?: unknown }).clear === true;
+  if (webhook.url == null && !clear) {
+    return jsonError(
+      400,
+      loaded.agent.webhookUrl
+        ? "Pass clear: true to remove the webhook"
+        : "webhook_url is required",
+      "invalid_request",
+    );
+  }
 
   await gate.caller.db
     .update(agents)

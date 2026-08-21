@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { createElement } from "react";
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { AgentsClient } from "../../app/agents/agents-client.js";
 import { AgentsList } from "../../app/agents/agents-list.js";
 import { CabinetList } from "../../app/envelopes/cabinet-list.js";
@@ -11,6 +11,7 @@ import { SigningCeremony } from "../../app/s/[token]/signing-ceremony.js";
 describe("AgentsList", () => {
   afterEach(() => {
     cleanup();
+    vi.unstubAllGlobals();
   });
 
   it("shows upgrade link and no create form when not entitled", () => {
@@ -55,6 +56,29 @@ describe("AgentsList", () => {
     expect(screen.queryByRole("button", { name: "Create agent" })).toBeNull();
     expect(screen.queryByRole("button", { name: /rotate/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /revoke/i })).toBeNull();
+  });
+
+  it("empty Save webhook does not PUT null when a hook is already set", () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      createElement(AgentsList, {
+        entitled: true,
+        canEdit: true,
+        agents: [
+          {
+            id: "agt_1",
+            slug: "grok-legal",
+            name: "Grok Legal",
+            has_webhook: true,
+            revoked_at: null,
+          },
+        ],
+      }),
+    );
+    const save = screen.getByRole("button", { name: "Save webhook" });
+    fireEvent.submit(save.closest("form")!);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

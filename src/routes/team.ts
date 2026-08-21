@@ -37,7 +37,7 @@ function requireOwner(
 }
 
 async function requireTeamCaller(req: Request) {
-  const caller = await requireCaller(req);
+  const caller = await requireCaller(req, { allowOauth: false });
   if (!caller.ok) return caller;
   const cabinet = await cabinetForUser(caller.db, caller.user.id);
   return { ok: true as const, caller, cabinet };

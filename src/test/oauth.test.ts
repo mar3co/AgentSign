@@ -7,13 +7,20 @@ import { eq } from "drizzle-orm";
 import { GET as getAuthCallback } from "../../app/auth/callback/route.js";
 import { POST as postLogin } from "../../app/login/session/route.js";
 import { POST as postAgents } from "../../app/v1/agents/route.js";
+import { POST as postRotate } from "../../app/v1/agents/[id]/rotate/route.js";
 import { POST as postAttest } from "../../app/v1/envelopes/[id]/attest/route.js";
 import { POST as postEnvelope } from "../../app/v1/envelopes/route.js";
 import { POST as postKeys } from "../../app/v1/keys/route.js";
-import { accounts, signers as signersTable } from "../db/schema.js";
+import { POST as postInvite } from "../../app/v1/team/invites/route.js";
+import { accounts, apiKeys, signers as signersTable } from "../db/schema.js";
 import { appOrigin, resetEnvCache } from "../env.js";
 import { resetDeps, setDeps } from "../lib/deps.js";
-import { fetchClientMetadata, pkceS256 } from "../lib/oauth.js";
+import {
+  fetchClientMetadata,
+  lookupOauthGrantByRefresh,
+  pkceS256,
+  rotateGrantTokens,
+} from "../lib/oauth.js";
 import { makeDevP12 } from "../lib/pdf/devP12.js";
 import { createFsStore } from "../lib/storage.js";
 import { handleMcpHttp } from "../mcp/server.js";
@@ -427,6 +434,158 @@ describe("MCP OAuth 2.1", () => {
       expect(row!.attestedAt).toBeNull();
     },
   );
+
+  it("OAuth grant cannot rotate an agent key", { timeout: 60_000 }, async () => {
+    const { db, userFor } = await boot();
+    const { cookie } = await asPro(db, userFor);
+    const created = await postAgents(
+      new Request("http://sign.test/v1/agents", {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ slug: "grok-legal", name: "Grok Legal" }),
+      }),
+    );
+    expect(created.status).toBe(201);
+    const minted = (await created.json()) as { id: string; key: string };
+    const redirectUri = "https://client.example/cb";
+    const clientId = await registerPublicClient(redirectUri, "Empty Grant");
+    const access = await issueAccessToken({
+      cookie,
+      clientId,
+      redirectUri,
+      agentIds: [],
+    });
+
+    const rotated = await postRotate(
+      new Request(`http://sign.test/v1/agents/${minted.id}/rotate`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${access}` },
+      }),
+      { params: Promise.resolve({ id: minted.id }) },
+    );
+    expect(rotated.status).toBe(403);
+    const json = (await rotated.json()) as { error: string; code: string };
+    expect(json.code).toBe("insufficient_scope");
+    expect(json.error).toBeTruthy();
+
+    const keys = await db.select().from(apiKeys);
+    expect(keys.filter((k) => k.kind === "agent" && k.agentId === minted.id)).toHaveLength(
+      1,
+    );
+  });
+
+  it("OAuth grant cannot send a team invite", { timeout: 60_000 }, async () => {
+    const { db, userFor } = await boot();
+    const { cookie } = await asPro(db, userFor);
+    const redirectUri = "https://client.example/cb";
+    const clientId = await registerPublicClient(redirectUri);
+    const access = await issueAccessToken({ cookie, clientId, redirectUri });
+    const invite = await postInvite(
+      new Request("http://sign.test/v1/team/invites", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${access}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ email: "tech@example.com" }),
+      }),
+    );
+    expect(invite.status).toBe(403);
+    expect(((await invite.json()) as { code: string }).code).toBe("insufficient_scope");
+  });
+
+  it("wrong PKCE leaves the authorization code reusable", { timeout: 60_000 }, async () => {
+    await boot();
+    const cookie = await magicCookie("shop@example.com");
+    const redirectUri = "https://client.example/cb";
+    const clientId = await registerPublicClient(redirectUri);
+    const { verifier, challenge } = pkcePair();
+    const authorize = await postAuthorize(
+      new Request("http://sign.test/oauth/authorize", {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({
+          client_id: clientId,
+          redirect_uri: redirectUri,
+          code_challenge: challenge,
+          resource: mcpResource(),
+        }),
+      }),
+    );
+    expect(authorize.status).toBe(302);
+    const code = new URL(authorize.headers.get("location")!, "https://client.example")
+      .searchParams.get("code");
+    expect(code).toBeTruthy();
+
+    const bad = await postToken(
+      new Request("http://sign.test/oauth/token", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code: code!,
+          redirect_uri: redirectUri,
+          client_id: clientId,
+          code_verifier: `x${"y".repeat(42)}`,
+          resource: mcpResource(),
+        }).toString(),
+      }),
+    );
+    expect(bad.status).toBe(400);
+
+    const good = await postToken(
+      new Request("http://sign.test/oauth/token", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code: code!,
+          redirect_uri: redirectUri,
+          client_id: clientId,
+          code_verifier: verifier,
+          resource: mcpResource(),
+        }).toString(),
+      }),
+    );
+    expect(good.status).toBe(200);
+    const tokens = (await good.json()) as { access_token?: string };
+    expect(tokens.access_token).toMatch(/^sign_oauth_/);
+  });
+
+  it("DCR rejects javascript: redirect URIs", async () => {
+    await boot();
+    const res = await postRegister(
+      new Request("http://sign.test/oauth/register", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          client_name: "Evil",
+          redirect_uris: ["javascript:alert(1)"],
+          token_endpoint_auth_method: "none",
+        }),
+      }),
+    );
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as { error?: string };
+    expect(json.error).toBe("invalid_client_metadata");
+  });
+
+  it("stale refresh rotation snapshot does not mint a second live refresh", {
+    timeout: 60_000,
+  }, async () => {
+    const { db, userFor } = await boot();
+    const cookie = await magicCookie("shop@example.com");
+    expect(userFor("shop@example.com").id).toBeTruthy();
+    const redirectUri = "https://client.example/cb";
+    const clientId = await registerPublicClient(redirectUri);
+    const first = await issueTokens({ cookie, clientId, redirectUri });
+    const grant = await lookupOauthGrantByRefresh(db, first.refresh_token);
+    expect(grant).toBeTruthy();
+    const rotated = await rotateGrantTokens(db, grant!);
+    expect(rotated).toBeTruthy();
+    const stale = await rotateGrantTokens(db, grant!);
+    expect(stale).toBeNull();
+  });
 
   it("CIMD client_id to a blocked host is rejected", async () => {
     const { userFor } = await boot();

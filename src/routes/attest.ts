@@ -244,22 +244,36 @@ export async function attestEnvelope(req: Request, envelopeId: string): Promise<
     });
   }
 
-  const [claimed] = await db
-    .update(signersTable)
-    .set({
-      attestedAt: at,
-      attestMethod,
-      attestLabel,
-    })
-    .where(
-      and(
-        eq(signersTable.id, party.id),
-        eq(signersTable.kind, "agent"),
-        isNull(signersTable.attestedAt),
-        isNull(signersTable.rejectedAt),
-      ),
-    )
-    .returning();
+  let claimed: SignerRow | undefined;
+  try {
+    await db.transaction(async (tx) => {
+      const [env] = await tx
+        .select()
+        .from(envelopes)
+        .where(and(eq(envelopes.id, envelope.id), eq(envelopes.status, "pending")));
+      if (!env) throw new Error("attest_conflict");
+      const [row] = await tx
+        .update(signersTable)
+        .set({
+          attestedAt: at,
+          attestMethod,
+          attestLabel,
+        })
+        .where(
+          and(
+            eq(signersTable.id, party.id),
+            eq(signersTable.kind, "agent"),
+            isNull(signersTable.attestedAt),
+            isNull(signersTable.rejectedAt),
+          ),
+        )
+        .returning();
+      if (!row) throw new Error("attest_conflict");
+      claimed = row;
+    });
+  } catch {
+    return jsonError(409, "Envelope is not awaiting attestation", "invalid_state");
+  }
   if (!claimed) {
     return jsonError(409, "Envelope is not awaiting attestation", "invalid_state");
   }

@@ -21,7 +21,7 @@ import {
 } from "../lib/email.js";
 import { verifyOtp } from "../lib/otp.js";
 import { newSigningToken, newTmpKey } from "../lib/tokens.js";
-import { sealWebhookSecret } from "../lib/webhooks.js";
+import { sealWebhookSecret, webhookEncryptionReady } from "../lib/webhooks.js";
 
 const MAX_ATTEMPTS = 5;
 
@@ -120,6 +120,14 @@ export async function verifyEnvelopeOtp(
     );
   if (Number(cap?.n ?? 0) >= limit) {
     return jsonError(429, "Send limit reached. Try again later.", "send_limit");
+  }
+
+  if (!webhookEncryptionReady()) {
+    return jsonError(
+      503,
+      "Webhook encryption is not configured",
+      "webhook_unconfigured",
+    );
   }
 
   const [owner] = await db

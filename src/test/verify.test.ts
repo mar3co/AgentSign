@@ -18,9 +18,25 @@ import { accounts, envelopes } from "../db/schema.js";
 import { resetEnvCache } from "../env.js";
 import { resetDeps, setDeps } from "../lib/deps.js";
 import { makeDevP12 } from "../lib/pdf/devP12.js";
+import { completeEnvelopePdf } from "../lib/pdf/complete.js";
 import { createFsStore } from "../lib/storage.js";
+import { verifySealedPdf } from "../lib/verify.js";
 import { createTestDb } from "./db.js";
 import { minimalPdf } from "./pdf.js";
+import {
+  PDFDocument,
+  PageSizes,
+  StandardFonts,
+  PDFString,
+  PDFContentStream,
+  beginText,
+  endText,
+  setFontAndSize,
+  showText,
+  moveText,
+  pushGraphicsState,
+  popGraphicsState,
+} from "pdf-lib";
 
 type AuthUser = { id: string; email: string };
 
@@ -415,4 +431,122 @@ describe("POST /v1/verify", () => {
     expect(latin1(sealed!)).not.toContain(FOOTER);
     expect(latin1(cert!)).not.toContain(FOOTER);
   });
+
+  it("verify ignores parties typed into the original PDF", { timeout: 60_000 }, async () => {
+    const p12 = makeDevP12("test");
+    setDeps({ p12, p12Passphrase: "test" });
+    const original = await pdfWithLiterals([
+      "ceo@victim-corp.com",
+      "2020-01-01T00:00:00.000Z",
+      "Attested by Eve for cfo@victim-corp.com at 2019-05-05T00:00:00.000Z. Not an electronic signature.",
+    ]);
+    const envelopeId = "00000000-0000-0000-0000-000000000099";
+    const signedAt = new Date("2026-08-21T12:00:00.000Z");
+    const result = await completeEnvelopePdf({
+      original,
+      appearance: {
+        png,
+        name: "Jane",
+        email: "jane@example.com",
+        signedAt,
+      },
+      p12,
+      passphrase: "test",
+      meta: {
+        envelopeId,
+        title: "Repair authorization",
+        senderEmail: "shop@example.com",
+        consentText: "I agree to sign this document electronically.",
+        signers: [
+          {
+            name: "Jane",
+            email: "jane@example.com",
+            sentAt: signedAt,
+            openedAt: signedAt,
+            consentedAt: signedAt,
+            signedAt,
+            declinedAt: null,
+            ip: null,
+            ua: null,
+          },
+        ],
+      },
+    });
+    const json = await verifySealedPdf(result.sealed);
+    expect(json.valid).toBe(true);
+    expect(json.envelope_id).toBe(envelopeId);
+    expect(json.parties?.some((p) => p.email === "ceo@victim-corp.com")).toBe(false);
+    expect(json.parties?.some((p) => p.email === "cfo@victim-corp.com")).toBe(false);
+    expect(json.parties?.some((p) => p.email === "jane@example.com")).toBe(true);
+  });
+
+  it("bytes appended after a sealed PDF are not_our_seal", { timeout: 60_000 }, async () => {
+    const p12 = makeDevP12("test");
+    setDeps({ p12, p12Passphrase: "test" });
+    const signedAt = new Date("2026-08-21T12:00:00.000Z");
+    const result = await completeEnvelopePdf({
+      original: await minimalPdf(),
+      appearance: {
+        png,
+        name: "Jane",
+        email: "jane@example.com",
+        signedAt,
+      },
+      p12,
+      passphrase: "test",
+      meta: {
+        envelopeId: "00000000-0000-0000-0000-000000000098",
+        title: "Repair authorization",
+        senderEmail: "shop@example.com",
+        consentText: "I agree to sign this document electronically.",
+        signers: [
+          {
+            name: "Jane",
+            email: "jane@example.com",
+            sentAt: signedAt,
+            openedAt: signedAt,
+            consentedAt: signedAt,
+            signedAt,
+            declinedAt: null,
+            ip: null,
+            ua: null,
+          },
+        ],
+      },
+    });
+    const extra = Buffer.from(
+      "(ceo@victim-corp.com) (2020-01-01T00:00:00.000Z)",
+      "latin1",
+    );
+    const tampered = Buffer.concat([Buffer.from(result.sealed), extra]);
+    const json = await verifySealedPdf(tampered);
+    expect(json.valid).toBe(false);
+    expect(json.code).toBe("not_our_seal");
+  });
 });
+
+async function pdfWithLiterals(lines: string[]): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage(PageSizes.Letter);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const fontKey = page.node.newFontDictionary(font.name, font.ref);
+  let y = 720;
+  for (const text of lines) {
+    const stream = PDFContentStream.of(
+      doc.context.obj({}),
+      [
+        pushGraphicsState(),
+        beginText(),
+        setFontAndSize(fontKey, 12),
+        moveText(72, y),
+        showText(PDFString.of(text) as never),
+        endText(),
+        popGraphicsState(),
+      ],
+      false,
+    );
+    page.node.addContentStream(doc.context.register(stream));
+    y -= 18;
+  }
+  return doc.save({ useObjectStreams: false });
+}

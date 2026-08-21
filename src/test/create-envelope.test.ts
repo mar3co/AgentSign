@@ -715,6 +715,39 @@ describe("POST /v1/envelopes agent parties", () => {
     expect(json.code).toBe("pro_required");
   });
 
+  it("send without WEBHOOK_KEK is 503 and does not insert an envelope", async () => {
+    const prevKek = process.env.WEBHOOK_KEK;
+    const prevCron = process.env.CRON_SECRET;
+    delete process.env.WEBHOOK_KEK;
+    delete process.env.CRON_SECRET;
+    resetEnvCache();
+    try {
+      const { db } = await bootAuth();
+      const cookie = await magicCookie("shop@example.com");
+      const key = await mintLive(cookie);
+      const before = await db.select().from(envelopes);
+      const res = await postEnvelope(
+        new Request("http://sign.test/v1/envelopes", {
+          method: "POST",
+          headers: { authorization: `Bearer ${key}` },
+          body: await envelopeBody([{ name: "Jane", email: "jane@example.com" }]),
+        }),
+      );
+      expect(res.status).toBe(503);
+      const json = (await res.json()) as { error: string; code: string };
+      expect(json.code).toBe("webhook_unconfigured");
+      expect(json.error).toBeTruthy();
+      const after = await db.select().from(envelopes);
+      expect(after).toHaveLength(before.length);
+    } finally {
+      if (prevKek === undefined) delete process.env.WEBHOOK_KEK;
+      else process.env.WEBHOOK_KEK = prevKek;
+      if (prevCron === undefined) delete process.env.CRON_SECRET;
+      else process.env.CRON_SECRET = prevCron;
+      resetEnvCache();
+    }
+  });
+
   it("unknown agent slug is 400 unknown_agent", async () => {
     const { db, userFor } = await bootAuth();
     const cookie = await magicCookie("shop@example.com");

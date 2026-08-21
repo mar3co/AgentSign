@@ -33,6 +33,7 @@ import {
   fireAgentPartyWebhooks,
   fireEnvelopeCompleted,
   sealWebhookSecret,
+  webhookEncryptionReady,
 } from "../lib/webhooks.js";
 import { syncTmpKeyExpiry } from "../lib/keys.js";
 
@@ -497,9 +498,25 @@ export async function inviteNextHumanIfNeeded(
 ): Promise<Response | null> {
   const next = allSigners.find((s) => s.signingOrder === current.signingOrder + 1);
   if (!next || partyDone(next) || next.sentAt) return null;
+  const [live] = await db
+    .select()
+    .from(envelopes)
+    .where(eq(envelopes.id, envelope.id));
+  if (!live || live.status !== "pending") {
+    await rollbackCurrent();
+    return jsonError(409, "Envelope is not awaiting signature", "invalid_state");
+  }
   if (next.kind === "agent") {
     await fireAgentPartyReady(db, envelope, next);
     return null;
+  }
+  if (!webhookEncryptionReady()) {
+    await rollbackCurrent();
+    return jsonError(
+      503,
+      "Webhook encryption is not configured",
+      "webhook_unconfigured",
+    );
   }
 
   const mailer = requireMailer();

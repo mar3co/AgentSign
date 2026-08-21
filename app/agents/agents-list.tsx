@@ -178,14 +178,23 @@ export function AgentsList({
     setError(null);
     setShownKey(null);
     setShownSecret(null);
-    setBusy(true);
     const webhookUrl = String(new FormData(e.currentTarget).get("webhook_url") ?? "").trim();
+    const current = items.find((a) => a.id === id);
+    if (!webhookUrl) {
+      setError(
+        current?.has_webhook
+          ? "Enter a URL, or use Clear webhook."
+          : "Enter a webhook URL.",
+      );
+      return;
+    }
+    setBusy(true);
     try {
       const res = await fetch(`/v1/agents/${id}/webhook`, {
         method: "PUT",
         credentials: "include",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ webhook_url: webhookUrl || null }),
+        body: JSON.stringify({ webhook_url: webhookUrl }),
       });
       if (res.status === 401) {
         window.location.href = `/login?next=${encodeURIComponent("/agents")}`;
@@ -207,6 +216,39 @@ export function AgentsList({
       );
     } catch {
       setError("Could not save webhook.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onClearWebhook(id: string) {
+    setError(null);
+    setShownKey(null);
+    setShownSecret(null);
+    setBusy(true);
+    try {
+      const res = await fetch(`/v1/agents/${id}/webhook`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ webhook_url: null, clear: true }),
+      });
+      if (res.status === 401) {
+        window.location.href = `/login?next=${encodeURIComponent("/agents")}`;
+        return;
+      }
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        setError(body?.error ?? "Could not clear webhook.");
+        return;
+      }
+      setItems((prev) =>
+        prev.map((a) => (a.id === id ? { ...a, has_webhook: false } : a)),
+      );
+    } catch {
+      setError("Could not clear webhook.");
     } finally {
       setBusy(false);
     }
@@ -306,6 +348,17 @@ export function AgentsList({
                       >
                         Save webhook
                       </Button>
+                      {agent.has_webhook ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-11 w-full text-base"
+                          disabled={busy}
+                          onClick={() => onClearWebhook(agent.id)}
+                        >
+                          Clear webhook
+                        </Button>
+                      ) : null}
                     </form>
                   ) : null}
                 </li>

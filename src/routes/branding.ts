@@ -49,7 +49,7 @@ function parseDisplayName(
 }
 
 async function requireEntitledCabinet(req: Request) {
-  const caller = await requireCaller(req);
+  const caller = await requireCaller(req, { allowOauth: false });
   if (!caller.ok) return caller;
   const cabinet = await cabinetForUser(caller.db, caller.user.id);
   if (!cabinet.entitled) {

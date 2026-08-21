@@ -40,6 +40,7 @@ import {
   fireAgentPartyReady,
   newWebhookSecret,
   sealWebhookSecret,
+  webhookEncryptionReady,
   webhookUrlError,
 } from "../lib/webhooks.js";
 import { getEnv } from "../env.js";
@@ -308,6 +309,16 @@ export async function sendPreparedPdf(opts: {
   const documentHash = sha256Hex(opts.bytes);
   const webhookUrl = opts.webhookUrl ?? null;
   const webhookSecret = opts.webhookSecret ?? null;
+  if (
+    resolved.parties.some((p) => p.kind === "human") &&
+    !webhookEncryptionReady()
+  ) {
+    return jsonError(
+      503,
+      "Webhook encryption is not configured",
+      "webhook_unconfigured",
+    );
+  }
 
   let webhookSecretHash: string | null = null;
   if (webhookSecret) {

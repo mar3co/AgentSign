@@ -76,22 +76,26 @@ function publicKeyEqual(
   return ap.n.compareTo(bp.n) === 0 && ap.e.compareTo(bp.e) === 0;
 }
 
-function parseByteRange(
+function parseByteRanges(
   pdf: Buffer,
-): [number, number, number, number] | null {
-  const m = /\/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*\]/.exec(
-    pdf.toString("latin1"),
-  );
-  if (!m) return null;
-  const br: [number, number, number, number] = [
-    Number(m[1]),
-    Number(m[2]),
-    Number(m[3]),
-    Number(m[4]),
-  ];
-  if (br.some((n) => !Number.isFinite(n) || n < 0)) return null;
-  if (br[0] + br[1] > pdf.length || br[2] + br[3] > pdf.length) return null;
-  return br;
+): [number, number, number, number][] {
+  const re = /\/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*\]/g;
+  const latin1 = pdf.toString("latin1");
+  const out: [number, number, number, number][] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(latin1))) {
+    const br: [number, number, number, number] = [
+      Number(m[1]),
+      Number(m[2]),
+      Number(m[3]),
+      Number(m[4]),
+    ];
+    if (br.some((n) => !Number.isFinite(n) || n < 0)) continue;
+    if (br[0] !== 0 || br[2] + br[3] !== pdf.length) continue;
+    if (br[0] + br[1] > pdf.length) continue;
+    out.push(br);
+  }
+  return out;
 }
 
 function cmsFromPdf(
@@ -190,34 +194,40 @@ function ourSealHolds(bytes: Uint8Array): boolean {
   if (!ourCert) return false;
 
   const pdf = Buffer.from(bytes);
-  const br = parseByteRange(pdf);
-  if (!br) return false;
-  const signedBytes = Buffer.concat([
-    pdf.subarray(br[0], br[0] + br[1]),
-    pdf.subarray(br[2], br[2] + br[3]),
-  ]);
-  const cms = cmsFromPdf(pdf, br);
-  if (!cms) return false;
+  const ranges = parseByteRanges(pdf);
+  for (let i = ranges.length - 1; i >= 0; i--) {
+    const br = ranges[i]!;
+    const signedBytes = Buffer.concat([
+      pdf.subarray(br[0], br[0] + br[1]),
+      pdf.subarray(br[2], br[2] + br[3]),
+    ]);
+    const cms = cmsFromPdf(pdf, br);
+    if (!cms) continue;
+    try {
+      const p7Asn1 = fromDer(cms.toString("binary"), { parseAllBytes: false });
+      const p7 = forge.pkcs7.messageFromAsn1(p7Asn1);
+      const certs = "certificates" in p7 ? p7.certificates : [];
+      if (!certs.some((c) => publicKeyEqual(c, ourCert))) continue;
 
-  try {
-    const p7Asn1 = fromDer(cms.toString("binary"), { parseAllBytes: false });
-    const p7 = forge.pkcs7.messageFromAsn1(p7Asn1);
-    const certs = "certificates" in p7 ? p7.certificates : [];
-    if (!certs.some((c) => publicKeyEqual(c, ourCert))) return false;
-
-    const explicit = nodes(p7Asn1)[1];
-    if (!explicit) return false;
-    const signedData = nodes(explicit)[0];
-    if (!signedData) return false;
-    const children = nodes(signedData);
-    const signerInfos = children[children.length - 1];
-    if (!signerInfos) return false;
-    return nodes(signerInfos).some((info) =>
-      verifySignerInfo(info, signedBytes, ourCert),
-    );
-  } catch {
-    return false;
+      const explicit = nodes(p7Asn1)[1];
+      if (!explicit) continue;
+      const signedData = nodes(explicit)[0];
+      if (!signedData) continue;
+      const children = nodes(signedData);
+      const signerInfos = children[children.length - 1];
+      if (!signerInfos) continue;
+      if (
+        nodes(signerInfos).some((info) =>
+          verifySignerInfo(info, signedBytes, ourCert),
+        )
+      ) {
+        return true;
+      }
+    } catch {
+      continue;
+    }
   }
+  return false;
 }
 
 function unescapePdf(raw: string): string {
@@ -246,13 +256,24 @@ function parseDrawnText(bytes: Uint8Array): {
   parties: VerifyResult["parties"];
 } {
   const strings = pdfStrings(bytes);
+  let lastId: string | undefined;
+  for (const raw of strings) {
+    const found = ENVELOPE_RE.exec(raw);
+    if (found) lastId = found[1];
+  }
+  const start =
+    lastId === undefined
+      ? 0
+      : strings.findIndex((raw) => ENVELOPE_RE.exec(raw)?.[1] === lastId);
+  const scoped = start >= 0 ? strings.slice(start) : strings;
+
   const parties: NonNullable<VerifyResult["parties"]> = [];
   let envelope_id: string | undefined;
   let human_signatures: number | undefined;
   let agent_attestations: number | undefined;
 
-  for (let i = 0; i < strings.length; i++) {
-    const s = strings[i]!;
+  for (let i = 0; i < scoped.length; i++) {
+    const s = scoped[i]!;
     const env = ENVELOPE_RE.exec(s);
     if (env) {
       envelope_id = env[1]!;
@@ -279,13 +300,13 @@ function parseDrawnText(bytes: Uint8Array): {
     }
     if (
       EMAIL_RE.test(s) &&
-      i + 1 < strings.length &&
-      ISO_RE.test(strings[i + 1]!)
+      i + 1 < scoped.length &&
+      ISO_RE.test(scoped[i + 1]!)
     ) {
       parties.push({
         kind: "human",
         email: s,
-        signed_at: strings[i + 1],
+        signed_at: scoped[i + 1],
       });
     }
   }

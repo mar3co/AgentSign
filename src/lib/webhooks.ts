@@ -43,6 +43,11 @@ function kek(): Buffer | null {
   return createHash("sha256").update(material).digest();
 }
 
+/** token_enc / webhook secret at rest. False when both WEBHOOK_KEK and CRON_SECRET are empty. */
+export function webhookEncryptionReady(): boolean {
+  return kek() !== null;
+}
+
 export function sealWebhookSecret(raw: string): string {
   const key = kek();
   if (!key) throw new Error("WEBHOOK_KEK or CRON_SECRET is required");

@@ -50,6 +50,32 @@ export function mcpUnauthorized(): Response {
   );
 }
 
+export function redirectUriAllowed(uri: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(uri);
+  } catch {
+    return false;
+  }
+  const scheme = parsed.protocol.toLowerCase();
+  if (
+    scheme === "javascript:" ||
+    scheme === "data:" ||
+    scheme === "file:" ||
+    scheme === "about:" ||
+    scheme === "blob:" ||
+    scheme === "vbscript:"
+  ) {
+    return false;
+  }
+  if (scheme === "https:") return true;
+  if (scheme === "http:") {
+    const host = parsed.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+    return host === "127.0.0.1" || host === "localhost" || host === "::1";
+  }
+  return /^[a-z][a-z0-9+.-]*:$/.test(scheme);
+}
+
 function equalStr(a: string, b: string): boolean {
   const left = Buffer.from(a);
   const right = Buffer.from(b);
@@ -93,7 +119,7 @@ export async function fetchClientMetadata(
   if (
     !Array.isArray(obj.redirect_uris) ||
     obj.redirect_uris.length === 0 ||
-    obj.redirect_uris.some((u) => typeof u !== "string" || !u)
+    obj.redirect_uris.some((u) => typeof u !== "string" || !u || !redirectUriAllowed(u))
   ) {
     return { error: "redirect_uris required" };
   }
@@ -269,7 +295,7 @@ export async function insertAuthorizationCode(
   return code.raw;
 }
 
-export async function consumeAuthorizationCode(
+export async function lookupAuthorizationCode(
   db: AuditDb,
   raw: string,
 ): Promise<typeof oauthCodes.$inferSelect | null> {
@@ -280,11 +306,19 @@ export async function consumeAuthorizationCode(
     .where(eq(oauthCodes.codeHash, hash));
   if (!row || !equalHex(row.codeHash, hash)) return null;
   if (row.consumedAt) return null;
-  const at = now();
-  if (row.expiresAt.getTime() <= at.getTime()) return null;
+  if (row.expiresAt.getTime() <= now().getTime()) return null;
+  return row;
+}
+
+export async function consumeAuthorizationCode(
+  db: AuditDb,
+  raw: string,
+): Promise<typeof oauthCodes.$inferSelect | null> {
+  const row = await lookupAuthorizationCode(db, raw);
+  if (!row) return null;
   const [consumed] = await db
     .update(oauthCodes)
-    .set({ consumedAt: at })
+    .set({ consumedAt: now() })
     .where(and(eq(oauthCodes.id, row.id), isNull(oauthCodes.consumedAt)))
     .returning();
   return consumed ?? null;
@@ -327,12 +361,17 @@ export async function issueGrantTokens(
 export async function rotateGrantTokens(
   db: AuditDb,
   grant: OauthGrantRow,
-): Promise<{ access_token: string; refresh_token: string; expires_in: number }> {
+): Promise<{
+  access_token: string;
+  refresh_token: string;
+  expires_in: number;
+} | null> {
+  if (!grant.refreshHash) return null;
   const at = now();
   const access = newOauthToken();
   const refresh = newOauthToken();
   const expiresAt = new Date(at.getTime() + ACCESS_TTL_MS);
-  await db
+  const [updated] = await db
     .update(oauthGrants)
     .set({
       accessHash: access.hash,
@@ -340,7 +379,11 @@ export async function rotateGrantTokens(
       previousRefreshHash: grant.refreshHash,
       expiresAt,
     })
-    .where(eq(oauthGrants.id, grant.id));
+    .where(
+      and(eq(oauthGrants.id, grant.id), eq(oauthGrants.refreshHash, grant.refreshHash)),
+    )
+    .returning();
+  if (!updated) return null;
   return {
     access_token: access.raw,
     refresh_token: refresh.raw,

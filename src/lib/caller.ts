@@ -24,6 +24,8 @@ export type CallerFail = { ok: false; response: Response };
 export type RequireCallerOpts = {
   /** Allow `sign_agent_` paste keys (attest/reject only). */
   allowAgent?: boolean;
+  /** MCP OAuth is send/status/download (+ mapped attest). Default true. */
+  allowOauth?: boolean;
 };
 
 function unauthorized(): CallerFail {
@@ -32,6 +34,16 @@ function unauthorized(): CallerFail {
     response: Response.json(
       { error: "Unauthorized", code: "unauthorized" },
       { status: 401 },
+    ),
+  };
+}
+
+function insufficientScope(): CallerFail {
+  return {
+    ok: false,
+    response: Response.json(
+      { error: "OAuth cannot manage this resource", code: "insufficient_scope" },
+      { status: 403 },
     ),
   };
 }
@@ -90,6 +102,7 @@ export async function requireCaller(
       };
     }
     if (raw.startsWith("sign_oauth_")) {
+      if (opts?.allowOauth === false) return insufficientScope();
       const grant = await lookupOauthGrant(db, raw);
       if (!grant) return unauthorized();
       const account = await accountForOauthGrant(db, grant);

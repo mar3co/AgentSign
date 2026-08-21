@@ -24,6 +24,7 @@ import {
 import { resetEnvCache } from "../env.js";
 import { resetDeps, setDeps } from "../lib/deps.js";
 import { makeDevP12 } from "../lib/pdf/devP12.js";
+import { inviteNextHumanIfNeeded } from "../routes/signing.js";
 import { createFsStore } from "../lib/storage.js";
 import { createTestDb } from "./db.js";
 import { minimalPdf } from "./pdf.js";
@@ -751,6 +752,50 @@ describe("POST /v1/envelopes/:id/attest", () => {
       .update(`${envTs}.${String(envDone[0]!.init.body)}`)
       .digest("hex");
     expect(envSig).toBe(`sha256=${envExpected}`);
+  });
+
+  it("inviteNextHumanIfNeeded does not email when envelope is not pending", {
+    timeout: 60_000,
+  }, async () => {
+    const { db, sent, userFor } = await boot();
+    const { cookie } = await asPro(db, userFor);
+    await createNamedAgent(cookie, "grok-legal", "Grok Legal");
+    const live = await mintLive(cookie);
+    const id = await sendEnvelope(live, [
+      {
+        name: "Grok Legal",
+        email: "shop@example.com",
+        kind: "agent",
+        agent: "grok-legal",
+      },
+      { name: "Jane", email: "jane@example.com" },
+    ]);
+    const allSigners = await db
+      .select()
+      .from(signersTable)
+      .where(eq(signersTable.envelopeId, id));
+    allSigners.sort((a, b) => a.signingOrder - b.signingOrder);
+    const [envelope] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    await db
+      .update(envelopes)
+      .set({ status: "deleted" })
+      .where(eq(envelopes.id, id));
+    const before = sent.length;
+    const fail = await inviteNextHumanIfNeeded(
+      db,
+      envelope!,
+      allSigners,
+      allSigners[0]!,
+      new Date(),
+      async () => {},
+    );
+    expect(fail?.status).toBe(409);
+    expect(sent.length).toBe(before);
+    const [human] = await db
+      .select()
+      .from(signersTable)
+      .where(eq(signersTable.id, allSigners[1]!.id));
+    expect(human!.sentAt).toBeNull();
   });
 });
 

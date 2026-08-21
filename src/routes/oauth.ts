@@ -11,6 +11,8 @@ import { ensureAccount } from "../lib/keys.js";
 import {
   consumeAuthorizationCode,
   insertAuthorizationCode,
+  lookupAuthorizationCode,
+  redirectUriAllowed,
   issueGrantTokens,
   lookupOauthGrantByRefresh,
   mcpResource,
@@ -137,7 +139,7 @@ function redirectUrisOk(uris: unknown): uris is string[] {
   return (
     Array.isArray(uris) &&
     uris.length > 0 &&
-    uris.every((u) => typeof u === "string" && u.length > 0)
+    uris.every((u) => typeof u === "string" && u.length > 0 && redirectUriAllowed(u))
   );
 }
 
@@ -277,13 +279,16 @@ function tokenResponse(tokens: {
   refresh_token: string;
   expires_in: number;
 }): Response {
-  return Response.json({
-    access_token: tokens.access_token,
-    token_type: "Bearer",
-    expires_in: tokens.expires_in,
-    refresh_token: tokens.refresh_token,
-    scope: "send status download",
-  });
+  return Response.json(
+    {
+      access_token: tokens.access_token,
+      token_type: "Bearer",
+      expires_in: tokens.expires_in,
+      refresh_token: tokens.refresh_token,
+      scope: "send status download",
+    },
+    { headers: { "cache-control": "no-store" } },
+  );
 }
 
 export async function postToken(req: Request): Promise<Response> {
@@ -303,17 +308,19 @@ export async function postToken(req: Request): Promise<Response> {
     if (!code || !redirectUri || !clientId || !verifier) {
       return jsonError(400, "invalid_request", "code, redirect_uri, client_id, code_verifier required");
     }
-    const consumed = await consumeAuthorizationCode(db, code);
-    if (!consumed) return jsonError(400, "invalid_grant", "code is invalid");
-    if (consumed.clientId !== clientId || consumed.redirectUri !== redirectUri) {
+    const pending = await lookupAuthorizationCode(db, code);
+    if (!pending) return jsonError(400, "invalid_grant", "code is invalid");
+    if (pending.clientId !== clientId || pending.redirectUri !== redirectUri) {
       return jsonError(400, "invalid_grant", "code does not match client");
     }
-    if (consumed.resource !== resource) {
+    if (pending.resource !== resource) {
       return jsonError(400, "invalid_target", "resource does not match authorization");
     }
-    if (!pkceMatches(verifier, consumed.codeChallenge)) {
+    if (!pkceMatches(verifier, pending.codeChallenge)) {
       return jsonError(400, "invalid_grant", "PKCE verification failed");
     }
+    const consumed = await consumeAuthorizationCode(db, code);
+    if (!consumed) return jsonError(400, "invalid_grant", "code is invalid");
     const tokens = await issueGrantTokens(db, {
       userId: consumed.userId,
       clientId: consumed.clientId,
@@ -335,6 +342,10 @@ export async function postToken(req: Request): Promise<Response> {
       return jsonError(400, "invalid_target", "resource does not match grant");
     }
     const tokens = await rotateGrantTokens(db, grant);
+    if (!tokens) {
+      await revokeGrantOnRefreshReuse(db, refresh);
+      return jsonError(400, "invalid_grant", "refresh token is invalid");
+    }
     return tokenResponse(tokens);
   }
 

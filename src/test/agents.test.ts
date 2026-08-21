@@ -384,6 +384,51 @@ describe("agents API", () => {
     expect(JSON.stringify(body)).not.toContain(secretJson.webhook_secret);
   });
 
+  it("empty webhook PUT does not clear a saved hook without clear", async () => {
+    const { db, userFor } = await boot();
+    const { cookie } = await asPro(db, userFor);
+    const created = await postAgents(
+      createReq(cookie, { slug: "hooks", name: "Hooks" }),
+    );
+    const minted = (await created.json()) as AgentJson;
+    const put = await putWebhook(
+      new Request(`http://sign.test/v1/agents/${minted.id}/webhook`, {
+        method: "PUT",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ webhook_url: "https://example.com/hook" }),
+      }),
+      agentCtx(minted.id),
+    );
+    expect(put.status).toBe(200);
+
+    const empty = await putWebhook(
+      new Request(`http://sign.test/v1/agents/${minted.id}/webhook`, {
+        method: "PUT",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ webhook_url: null }),
+      }),
+      agentCtx(minted.id),
+    );
+    expect(empty.status).toBe(400);
+    expect(((await empty.json()) as { code: string }).code).toBe("invalid_request");
+    const [kept] = await db.select().from(agents).where(eq(agents.id, minted.id));
+    expect(kept!.webhookUrl).toBe("https://example.com/hook");
+    expect(kept!.webhookSecretHash).toBeTruthy();
+
+    const cleared = await putWebhook(
+      new Request(`http://sign.test/v1/agents/${minted.id}/webhook`, {
+        method: "PUT",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ webhook_url: null, clear: true }),
+      }),
+      agentCtx(minted.id),
+    );
+    expect(cleared.status).toBe(200);
+    const [gone] = await db.select().from(agents).where(eq(agents.id, minted.id));
+    expect(gone!.webhookUrl).toBeNull();
+    expect(gone!.webhookSecretHash).toBeNull();
+  });
+
   it("invalid slug is 400 and duplicate slug is 409", async () => {
     const { db, userFor } = await boot();
     const { cookie } = await asPro(db, userFor);

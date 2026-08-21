@@ -80,6 +80,19 @@ export async function appendSignaturePage(
     y -= 24;
   }
 
+  if (appearance.envelopeId) {
+    drawLiteralText(
+      doc,
+      page,
+      fontKey,
+      `Envelope id: ${appearance.envelopeId}`,
+      margin,
+      y,
+      size,
+    );
+    y -= 18;
+  }
+
   if (kind !== "agent" && appearance.png && appearance.png.byteLength > 0) {
     const image = await doc.embedPng(appearance.png);
     const imageWidth = Math.min(200, image.width);
@@ -123,18 +136,6 @@ export async function appendSignaturePage(
     y -= 18;
   }
 
-  if (appearance.envelopeId) {
-    drawLiteralText(
-      doc,
-      page,
-      fontKey,
-      `Envelope id: ${appearance.envelopeId}`,
-      margin,
-      y,
-      size,
-    );
-    y -= 18;
-  }
   if (appearance.humanSignatures != null) {
     drawLiteralText(
       doc,
