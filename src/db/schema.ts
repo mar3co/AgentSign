@@ -35,14 +35,22 @@ export const auditEvent = [
   "deleted",
   "webhook_sent",
   "webhook_failed",
+  "attested",
+  "rejected",
 ] as const;
 export type AuditEvent = (typeof auditEvent)[number];
 
 export const documentKind = ["original", "sealed", "certificate"] as const;
 export type DocumentKind = (typeof documentKind)[number];
 
-export const apiKeyKind = ["tmp", "live"] as const;
+export const apiKeyKind = ["tmp", "live", "agent"] as const;
 export type ApiKeyKind = (typeof apiKeyKind)[number];
+
+export const partyKind = ["human", "agent"] as const;
+export type PartyKind = (typeof partyKind)[number];
+
+export const attestMethodKind = ["agent_key", "oauth"] as const;
+export type AttestMethod = (typeof attestMethodKind)[number];
 
 export const accountPlan = ["free", "pro"] as const;
 export type AccountPlan = (typeof accountPlan)[number];
@@ -77,7 +85,14 @@ export const signers = pgTable("signers", {
   name: text("name").notNull(),
   email: text("email").notNull(),
   signingOrder: integer("signing_order").notNull(),
-  tokenHash: text("token_hash").notNull().unique(),
+  kind: text("kind", { enum: partyKind }).notNull().default("human"),
+  agentId: uuid("agent_id").references(() => agents.id),
+  attestedAt: timestamptz("attested_at"),
+  rejectedAt: timestamptz("rejected_at"),
+  attestMethod: text("attest_method", { enum: attestMethodKind }),
+  attestLabel: text("attest_label"),
+  tokenHash: text("token_hash").unique(),
+  tokenEnc: text("token_enc"),
   sentAt: timestamptz("sent_at"),
   openedAt: timestamptz("opened_at"),
   consentedAt: timestamptz("consented_at"),
@@ -139,6 +154,7 @@ export const apiKeys = pgTable("api_keys", {
   tokenHash: text("token_hash").notNull().unique(),
   envelopeId: uuid("envelope_id").references(() => envelopes.id),
   userId: uuid("user_id"),
+  agentId: uuid("agent_id").references(() => agents.id),
   createdAt: timestamptz("created_at").notNull().defaultNow(),
   expiresAt: timestamptz("expires_at").notNull(),
 }).enableRLS();
@@ -195,3 +211,59 @@ export const cabinetMembers = pgTable(
   },
   (t) => [uniqueIndex("cabinet_members_owner_email").on(t.ownerUserId, t.email)],
 ).enableRLS();
+
+export const agents = pgTable(
+  "agents",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .$defaultFn(() => randomUUID()),
+    ownerUserId: uuid("owner_user_id").notNull(),
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    webhookUrl: text("webhook_url"),
+    webhookSecretHash: text("webhook_secret_hash"),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+    revokedAt: timestamptz("revoked_at"),
+  },
+  (t) => [uniqueIndex("agents_owner_slug").on(t.ownerUserId, t.slug)],
+).enableRLS();
+
+export const oauthClients = pgTable("oauth_clients", {
+  id: uuid("id")
+    .primaryKey()
+    .$defaultFn(() => randomUUID()),
+  clientId: text("client_id").notNull().unique(),
+  clientName: text("client_name").notNull(),
+  redirectUris: jsonb("redirect_uris").$type<string[]>().notNull(),
+  authMethod: text("auth_method").notNull(),
+  createdAt: timestamptz("created_at").notNull().defaultNow(),
+}).enableRLS();
+
+export const oauthGrants = pgTable("oauth_grants", {
+  id: uuid("id")
+    .primaryKey()
+    .$defaultFn(() => randomUUID()),
+  userId: uuid("user_id").notNull(),
+  clientId: text("client_id").notNull(),
+  allowedAgentIds: jsonb("allowed_agent_ids").$type<string[]>().notNull().default([]),
+  accessHash: text("access_hash"),
+  refreshHash: text("refresh_hash"),
+  expiresAt: timestamptz("expires_at"),
+  revokedAt: timestamptz("revoked_at"),
+}).enableRLS();
+
+export const oauthCodes = pgTable("oauth_codes", {
+  id: uuid("id")
+    .primaryKey()
+    .$defaultFn(() => randomUUID()),
+  codeHash: text("code_hash").notNull(),
+  userId: uuid("user_id").notNull(),
+  clientId: text("client_id").notNull(),
+  redirectUri: text("redirect_uri").notNull(),
+  codeChallenge: text("code_challenge").notNull(),
+  resource: text("resource").notNull(),
+  allowedAgentIds: jsonb("allowed_agent_ids").$type<string[]>(),
+  expiresAt: timestamptz("expires_at").notNull(),
+  consumedAt: timestamptz("consumed_at"),
+}).enableRLS();

@@ -16,12 +16,11 @@ export function placeholderSigningTokenHash(): string {
   return sha256Hex(randomBytes(32).toString("hex"));
 }
 
-function newApiKey(kind: "tmp" | "live"): {
+function newPrefixedSecret(tag: string): {
   raw: string;
   prefix: string;
   hash: string;
 } {
-  const tag = kind === "tmp" ? "sign_tmp_" : "sign_live_";
   const raw = tag + randomBytes(32).toString("hex");
   return {
     raw,
@@ -31,9 +30,17 @@ function newApiKey(kind: "tmp" | "live"): {
 }
 
 export function newTmpKey(): { raw: string; prefix: string; hash: string } {
-  return newApiKey("tmp");
+  return newPrefixedSecret("sign_tmp_");
 }
 
 export function newLiveKey(): { raw: string; prefix: string; hash: string } {
-  return newApiKey("live");
+  return newPrefixedSecret("sign_live_");
+}
+
+export function newAgentKey(): { raw: string; prefix: string; hash: string } {
+  return newPrefixedSecret("sign_agent_");
+}
+
+export function newOauthToken(): { raw: string; prefix: string; hash: string } {
+  return newPrefixedSecret("sign_oauth_");
 }

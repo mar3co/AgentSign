@@ -3,7 +3,7 @@ import { describe, expect, it, afterEach } from "vitest";
 import { accounts, cabinetMembers, packets, packetRoles } from "../db/schema.js";
 import { resetEnvCache } from "../env.js";
 import { cabinetForUser } from "../lib/cabinet.js";
-import { isEntitled, TEAM_CAP, PACKET_CAP } from "../lib/entitlement.js";
+import { isEntitled, TEAM_CAP, PACKET_CAP, AGENT_CAP } from "../lib/entitlement.js";
 import { createTestDb } from "./db.js";
 
 afterEach(() => {
@@ -71,5 +71,6 @@ describe("caps", () => {
   it("exposes team 10 and packets 50", () => {
     expect(TEAM_CAP).toBe(10);
     expect(PACKET_CAP).toBe(50);
+    expect(AGENT_CAP).toBe(10);
   });
 });
