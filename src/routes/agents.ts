@@ -149,7 +149,10 @@ export async function listAgents(req: Request): Promise<Response> {
     .from(agents)
     .where(eq(agents.ownerUserId, gate.cabinet.ownerUserId));
   rows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-  return Response.json({ agents: rows.map(agentJson) });
+  return Response.json({
+    agents: rows.map(agentJson),
+    can_edit: gate.caller.user.id === gate.cabinet.ownerUserId,
+  });
 }
 
 export async function createAgent(req: Request): Promise<Response> {

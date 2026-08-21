@@ -11,6 +11,11 @@ import {
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 
+export type CeremonyAttested = {
+  slug: string;
+  email: string;
+};
+
 export type CeremonyState = {
   title: string;
   signerName: string;
@@ -23,6 +28,7 @@ export type CeremonyState = {
   status?: string;
   display_name?: string | null;
   has_logo?: boolean;
+  attested?: CeremonyAttested[];
 };
 
 export function SigningCeremony({
@@ -229,6 +235,11 @@ export function SigningCeremony({
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
+          {(state.attested ?? []).map((party) => (
+            <p key={`${party.slug}:${party.email}`} className="text-base">
+              {party.slug} attested for {party.email}
+            </p>
+          ))}
           <label className="flex items-start gap-3 text-base leading-snug">
             <Checkbox
               className="mt-1 size-4"

@@ -1,10 +1,15 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { getAuth } from "../../../src/lib/auth/supabase.js";
-import { mcpResource, resolveOauthClient } from "../../../src/lib/oauth.js";
-import { getDeps } from "../../../src/lib/deps.js";
+import { and, eq, isNull } from "drizzle-orm";
+import { agents } from "../../../src/db/schema.js";
 import { getDb } from "../../../src/db/client.js";
+import { getAuth } from "../../../src/lib/auth/supabase.js";
+import { cabinetForUser } from "../../../src/lib/cabinet.js";
+import { getDeps } from "../../../src/lib/deps.js";
+import { flagOn } from "../../../src/lib/flags.js";
+import { mcpResource, resolveOauthClient } from "../../../src/lib/oauth.js";
 import { safeNext } from "../../../src/lib/safeNext.js";
+import { AuthorizeForm } from "./authorize-form";
 
 export const runtime = "nodejs";
 
@@ -45,9 +50,10 @@ export default async function AuthorizePage({
 
   let clientName = "this client";
   let error: string | null = null;
+  let agentOptions: { id: string; slug: string; name: string }[] = [];
+  const db = getDeps().db ?? getDb();
   if (clientId) {
     try {
-      const db = getDeps().db ?? getDb();
       const resolved = await resolveOauthClient(db, clientId);
       if (!resolved.ok) error = resolved.error;
       else clientName = resolved.client.clientName;
@@ -56,6 +62,24 @@ export default async function AuthorizePage({
     }
   } else {
     error = "client_id required";
+  }
+
+  if (!error && (await flagOn("agent_parties"))) {
+    const cabinet = await cabinetForUser(db, user.id);
+    if (cabinet.entitled) {
+      const rows = await db
+        .select()
+        .from(agents)
+        .where(
+          and(eq(agents.ownerUserId, cabinet.ownerUserId), isNull(agents.revokedAt)),
+        );
+      rows.sort((a, b) => a.slug.localeCompare(b.slug));
+      agentOptions = rows.map((row) => ({
+        id: row.id,
+        slug: row.slug,
+        name: row.name,
+      }));
+    }
   }
 
   return (
@@ -70,27 +94,15 @@ export default async function AuthorizePage({
         {error ? (
           <p className="text-sm text-destructive">{error}</p>
         ) : (
-          <>
-            <p className="text-base">
-              {clientName} wants to use your AgentSign account.
-            </p>
-            <p className="text-sm text-muted-foreground">
-              Send, status, and download. Attest only for agents you allow.
-            </p>
-            <form method="post" action="/oauth/authorize" className="flex flex-col gap-3">
-              <input type="hidden" name="client_id" value={clientId} />
-              <input type="hidden" name="redirect_uri" value={redirectUri} />
-              <input type="hidden" name="state" value={state} />
-              <input type="hidden" name="code_challenge" value={codeChallenge} />
-              <input type="hidden" name="resource" value={resource} />
-              <button
-                type="submit"
-                className="inline-flex h-8 items-center justify-center rounded-lg bg-primary px-2.5 text-sm font-medium text-primary-foreground"
-              >
-                Allow
-              </button>
-            </form>
-          </>
+          <AuthorizeForm
+            clientName={clientName}
+            clientId={clientId}
+            redirectUri={redirectUri}
+            state={state}
+            codeChallenge={codeChallenge}
+            resource={resource}
+            agents={agentOptions}
+          />
         )}
       </main>
       <footer className="pb-4 text-center text-sm text-muted-foreground">

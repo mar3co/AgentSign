@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
+import { AgentsList } from "../../app/agents/agents-list.js";
 import { GET as getAuthCallback } from "../../app/auth/callback/route.js";
 import { POST as postLogin } from "../../app/login/session/route.js";
 import { POST as postAccept } from "../../app/internal/team/accept/route.js";
@@ -397,5 +400,41 @@ describe("agents API", () => {
     );
     expect(dup.status).toBe(409);
     expect(((await dup.json()) as { code: string }).code).toBe("slug_taken");
+  });
+});
+
+describe("agents page HTML", () => {
+  it("Free GET /agents contains upgrade", async () => {
+    await boot();
+    const cookie = await magicCookie("shop@example.com");
+    const res = await listAgents(
+      new Request("http://sign.test/v1/agents", { headers: { cookie } }),
+    );
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as { code: string };
+    expect(json.code).toBe("pro_required");
+    const html = renderToStaticMarkup(createElement(AgentsList, { entitled: false }));
+    expect(html).toMatch(/upgrade/i);
+    expect(html).toContain('href="/upgrade"');
+    expect(html).not.toContain("Create agent");
+  });
+
+  it('Pro owner contains "Create agent"', async () => {
+    const { db, userFor } = await boot();
+    const { cookie } = await asPro(db, userFor);
+    const res = await listAgents(
+      new Request("http://sign.test/v1/agents", { headers: { cookie } }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { agents: AgentJson[]; can_edit: boolean };
+    expect(body.can_edit).toBe(true);
+    const html = renderToStaticMarkup(
+      createElement(AgentsList, {
+        entitled: true,
+        canEdit: body.can_edit,
+        agents: body.agents,
+      }),
+    );
+    expect(html).toContain("Create agent");
   });
 });

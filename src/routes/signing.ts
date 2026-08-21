@@ -598,6 +598,37 @@ export async function getSigningState(
     has_logo = Boolean(cabinet.logoPath);
   }
 
+  const parties = await db
+    .select()
+    .from(signersTable)
+    .where(eq(signersTable.envelopeId, envelope.id));
+  parties.sort((a, b) => a.signingOrder - b.signingOrder);
+  const earlierAgents = parties.filter(
+    (s) =>
+      s.signingOrder < signer.signingOrder &&
+      s.kind === "agent" &&
+      Boolean(s.attestedAt),
+  );
+  const agentIds = [
+    ...new Set(
+      earlierAgents
+        .map((s) => s.agentId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const slugRows =
+    agentIds.length === 0
+      ? []
+      : await db.select().from(agents).where(inArray(agents.id, agentIds));
+  const slugById = new Map(slugRows.map((row) => [row.id, row.slug]));
+  const attested = earlierAgents
+    .map((s) => {
+      const slug = s.agentId ? slugById.get(s.agentId) : undefined;
+      if (!slug) return null;
+      return { slug, email: s.email };
+    })
+    .filter((row): row is { slug: string; email: string } => Boolean(row));
+
   return Response.json({
     title: envelope.title,
     signerName: signer.name,
@@ -610,6 +641,7 @@ export async function getSigningState(
     status: envelope.status,
     display_name,
     has_logo,
+    attested,
   });
 }
 

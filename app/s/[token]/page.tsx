@@ -51,6 +51,7 @@ export default async function SigningPage({
     status?: string;
     display_name?: string | null;
     has_logo?: boolean;
+    attested?: { slug: string; email: string }[];
   };
   return (
     <SigningCeremony token={token} state={state} consentText={CONSENT_TEXT} />

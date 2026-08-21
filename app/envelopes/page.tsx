@@ -23,6 +23,9 @@ export default function EnvelopesPage() {
           <a className="text-sm text-muted-foreground underline" href="/team">
             Team
           </a>
+          <a className="text-sm text-muted-foreground underline" href="/agents">
+            Agents
+          </a>
           <a className="text-sm text-muted-foreground underline" href="/">
             Send a PDF
           </a>

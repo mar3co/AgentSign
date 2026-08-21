@@ -44,6 +44,9 @@ export function CabinetList({
             <a className="text-sm underline" href="/team">
               Team
             </a>
+            <a className="text-sm underline" href="/agents">
+              Agents
+            </a>
           </span>
         </CardAction>
       </CardHeader>

@@ -442,6 +442,7 @@ export const openapi = {
                       type: "array",
                       items: { $ref: "#/components/schemas/Agent" },
                     },
+                    can_edit: { type: "boolean" },
                   },
                 },
               },
