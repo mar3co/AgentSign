@@ -148,5 +148,45 @@ export const accounts = pgTable("accounts", {
   stripeCustomerId: text("stripe_customer_id").unique(),
   plan: text("plan", { enum: accountPlan }).notNull().default("free"),
   currentPeriodEnd: timestamptz("current_period_end"),
+  displayName: text("display_name"),
+  logoPath: text("logo_path"),
   createdAt: timestamptz("created_at").notNull().defaultNow(),
+}).enableRLS();
+
+export const memberStatus = ["invited", "active"] as const;
+export type MemberStatus = (typeof memberStatus)[number];
+
+export const packets = pgTable("packets", {
+  id: uuid("id")
+    .primaryKey()
+    .$defaultFn(() => randomUUID()),
+  ownerUserId: uuid("owner_user_id").notNull(),
+  createdByUserId: uuid("created_by_user_id").notNull(),
+  title: text("title").notNull(),
+  storagePath: text("storage_path").notNull(),
+  createdAt: timestamptz("created_at").notNull().defaultNow(),
+}).enableRLS();
+
+export const packetRoles = pgTable("packet_roles", {
+  id: uuid("id")
+    .primaryKey()
+    .$defaultFn(() => randomUUID()),
+  packetId: uuid("packet_id")
+    .notNull()
+    .references(() => packets.id),
+  signingOrder: integer("signing_order").notNull(),
+  roleName: text("role_name").notNull(),
+}).enableRLS();
+
+export const cabinetMembers = pgTable("cabinet_members", {
+  id: uuid("id")
+    .primaryKey()
+    .$defaultFn(() => randomUUID()),
+  ownerUserId: uuid("owner_user_id").notNull(),
+  email: text("email").notNull(),
+  userId: uuid("user_id"),
+  status: text("status", { enum: memberStatus }).notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  invitedAt: timestamptz("invited_at").notNull(),
+  acceptedAt: timestamptz("accepted_at"),
 }).enableRLS();

@@ -24,6 +24,7 @@ const envSchema = z.object({
   FREE_SEND_WINDOW_DAYS: z.string().default("30"),
   P12_PATH: z.string().default(""),
   P12_PASSPHRASE: z.string().default(""),
+  SELF_HOST: z.string().default(""),
 });
 
 export type Env = z.infer<typeof envSchema>;
