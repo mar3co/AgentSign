@@ -1,3 +1,4 @@
+import { PageShell } from "@/components/page-shell";
 import { CONSENT_TEXT, getSigningState } from "../../../src/routes/signing.js";
 import { SigningCeremony } from "./signing-ceremony";
 
@@ -12,31 +13,31 @@ export default async function SigningPage({
   const res = await getSigningState(token);
   if (res.status === 404) {
     return (
-      <main className="mx-auto max-w-md p-4">
+      <PageShell variant="ceremony" showRange={false}>
         <p className="text-base">Not found</p>
-      </main>
+      </PageShell>
     );
   }
   if (res.status === 410) {
     return (
-      <main className="mx-auto max-w-md p-4">
+      <PageShell variant="ceremony" showRange={false}>
         <p className="text-base">This link has expired.</p>
-      </main>
+      </PageShell>
     );
   }
   if (res.status === 409) {
     const body = (await res.json()) as { error?: string };
     return (
-      <main className="mx-auto max-w-md p-4">
+      <PageShell variant="ceremony" showRange={false}>
         <p className="text-base">{body.error ?? "Waiting on previous signer."}</p>
-      </main>
+      </PageShell>
     );
   }
   if (!res.ok) {
     return (
-      <main className="mx-auto max-w-md p-4">
+      <PageShell variant="ceremony" showRange={false}>
         <p className="text-base">Unable to load this document.</p>
-      </main>
+      </PageShell>
     );
   }
   const state = (await res.json()) as {
@@ -54,6 +55,8 @@ export default async function SigningPage({
     attested?: { slug: string; email: string }[];
   };
   return (
-    <SigningCeremony token={token} state={state} consentText={CONSENT_TEXT} />
+    <PageShell variant="ceremony" showRange={false} width="md">
+      <SigningCeremony token={token} state={state} consentText={CONSENT_TEXT} />
+    </PageShell>
   );
 }

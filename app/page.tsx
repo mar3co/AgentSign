@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageShell } from "@/components/page-shell";
 
 const CURL_EXAMPLE = `curl -F title=Repair\\ authorization \\
      -F sender_email=shop@example.com \\
@@ -100,15 +101,20 @@ export default function Home() {
   }
 
   return (
-    <div className="mx-auto flex min-h-dvh max-w-lg flex-col gap-6 p-4">
-      <header className="flex items-center justify-between">
-        <p className="text-base font-medium">AgentSign</p>
-        <a className="text-sm text-muted-foreground underline" href="/login">
-          Log in
-        </a>
-      </header>
+    <PageShell variant="public" width="lg">
+      <section className="flex flex-col gap-3">
+        <p className="font-mono text-[0.7rem] uppercase tracking-[0.2em] text-muted-foreground">
+          send · sign · fetch
+        </p>
+        <h1 className="font-heading text-pretty text-4xl leading-[0.95] tracking-tight md:text-6xl">
+          Send a PDF. A human signs. You get a sealed file.
+        </h1>
+        <p className="max-w-prose text-base text-muted-foreground">
+          No account to send. No account to finish. We shred it after a week
+          unless you keep it.
+        </p>
+      </section>
 
-      <main className="flex flex-1 flex-col gap-6">
         {done ? (
           <Alert>
             <AlertDescription className="flex flex-col gap-2">
@@ -248,16 +254,13 @@ export default function Home() {
         )}
 
         <section className="flex flex-col gap-2">
-          <h2 className="text-sm font-medium">Or curl</h2>
-          <pre className="overflow-x-auto rounded-lg bg-muted p-3 text-xs leading-relaxed whitespace-pre-wrap">
+          <h2 className="font-mono text-[0.7rem] uppercase tracking-[0.2em] text-muted-foreground">
+            Or curl
+          </h2>
+          <pre className="overflow-x-auto rounded-md bg-muted p-3 text-xs leading-relaxed whitespace-pre-wrap">
             {CURL_EXAMPLE}
           </pre>
         </section>
-      </main>
-
-      <footer className="pb-4 text-center text-sm text-muted-foreground">
-        AgentSign
-      </footer>
-    </div>
+    </PageShell>
   );
 }

@@ -2,7 +2,7 @@
 import { createElement } from "react";
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { CabinetList } from "../../app/envelopes/cabinet-list.js";
+import { SiteHeader } from "../../components/site-header.js";
 import { TeamAccept } from "../../app/team/accept/team-accept.js";
 import { TeamClient } from "../../app/team/team-client.js";
 import { TeamList } from "../../app/team/team-list.js";
@@ -101,8 +101,8 @@ describe("cabinet Team link", () => {
   });
 
   it("links Team to /team", () => {
-    render(createElement(CabinetList, { envelopes: [] }));
-    expect(screen.getByRole("link", { name: /^team$/i }).getAttribute("href")).toBe(
+    render(createElement(SiteHeader, { variant: "app" }));
+    expect(screen.getAllByRole("link", { name: /^team$/i })[0]?.getAttribute("href")).toBe(
       "/team",
     );
   });

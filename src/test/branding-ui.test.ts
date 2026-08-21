@@ -4,7 +4,7 @@ import { afterEach, describe, it, expect, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { BrandingClient } from "../../app/settings/branding/branding-client.js";
 import { BrandingForm } from "../../app/settings/branding/branding-form.js";
-import { CabinetList } from "../../app/envelopes/cabinet-list.js";
+import { SiteHeader } from "../../components/site-header.js";
 
 describe("BrandingForm", () => {
   afterEach(() => {
@@ -52,10 +52,10 @@ describe("cabinet Branding link", () => {
   });
 
   it("links Branding to /settings/branding", () => {
-    render(createElement(CabinetList, { envelopes: [] }));
-    expect(screen.getByRole("link", { name: /branding/i }).getAttribute("href")).toBe(
-      "/settings/branding",
-    );
+    render(createElement(SiteHeader, { variant: "app" }));
+    expect(
+      screen.getAllByRole("link", { name: /^branding$/i })[0]?.getAttribute("href"),
+    ).toBe("/settings/branding");
   });
 });
 

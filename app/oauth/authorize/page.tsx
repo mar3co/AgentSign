@@ -9,6 +9,7 @@ import { getDeps } from "../../../src/lib/deps.js";
 import { flagOn } from "../../../src/lib/flags.js";
 import { mcpResource, resolveOauthClient } from "../../../src/lib/oauth.js";
 import { safeNext } from "../../../src/lib/safeNext.js";
+import { PageShell } from "@/components/page-shell";
 import { AuthorizeForm } from "./authorize-form";
 
 export const runtime = "nodejs";
@@ -83,31 +84,20 @@ export default async function AuthorizePage({
   }
 
   return (
-    <div className="mx-auto flex min-h-dvh max-w-lg flex-col gap-6 p-4">
-      <header className="flex items-center justify-between">
-        <p className="text-base font-medium">AgentSign</p>
-        <a className="text-sm text-muted-foreground underline" href="/">
-          Home
-        </a>
-      </header>
-      <main className="flex flex-1 flex-col gap-4">
-        {error ? (
-          <p className="text-sm text-destructive">{error}</p>
-        ) : (
-          <AuthorizeForm
-            clientName={clientName}
-            clientId={clientId}
-            redirectUri={redirectUri}
-            state={state}
-            codeChallenge={codeChallenge}
-            resource={resource}
-            agents={agentOptions}
-          />
-        )}
-      </main>
-      <footer className="pb-4 text-center text-sm text-muted-foreground">
-        AgentSign
-      </footer>
-    </div>
+    <PageShell variant="app">
+      {error ? (
+        <p className="text-sm text-destructive">{error}</p>
+      ) : (
+        <AuthorizeForm
+          clientName={clientName}
+          clientId={clientId}
+          redirectUri={redirectUri}
+          state={state}
+          codeChallenge={codeChallenge}
+          resource={resource}
+          agents={agentOptions}
+        />
+      )}
+    </PageShell>
   );
 }

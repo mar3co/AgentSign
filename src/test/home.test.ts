@@ -51,6 +51,17 @@ describe("Home", () => {
     expect(screen.getByRole("link", { name: /log in/i }).getAttribute("href")).toBe(
       "/login",
     );
+    expect(
+      screen.getByRole("heading", {
+        name: /send a pdf\. a human signs\. you get a sealed file/i,
+      }),
+    ).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/20 envelopes/i);
+    expect(document.body.textContent).not.toMatch(/AI signing/i);
+    expect(screen.getByRole("img", { name: /byterange/i })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /privacy/i }).getAttribute("href")).toBe(
+      "/privacy",
+    );
 
     await fillSendForm();
 

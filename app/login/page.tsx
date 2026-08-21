@@ -1,3 +1,4 @@
+import { PageShell } from "@/components/page-shell";
 import { safeNext } from "../../src/lib/safeNext.js";
 import { LoginForm } from "./login-form";
 
@@ -10,19 +11,8 @@ export default async function LoginPage({
 }) {
   const sp = (await searchParams) ?? {};
   return (
-    <div className="mx-auto flex min-h-dvh max-w-lg flex-col gap-6 p-4">
-      <header className="flex items-center justify-between">
-        <p className="text-base font-medium">AgentSign</p>
-        <a className="text-sm text-muted-foreground underline" href="/">
-          Send a PDF
-        </a>
-      </header>
-      <main className="flex flex-1 flex-col">
-        <LoginForm email={sp.email ?? ""} next={safeNext(sp.next)} />
-      </main>
-      <footer className="pb-4 text-center text-sm text-muted-foreground">
-        AgentSign
-      </footer>
-    </div>
+    <PageShell variant="auth">
+      <LoginForm email={sp.email ?? ""} next={safeNext(sp.next)} />
+    </PageShell>
   );
 }

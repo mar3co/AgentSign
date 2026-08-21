@@ -3,6 +3,7 @@ import { createElement } from "react";
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { CabinetList } from "../../app/envelopes/cabinet-list.js";
+import { SiteHeader } from "../../components/site-header.js";
 import { PacketsClient } from "../../app/packets/packets-client.js";
 import { PacketsList } from "../../app/packets/packets-list.js";
 
@@ -57,7 +58,14 @@ describe("cabinet Packets link", () => {
     cleanup();
   });
 
-  it("links Packets to /packets and Save as packet on completed canDelete rows", () => {
+  it("links Packets to /packets from the app header", () => {
+    render(createElement(SiteHeader, { variant: "app" }));
+    expect(screen.getAllByRole("link", { name: /^packets$/i })[0]?.getAttribute("href")).toBe(
+      "/packets",
+    );
+  });
+
+  it("Save as packet on completed canDelete rows", () => {
     const onSavePacket = vi.fn();
     render(
       createElement(CabinetList, {
@@ -71,9 +79,6 @@ describe("cabinet Packets link", () => {
         ],
         onSavePacket,
       }),
-    );
-    expect(screen.getByRole("link", { name: /packets/i }).getAttribute("href")).toBe(
-      "/packets",
     );
     fireEvent.click(screen.getByRole("button", { name: /save as packet/i }));
     expect(onSavePacket).toHaveBeenCalledWith("env_1");

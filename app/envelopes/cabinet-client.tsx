@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   CabinetList,
   type CabinetEnvelope,
@@ -56,7 +57,14 @@ export function CabinetClient() {
   }
 
   if (envelopes === null) {
-    return <p className="text-base text-muted-foreground">Loading…</p>;
+    return (
+      <div className="flex flex-col gap-3">
+        <p className="text-base text-muted-foreground">Loading…</p>
+        <Skeleton className="h-10 w-full" />
+        <Skeleton className="h-10 w-full" />
+        <Skeleton className="h-10 w-2/3" />
+      </div>
+    );
   }
 
   async function onVoid(id: string) {

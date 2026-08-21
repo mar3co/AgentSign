@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { ByteRange } from "@/components/byte-range";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -52,9 +53,10 @@ export function SigningCeremony({
 
   if (declined) {
     return (
-      <main className="mx-auto max-w-md p-4">
+      <div className="flex flex-col gap-4">
+        <ByteRange />
         <p className="text-base">You declined to sign.</p>
-      </main>
+      </div>
     );
   }
 
@@ -63,7 +65,8 @@ export function SigningCeremony({
     const when = shredAt ?? state.shredAt ?? "";
     if (!completed) {
       return (
-        <main className="mx-auto max-w-md p-4">
+        <div className="flex flex-col gap-4">
+          <ByteRange />
           <Card>
             <CardHeader>
               <CardTitle>Signed</CardTitle>
@@ -73,11 +76,12 @@ export function SigningCeremony({
               <p className="text-base">You&apos;re done. Waiting on the next signer.</p>
             </CardContent>
           </Card>
-        </main>
+        </div>
       );
     }
     return (
-      <main className="mx-auto max-w-md p-4">
+      <div className="flex flex-col gap-4">
+        <ByteRange sealed />
         <Card>
           <CardHeader>
             <CardTitle>Signed</CardTitle>
@@ -87,12 +91,13 @@ export function SigningCeremony({
             <p className="text-base">
               Download this. We delete it on {when}.
             </p>
-            <a
-              className="inline-flex h-11 w-full items-center justify-center rounded-lg bg-primary text-base font-medium text-primary-foreground"
-              href={`/s/${token}/pdf`}
+            <Button
+              nativeButton={false}
+              className="h-11 w-full text-base"
+              render={<a href={`/s/${token}/pdf`} />}
             >
               Download
-            </a>
+            </Button>
             <a
               className="text-base underline"
               href={`/s/${token}/pdf?kind=certificate`}
@@ -107,7 +112,7 @@ export function SigningCeremony({
             </a>
           </CardContent>
         </Card>
-      </main>
+      </div>
     );
   }
 
@@ -216,7 +221,8 @@ export function SigningCeremony({
   }
 
   return (
-    <main className="mx-auto max-w-md p-4">
+    <div className="flex flex-col gap-4">
+      <ByteRange />
       <Card>
         <CardHeader>
           {state.has_logo ? (
@@ -229,7 +235,9 @@ export function SigningCeremony({
           {state.display_name ? (
             <p className="text-base text-muted-foreground">{state.display_name}</p>
           ) : null}
-          <CardTitle className="text-base">{state.title}</CardTitle>
+          <CardTitle className="font-heading text-2xl tracking-tight">
+            {state.title}
+          </CardTitle>
           <CardDescription className="text-base">
             {state.signerName}
           </CardDescription>
@@ -248,16 +256,22 @@ export function SigningCeremony({
             />
             <span>{consentText}</span>
           </label>
-          <canvas
-            ref={canvasRef}
-            width={320}
-            height={160}
-            className="h-40 w-full touch-none rounded-md border border-border bg-white"
-            onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onPointerUp={onPointerUp}
-            onPointerCancel={onPointerUp}
-          />
+          <div className="relative">
+            <p className="mb-1 font-mono text-[0.7rem] uppercase tracking-[0.2em] text-muted-foreground">
+              Sign here
+            </p>
+            <canvas
+              ref={canvasRef}
+              width={320}
+              height={160}
+              className="h-40 w-full touch-none rounded-md border border-border bg-card"
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerCancel={onPointerUp}
+            />
+            <span className="pointer-events-none absolute inset-x-4 bottom-6 border-b border-foreground/35" />
+          </div>
           {error ? <p className="text-base text-destructive">{error}</p> : null}
           <Button
             className="h-11 w-full text-base"
@@ -278,6 +292,6 @@ export function SigningCeremony({
           </Button>
         </CardContent>
       </Card>
-    </main>
+    </div>
   );
 }
