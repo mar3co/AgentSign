@@ -230,6 +230,21 @@ export function completionEmail(input: {
   };
 }
 
+export function teamInviteEmail(input: {
+  acceptUrl: string;
+}): Pick<MailMessage, "subject" | "text"> {
+  return {
+    subject: "Join the Sign cabinet",
+    text: [
+      "You were invited to a Sign cabinet.",
+      "",
+      `Accept here: ${absoluteUrl(input.acceptUrl)}`,
+      "",
+      "This invite expires in 7 days.",
+    ].join("\n"),
+  };
+}
+
 export function declineEmail(input: {
   signerName: string;
   title: string;

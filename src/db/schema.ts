@@ -5,6 +5,7 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 
@@ -178,15 +179,19 @@ export const packetRoles = pgTable("packet_roles", {
   roleName: text("role_name").notNull(),
 }).enableRLS();
 
-export const cabinetMembers = pgTable("cabinet_members", {
-  id: uuid("id")
-    .primaryKey()
-    .$defaultFn(() => randomUUID()),
-  ownerUserId: uuid("owner_user_id").notNull(),
-  email: text("email").notNull(),
-  userId: uuid("user_id"),
-  status: text("status", { enum: memberStatus }).notNull(),
-  tokenHash: text("token_hash").notNull().unique(),
-  invitedAt: timestamptz("invited_at").notNull(),
-  acceptedAt: timestamptz("accepted_at"),
-}).enableRLS();
+export const cabinetMembers = pgTable(
+  "cabinet_members",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .$defaultFn(() => randomUUID()),
+    ownerUserId: uuid("owner_user_id").notNull(),
+    email: text("email").notNull(),
+    userId: uuid("user_id"),
+    status: text("status", { enum: memberStatus }).notNull(),
+    tokenHash: text("token_hash").notNull().unique(),
+    invitedAt: timestamptz("invited_at").notNull(),
+    acceptedAt: timestamptz("accepted_at"),
+  },
+  (t) => [uniqueIndex("cabinet_members_owner_email").on(t.ownerUserId, t.email)],
+).enableRLS();
