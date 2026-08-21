@@ -10,6 +10,12 @@ export default function EnvelopesPage() {
         <nav className="flex items-center gap-3">
           <a
             className="text-sm text-muted-foreground underline"
+            href="/packets"
+          >
+            Packets
+          </a>
+          <a
+            className="text-sm text-muted-foreground underline"
             href="/settings/branding"
           >
             Branding

@@ -20,9 +20,11 @@ export type CabinetEnvelope = {
 export function CabinetList({
   envelopes,
   onVoid,
+  onSavePacket,
 }: {
   envelopes: CabinetEnvelope[];
   onVoid?: (id: string) => void;
+  onSavePacket?: (id: string) => void;
 }) {
   return (
     <Card>
@@ -32,9 +34,14 @@ export function CabinetList({
           Envelopes you sent or signed.
         </CardDescription>
         <CardAction>
-          <a className="text-sm underline" href="/settings/branding">
-            Branding
-          </a>
+          <span className="flex items-center gap-3">
+            <a className="text-sm underline" href="/packets">
+              Packets
+            </a>
+            <a className="text-sm underline" href="/settings/branding">
+              Branding
+            </a>
+          </span>
         </CardAction>
       </CardHeader>
       <CardContent>
@@ -67,6 +74,16 @@ export function CabinetList({
                         Certificate
                       </a>
                     </>
+                  ) : null}
+                  {env.status === "completed" && env.canDelete ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-8 text-sm"
+                      onClick={() => onSavePacket?.(env.id)}
+                    >
+                      Save as packet
+                    </Button>
                   ) : null}
                   {env.canDelete ? (
                     <Button

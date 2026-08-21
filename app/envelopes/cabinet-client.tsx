@@ -71,5 +71,36 @@ export function CabinetClient() {
     setEnvelopes((prev) => (prev ?? []).filter((e) => e.id !== id));
   }
 
-  return <CabinetList envelopes={envelopes} onVoid={onVoid} />;
+  async function onSavePacket(id: string) {
+    const res = await fetch("/v1/packets", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ envelope_id: id }),
+    });
+    if (res.status === 401) {
+      window.location.href = `/login?next=${encodeURIComponent("/envelopes")}`;
+      return;
+    }
+    if (res.status === 403) {
+      window.location.href = "/upgrade";
+      return;
+    }
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as {
+        error?: string;
+      } | null;
+      setError(body?.error ?? "Could not save packet.");
+      return;
+    }
+    window.location.href = "/packets";
+  }
+
+  return (
+    <CabinetList
+      envelopes={envelopes}
+      onVoid={onVoid}
+      onSavePacket={onSavePacket}
+    />
+  );
 }
