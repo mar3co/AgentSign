@@ -1,3 +1,4 @@
+import { createHmac, randomUUID } from "node:crypto";
 import { describe, it, expect } from "vitest";
 import { eq } from "drizzle-orm";
 import { createTestDb } from "./db.js";
@@ -17,12 +18,14 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  agents,
   apiKeys,
   auditEvents,
   envelopes,
   signers as signersTable,
 } from "../db/schema.js";
 import type { MailMessage } from "../lib/email.js";
+import { newWebhookSecret, sealWebhookSecret } from "../lib/webhooks.js";
 
 const png = Uint8Array.from(
   Buffer.from(
@@ -446,5 +449,107 @@ describe("remindDue and shredDue", () => {
     expect(keys).toHaveLength(1);
     expect(keys[0]!.kind).toBe("tmp");
     expect(keys[0]!.expiresAt.getTime()).toBeLessThanOrEqual(at.getTime());
+  });
+
+  it("remindDue does not mark overdue pending as expired", { timeout: 60_000 }, async () => {
+    let at = new Date("2026-08-20T12:00:00Z");
+    const pending = await startEnvelope({ now: () => at });
+    at = new Date(at.getTime() + 7 * DAY);
+    await remindDue(pending.db, pending.mailer, at);
+    const [row] = await pending.db
+      .select()
+      .from(envelopes)
+      .where(eq(envelopes.id, pending.id));
+    expect(row!.status).toBe("pending");
+    expect(reminderMails(pending.sent)).toHaveLength(0);
+  });
+
+  it("shredDue pending envelope fires agent envelope.expired then purges", {
+    timeout: 60_000,
+  }, async () => {
+    const frozen = new Date("2026-08-20T12:00:00Z");
+    let at = frozen;
+    const pending = await startEnvelope({ now: () => at });
+    const completed = await addVerified(pending.sent, {
+      sender: "other@example.com",
+      signers: [{ name: "Bob", email: "bob@example.com" }],
+      title: "Completed job",
+    });
+    await complete(completed.token);
+
+    const secret = newWebhookSecret();
+    const [agent] = await pending.db
+      .insert(agents)
+      .values({
+        ownerUserId: randomUUID(),
+        slug: "grok-legal",
+        name: "Grok Legal",
+        webhookUrl: "https://example.com/agent-hook",
+        webhookSecretHash: sealWebhookSecret(secret),
+      })
+      .returning();
+    await pending.db.insert(signersTable).values([
+      {
+        envelopeId: pending.id,
+        name: "Grok Legal",
+        email: "bot@example.com",
+        signingOrder: 2,
+        kind: "agent",
+        agentId: agent.id,
+      },
+      {
+        envelopeId: completed.id,
+        name: "Grok Legal",
+        email: "bot@example.com",
+        signingOrder: 2,
+        kind: "agent",
+        agentId: agent.id,
+      },
+    ]);
+
+    const posts: { url: string; init: RequestInit }[] = [];
+    at = new Date(frozen.getTime() + 7 * DAY);
+    setDeps({
+      db: pending.db,
+      store: pending.store,
+      mailer: pending.mailer,
+      now: () => at,
+      fetch: async (input, init) => {
+        posts.push({ url: String(input), init: init ?? {} });
+        return new Response("ok", { status: 200 });
+      },
+      lookup: async () => [{ address: "93.184.216.34", family: 4 }],
+    });
+    await shredDue(pending.db, pending.store, at);
+
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.url).toBe("https://example.com/agent-hook");
+    const rawBody = String(posts[0]!.init.body);
+    const payload = JSON.parse(rawBody) as Record<string, unknown>;
+    expect(payload).toEqual({
+      event: "envelope.expired",
+      id: pending.id,
+      agent: "grok-legal",
+      status: "expired",
+    });
+    expect(rawBody).not.toContain(secret);
+    const headers = posts[0]!.init.headers as Record<string, string>;
+    const timestamp = headers["X-Sign-Timestamp"];
+    const expected = createHmac("sha256", secret)
+      .update(`${timestamp}.${rawBody}`)
+      .digest("hex");
+    expect(headers["X-Sign-Signature"]).toBe(`sha256=${expected}`);
+
+    const [pendingRow] = await pending.db
+      .select()
+      .from(envelopes)
+      .where(eq(envelopes.id, pending.id));
+    expect(pendingRow!.status).toBe("deleted");
+    const [completedRow] = await pending.db
+      .select()
+      .from(envelopes)
+      .where(eq(envelopes.id, completed.id));
+    expect(completedRow!.status).toBe("deleted");
+    expect(posts.every((p) => !String(p.init.body).includes(completed.id))).toBe(true);
   });
 });

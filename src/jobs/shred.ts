@@ -83,6 +83,12 @@ export async function shredDue(
     .from(envelopes)
     .where(and(lte(envelopes.shredAt, now), ne(envelopes.status, "deleted")));
   for (const envelope of due) {
+    if (envelope.status === "pending") {
+      await fireAgentPartyWebhooks(db, envelope.id, {
+        event: "envelope.expired",
+        status: "expired",
+      });
+    }
     await purgeEnvelope(db, store, envelope.id, now);
   }
 }
@@ -98,23 +104,7 @@ export async function remindDue(
     .from(envelopes)
     .where(eq(envelopes.status, "pending"));
   for (const envelope of pending) {
-    if (envelope.expiresAt.getTime() <= now.getTime()) {
-      if (envelope.status === "pending") {
-        const [claimed] = await db
-          .update(envelopes)
-          .set({ status: "expired" })
-          .where(and(eq(envelopes.id, envelope.id), eq(envelopes.status, "pending")))
-          .returning();
-        if (claimed) {
-          await logEvent(db, { envelopeId: envelope.id, event: "expired" });
-          await fireAgentPartyWebhooks(db, envelope.id, {
-            event: "envelope.expired",
-            status: "expired",
-          });
-        }
-      }
-      continue;
-    }
+    if (envelope.expiresAt.getTime() <= now.getTime()) continue;
     const rows = await db
       .select()
       .from(signersTable)
