@@ -1,6 +1,8 @@
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from "node:crypto";
 import { lookup as dnsLookup } from "node:dns/promises";
 import { BlockList, isIP } from "node:net";
+import { eq, inArray } from "drizzle-orm";
+import { agents, signers as signersTable } from "../db/schema.js";
 import { getEnv } from "../env.js";
 import { logEvent, type AuditDb } from "./audit.js";
 import { getDeps } from "./deps.js";
@@ -250,6 +252,65 @@ function now(): Date {
   return getDeps().now?.() ?? new Date();
 }
 
+async function auditWebhook(
+  db: AuditDb | undefined,
+  envelopeId: string,
+  event: "webhook_sent" | "webhook_failed",
+  payload?: Record<string, unknown>,
+): Promise<void> {
+  if (!db) return;
+  await logEvent(db, { envelopeId, event, payload });
+}
+
+/** One POST; failures audit webhook_failed (when db is available) and do not throw. */
+async function postSignedWebhook(
+  url: string,
+  secretHash: string,
+  rawBody: string,
+  envelopeId: string,
+  db?: AuditDb,
+): Promise<void> {
+  const blocked = await webhookUrlError(url);
+  if (blocked) {
+    await auditWebhook(db, envelopeId, "webhook_failed", { error: "blocked_url" });
+    return;
+  }
+  const timestamp = String(Math.floor(now().getTime() / 1000));
+  try {
+    const secret = openWebhookSecret(secretHash);
+    const signature = webhookSignature(secret, timestamp, rawBody);
+    const parsed = new URL(url);
+    const resolved = await resolveHost(normalizeHost(parsed.hostname));
+    if (resolved.length === 0 || resolved.some((row) => isBlockedIp(normalizeHost(row.address)))) {
+      await auditWebhook(db, envelopeId, "webhook_failed", { error: "blocked_url" });
+      return;
+    }
+    const res = await pinnedFetch(
+      url,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Sign-Timestamp": timestamp,
+          "X-Sign-Signature": signature,
+        },
+        body: rawBody,
+        redirect: "error",
+        signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
+      },
+      resolved,
+    );
+    if (!res.ok) {
+      await auditWebhook(db, envelopeId, "webhook_failed", { status: res.status });
+      return;
+    }
+    await auditWebhook(db, envelopeId, "webhook_sent");
+  } catch (err) {
+    const error = err instanceof Error ? err.message : "webhook_failed";
+    await auditWebhook(db, envelopeId, "webhook_failed", { error });
+  }
+}
+
 /** One POST; failures audit webhook_failed and do not throw. */
 export async function fireEnvelopeCompleted(
   db: AuditDb,
@@ -261,16 +322,6 @@ export async function fireEnvelopeCompleted(
   payload: EnvelopeCompletedPayload,
 ): Promise<void> {
   if (!envelope.webhookUrl || !envelope.webhookSecretHash) return;
-  const blocked = await webhookUrlError(envelope.webhookUrl);
-  if (blocked) {
-    await logEvent(db, {
-      envelopeId: envelope.id,
-      event: "webhook_failed",
-      payload: { error: "blocked_url" },
-    });
-    return;
-  }
-
   const body = {
     event: payload.event,
     id: payload.id,
@@ -278,51 +329,83 @@ export async function fireEnvelopeCompleted(
     sha256: payload.sha256,
     shred_at: payload.shred_at.toISOString(),
   };
-  const rawBody = JSON.stringify(body);
-  const timestamp = String(Math.floor(now().getTime() / 1000));
+  await postSignedWebhook(
+    envelope.webhookUrl,
+    envelope.webhookSecretHash,
+    JSON.stringify(body),
+    envelope.id,
+    db,
+  );
+}
 
-  try {
-    const secret = openWebhookSecret(envelope.webhookSecretHash);
-    const signature = webhookSignature(secret, timestamp, rawBody);
-    const parsed = new URL(envelope.webhookUrl);
-    const resolved = await resolveHost(normalizeHost(parsed.hostname));
-    if (resolved.length === 0 || resolved.some((row) => isBlockedIp(normalizeHost(row.address)))) {
-      await logEvent(db, {
-        envelopeId: envelope.id,
-        event: "webhook_failed",
-        payload: { error: "blocked_url" },
-      });
-      return;
-    }
-    const res = await pinnedFetch(envelope.webhookUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Sign-Timestamp": timestamp,
-        "X-Sign-Signature": signature,
-      },
-      body: rawBody,
-      redirect: "error",
-      signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
-    }, resolved);
-    if (!res.ok) {
-      await logEvent(db, {
-        envelopeId: envelope.id,
-        event: "webhook_failed",
-        payload: { status: res.status },
-      });
-      return;
-    }
-    await logEvent(db, {
-      envelopeId: envelope.id,
-      event: "webhook_sent",
-    });
-  } catch (err) {
-    const error = err instanceof Error ? err.message : "webhook_failed";
-    await logEvent(db, {
-      envelopeId: envelope.id,
-      event: "webhook_failed",
-      payload: { error },
+async function deliverAgentWebhook(
+  db: AuditDb | undefined,
+  agent: { webhookUrl: string | null; webhookSecretHash: string | null },
+  payload: { event: string; id: string; agent: string; status: string },
+): Promise<void> {
+  if (!agent.webhookUrl || !agent.webhookSecretHash) return;
+  const body = {
+    event: payload.event,
+    id: payload.id,
+    agent: payload.agent,
+    status: payload.status,
+  };
+  await postSignedWebhook(
+    agent.webhookUrl,
+    agent.webhookSecretHash,
+    JSON.stringify(body),
+    payload.id,
+    db,
+  );
+}
+
+export async function fireAgentWebhook(
+  agent: { webhookUrl: string | null; webhookSecretHash: string | null },
+  payload: { event: string; id: string; agent: string; status: string },
+): Promise<void> {
+  await deliverAgentWebhook(getDeps().db, agent, payload);
+}
+
+export async function fireAgentPartyReady(
+  db: AuditDb,
+  envelope: { id: string; status: string },
+  party: { kind: string; agentId: string | null },
+): Promise<void> {
+  if (party.kind !== "agent" || !party.agentId) return;
+  const [agent] = await db.select().from(agents).where(eq(agents.id, party.agentId));
+  if (!agent) return;
+  await deliverAgentWebhook(db, agent, {
+    event: "party.ready",
+    id: envelope.id,
+    agent: agent.slug,
+    status: envelope.status,
+  });
+}
+
+export async function fireAgentPartyWebhooks(
+  db: AuditDb,
+  envelopeId: string,
+  payload: { event: string; status: string },
+): Promise<void> {
+  const parties = await db
+    .select()
+    .from(signersTable)
+    .where(eq(signersTable.envelopeId, envelopeId));
+  const agentIds = [
+    ...new Set(
+      parties
+        .filter((p) => p.kind === "agent" && p.agentId)
+        .map((p) => p.agentId!),
+    ),
+  ];
+  if (agentIds.length === 0) return;
+  const rows = await db.select().from(agents).where(inArray(agents.id, agentIds));
+  for (const agent of rows) {
+    await deliverAgentWebhook(db, agent, {
+      event: payload.event,
+      id: envelopeId,
+      agent: agent.slug,
+      status: payload.status,
     });
   }
 }

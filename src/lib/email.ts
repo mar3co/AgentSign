@@ -143,17 +143,21 @@ export function inviteEmail(input: {
   };
 }
 
-/** Nudge only — never include a new /s/ token; the original invite URL stays valid. */
+/** Nudge only — never remint; reprint the same /s/ URL when `signUrl` is known. */
 export function reminderEmail(input: {
   senderEmail: string;
   title: string;
   expiresAt: Date;
   brand?: MailBrand;
+  signUrl?: string;
 }): Pick<MailMessage, "subject" | "text" | "html"> {
+  const linkLine = input.signUrl
+    ? `Sign here: ${absoluteUrl(input.signUrl)}`
+    : `Use the unique signing link we already sent you.`;
   const text = [
     `${senderWho(input.senderEmail, input.brand)} asked you to sign "${input.title}".`,
     ``,
-    `Use the unique signing link we already sent you.`,
+    linkLine,
     ``,
     `This link expires on ${input.expiresAt.toISOString()}.`,
     ``,

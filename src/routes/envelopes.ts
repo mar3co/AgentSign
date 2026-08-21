@@ -37,6 +37,7 @@ import { newOtp } from "../lib/otp.js";
 import { objectKey, type BlobStore } from "../lib/storage.js";
 import { newSigningToken, placeholderSigningTokenHash } from "../lib/tokens.js";
 import {
+  fireAgentPartyReady,
   newWebhookSecret,
   sealWebhookSecret,
   webhookUrlError,
@@ -208,12 +209,15 @@ async function inviteFirstSigner(
   signerRows.sort((a, b) => a.signingOrder - b.signingOrder);
   const first = signerRows[0];
   if (!first) return null;
-  if (first.kind === "agent") return null;
+  if (first.kind === "agent") {
+    await fireAgentPartyReady(db, { id: envelope.id, status: "pending" }, first);
+    return null;
+  }
   const token = newSigningToken();
   const signUrl = `/s/${token.raw}`;
   await db
     .update(signersTable)
-    .set({ tokenHash: token.hash })
+    .set({ tokenHash: token.hash, tokenEnc: sealWebhookSecret(token.raw) })
     .where(eq(signersTable.id, first.id));
   const brand = await loadBrand(db, envelope.userId, requireStore());
   try {

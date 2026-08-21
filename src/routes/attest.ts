@@ -7,6 +7,7 @@ import { requireCaller, type CallerOk } from "../lib/caller.js";
 import { getDeps, storeUnavailableResponse } from "../lib/deps.js";
 import { flagOn } from "../lib/flags.js";
 import type { BlobStore } from "../lib/storage.js";
+import { fireAgentPartyWebhooks } from "../lib/webhooks.js";
 import {
   buildCompleteAppearances,
   commitCompletedEnvelope,
@@ -336,6 +337,10 @@ export async function rejectEnvelope(req: Request, envelopeId: string): Promise<
     envelopeId: envelope.id,
     signerId: party.id,
     event: "rejected",
+  });
+  await fireAgentPartyWebhooks(db, envelope.id, {
+    event: "envelope.declined",
+    status: "declined",
   });
   return Response.json({ status: "declined" });
 }

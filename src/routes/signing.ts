@@ -28,7 +28,12 @@ import { loadSigningP12 } from "../lib/pdf/devP12.js";
 import type { SignatureAppearance } from "../lib/pdf/appendSignaturePage.js";
 import { appearanceKey, objectKey, type BlobStore } from "../lib/storage.js";
 import { hashSigningToken, newSigningToken } from "../lib/tokens.js";
-import { fireEnvelopeCompleted } from "../lib/webhooks.js";
+import {
+  fireAgentPartyReady,
+  fireAgentPartyWebhooks,
+  fireEnvelopeCompleted,
+  sealWebhookSecret,
+} from "../lib/webhooks.js";
 import { syncTmpKeyExpiry } from "../lib/keys.js";
 
 export const CONSENT_TEXT =
@@ -463,6 +468,18 @@ export async function commitCompletedEnvelope(opts: {
       payload: { error: err instanceof Error ? err.message : "webhook_failed" },
     });
   }
+  try {
+    await fireAgentPartyWebhooks(db, envelope.id, {
+      event: "envelope.completed",
+      status: "completed",
+    });
+  } catch (err) {
+    await logEvent(db, {
+      envelopeId: envelope.id,
+      event: "webhook_failed",
+      payload: { error: err instanceof Error ? err.message : "webhook_failed" },
+    });
+  }
   return Response.json({
     status: "completed",
     shred_at: shredAt.toISOString(),
@@ -480,7 +497,10 @@ export async function inviteNextHumanIfNeeded(
 ): Promise<Response | null> {
   const next = allSigners.find((s) => s.signingOrder === current.signingOrder + 1);
   if (!next || partyDone(next) || next.sentAt) return null;
-  if (next.kind === "agent") return null;
+  if (next.kind === "agent") {
+    await fireAgentPartyReady(db, envelope, next);
+    return null;
+  }
 
   const mailer = requireMailer();
   const store = requireStore();
@@ -488,7 +508,7 @@ export async function inviteNextHumanIfNeeded(
   const signUrl = `/s/${token.raw}`;
   const [slot] = await db
     .update(signersTable)
-    .set({ tokenHash: token.hash })
+    .set({ tokenHash: token.hash, tokenEnc: sealWebhookSecret(token.raw) })
     .where(and(eq(signersTable.id, next.id), isNull(signersTable.sentAt)))
     .returning();
   if (!slot) return null;
@@ -885,6 +905,10 @@ export async function postDecline(
     ip,
     ua,
     payload: reason ? { reason } : undefined,
+  });
+  await fireAgentPartyWebhooks(db, envelope.id, {
+    event: "envelope.declined",
+    status: "declined",
   });
   try {
     const brand = await loadBrand(db, envelope.userId, requireStore());

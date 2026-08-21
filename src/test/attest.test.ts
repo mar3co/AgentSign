@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -160,40 +160,63 @@ async function mintLive(cookie: string) {
   return key;
 }
 
-async function createNamedAgent(cookie: string, slug: string, name: string) {
+async function createNamedAgent(
+  cookie: string,
+  slug: string,
+  name: string,
+  webhookUrl?: string,
+) {
   const res = await postAgents(
     new Request("http://sign.test/v1/agents", {
       method: "POST",
       headers: { cookie, "content-type": "application/json" },
-      body: JSON.stringify({ slug, name }),
+      body: JSON.stringify({
+        slug,
+        name,
+        ...(webhookUrl ? { webhook_url: webhookUrl } : {}),
+      }),
     }),
   );
   expect(res.status).toBe(201);
-  const json = (await res.json()) as { id: string; slug: string; key: string };
+  const json = (await res.json()) as {
+    id: string;
+    slug: string;
+    key: string;
+    webhook_secret?: string;
+  };
   expect(json.key).toMatch(/^sign_agent_/);
   return json;
 }
 
-async function envelopeBody(signers: unknown, sender = "shop@example.com") {
+async function envelopeBody(
+  signers: unknown,
+  sender = "shop@example.com",
+  webhookUrl?: string,
+) {
   const pdf = await minimalPdf();
   const body = new FormData();
   body.set("title", "Repair authorization");
   body.set("sender_email", sender);
   body.set("signers", JSON.stringify(signers));
   body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
+  if (webhookUrl) body.set("webhook_url", webhookUrl);
   return body;
 }
 
-async function sendEnvelope(liveKey: string, signers: unknown) {
+async function sendEnvelope(liveKey: string, signers: unknown, webhookUrl?: string) {
   const res = await postEnvelope(
     new Request("http://sign.test/v1/envelopes", {
       method: "POST",
       headers: { authorization: `Bearer ${liveKey}` },
-      body: await envelopeBody(signers),
+      body: await envelopeBody(signers, "shop@example.com", webhookUrl),
     }),
   );
   expect(res.status).toBe(201);
-  const created = (await res.json()) as { id: string; status: string };
+  const created = (await res.json()) as {
+    id: string;
+    status: string;
+    webhook_secret?: string;
+  };
   expect(created.status).toBe("pending");
   return created.id;
 }
@@ -587,6 +610,147 @@ describe("POST /v1/envelopes/:id/attest", () => {
       .from(auditEvents)
       .where(eq(auditEvents.envelopeId, id));
     expect(audit.some((a) => a.event === "attested")).toBe(false);
+  });
+
+  it("agent party.ready HMAC verifies and envelope.completed still fires", {
+    timeout: 60_000,
+  }, async () => {
+    const frozen = new Date("2026-08-20T12:00:00Z");
+    const posts: { url: string; init: RequestInit }[] = [];
+    function hdr(init: RequestInit, name: string): string | null {
+      const h = init.headers;
+      if (!h) return null;
+      if (h instanceof Headers) return h.get(name);
+      if (Array.isArray(h)) {
+        const row = h.find(([k]) => k.toLowerCase() === name.toLowerCase());
+        return row?.[1] ?? null;
+      }
+      const rec = h as Record<string, string>;
+      const key = Object.keys(rec).find((k) => k.toLowerCase() === name.toLowerCase());
+      return key ? rec[key]! : null;
+    }
+
+    const { db, sent, userFor } = await boot();
+    setDeps({
+      now: () => frozen,
+      fetch: async (input, init) => {
+        posts.push({ url: String(input), init: init ?? {} });
+        return new Response("ok", { status: 200 });
+      },
+      lookup: async () => [{ address: "93.184.216.34", family: 4 }],
+    });
+    const { cookie } = await asPro(db, userFor);
+    const agent = await createNamedAgent(
+      cookie,
+      "grok-legal",
+      "Grok Legal",
+      "https://example.com/agent-hook",
+    );
+    expect(agent.webhook_secret).toBeTruthy();
+    const live = await mintLive(cookie);
+    const createRes = await postEnvelope(
+      new Request("http://sign.test/v1/envelopes", {
+        method: "POST",
+        headers: { authorization: `Bearer ${live}` },
+        body: await envelopeBody(
+          [
+            {
+              name: "Grok Legal",
+              email: "shop@example.com",
+              kind: "agent",
+              agent: "grok-legal",
+            },
+            { name: "Jane", email: "jane@example.com" },
+          ],
+          "shop@example.com",
+          "https://example.com/env-hook",
+        ),
+      }),
+    );
+    expect(createRes.status).toBe(201);
+    const created = (await createRes.json()) as {
+      id: string;
+      webhook_secret?: string;
+    };
+    expect(created.webhook_secret).toBeTruthy();
+
+    const ready = posts.filter((p) => p.url === "https://example.com/agent-hook");
+    expect(ready).toHaveLength(1);
+    const readyBody = String(ready[0]!.init.body);
+    const readyPayload = JSON.parse(readyBody) as Record<string, unknown>;
+    expect(readyPayload).toEqual({
+      event: "party.ready",
+      id: created.id,
+      agent: "grok-legal",
+      status: "pending",
+    });
+    expect(readyBody).not.toContain(agent.key);
+    expect(readyBody).not.toContain(agent.webhook_secret);
+    expect(readyBody).not.toContain(created.webhook_secret);
+    expect(readyBody).not.toMatch(/sign_agent_/);
+    const readyTs = hdr(ready[0]!.init, "X-Sign-Timestamp");
+    const readySig = hdr(ready[0]!.init, "X-Sign-Signature");
+    const readyExpected = createHmac("sha256", agent.webhook_secret!)
+      .update(`${readyTs}.${readyBody}`)
+      .digest("hex");
+    expect(readySig).toBe(`sha256=${readyExpected}`);
+
+    expect((await postAttest(attestReq(created.id, agent.key), envCtx(created.id))).status).toBe(
+      200,
+    );
+    const invite = sent.find((m) => m.to === "jane@example.com");
+    expect(invite).toBeTruthy();
+    const token = tokenFromUrl(invite!.text.match(/\/s\/([A-Za-z0-9_-]+)/)![1]!);
+    expect(
+      (
+        await postConsent(
+          new Request(`http://sign.test/s/${token}/consent`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ consent: true }),
+          }),
+          { params: Promise.resolve({ token }) },
+        )
+      ).status,
+    ).toBe(200);
+    const pngBody = new FormData();
+    pngBody.set("png", new Blob([png], { type: "image/png" }), "sig.png");
+    const sign = await postSign(
+      new Request(`http://sign.test/s/${token}/sign`, { method: "POST", body: pngBody }),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(sign.status).toBe(200);
+
+    const agentDone = posts.filter(
+      (p) =>
+        p.url === "https://example.com/agent-hook" &&
+        String(p.init.body).includes("envelope.completed"),
+    );
+    expect(agentDone).toHaveLength(1);
+    const agentDonePayload = JSON.parse(String(agentDone[0]!.init.body)) as Record<
+      string,
+      unknown
+    >;
+    expect(agentDonePayload.event).toBe("envelope.completed");
+    expect(agentDonePayload.id).toBe(created.id);
+    expect(agentDonePayload.agent).toBe("grok-legal");
+    expect(agentDonePayload.status).toBe("completed");
+    expect("sha256" in agentDonePayload).toBe(false);
+    expect(String(agentDone[0]!.init.body)).not.toContain(agent.key);
+
+    const envDone = posts.filter((p) => p.url === "https://example.com/env-hook");
+    expect(envDone).toHaveLength(1);
+    const envPayload = JSON.parse(String(envDone[0]!.init.body)) as Record<string, unknown>;
+    expect(envPayload.event).toBe("envelope.completed");
+    expect(envPayload.id).toBe(created.id);
+    expect(envPayload.status).toBe("completed");
+    expect(envPayload.sha256).toBeTruthy();
+    const envTs = hdr(envDone[0]!.init, "X-Sign-Timestamp");
+    const envSig = hdr(envDone[0]!.init, "X-Sign-Signature");
+    const envExpected = createHmac("sha256", created.webhook_secret!)
+      .update(`${envTs}.${String(envDone[0]!.init.body)}`)
+      .digest("hex");
+    expect(envSig).toBe(`sha256=${envExpected}`);
   });
 });
 

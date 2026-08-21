@@ -21,6 +21,7 @@ import {
 } from "../lib/email.js";
 import { verifyOtp } from "../lib/otp.js";
 import { newSigningToken, newTmpKey } from "../lib/tokens.js";
+import { sealWebhookSecret } from "../lib/webhooks.js";
 
 const MAX_ATTEMPTS = 5;
 
@@ -148,12 +149,12 @@ export async function verifyEnvelopeOtp(
   const outSigners: { email: string; sign_url: string | null }[] = [];
   let firstSignUrl: string | null = null;
   for (const row of signerRows) {
-    if (row.signingOrder === 1) {
+    if (row.signingOrder === 1 && row.kind !== "agent") {
       const token = newSigningToken();
       const signUrl = `/s/${token.raw}`;
       await db
         .update(signersTable)
-        .set({ tokenHash: token.hash })
+        .set({ tokenHash: token.hash, tokenEnc: sealWebhookSecret(token.raw) })
         .where(eq(signersTable.id, row.id));
       firstSignUrl = signUrl;
       outSigners.push({ email: row.email, sign_url: signUrl });

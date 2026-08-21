@@ -15,6 +15,10 @@ import {
   type Mailer,
 } from "../lib/email.js";
 import { appearanceKey, objectKey, type BlobStore } from "../lib/storage.js";
+import {
+  fireAgentPartyWebhooks,
+  openWebhookSecret,
+} from "../lib/webhooks.js";
 
 const KINDS = ["original", "sealed", "certificate"] as const;
 const REMIND_AFTER_MS = 3 * 86_400_000;
@@ -94,12 +98,29 @@ export async function remindDue(
     .from(envelopes)
     .where(eq(envelopes.status, "pending"));
   for (const envelope of pending) {
-    if (envelope.expiresAt.getTime() <= now.getTime()) continue;
+    if (envelope.expiresAt.getTime() <= now.getTime()) {
+      if (envelope.status === "pending") {
+        const [claimed] = await db
+          .update(envelopes)
+          .set({ status: "expired" })
+          .where(and(eq(envelopes.id, envelope.id), eq(envelopes.status, "pending")))
+          .returning();
+        if (claimed) {
+          await logEvent(db, { envelopeId: envelope.id, event: "expired" });
+          await fireAgentPartyWebhooks(db, envelope.id, {
+            event: "envelope.expired",
+            status: "expired",
+          });
+        }
+      }
+      continue;
+    }
     const rows = await db
       .select()
       .from(signersTable)
       .where(eq(signersTable.envelopeId, envelope.id));
     for (const signer of rows) {
+      if (signer.kind === "agent") continue;
       if (signer.signedAt || signer.declinedAt || !signer.sentAt) continue;
       if (now.getTime() - signer.sentAt.getTime() < REMIND_AFTER_MS) continue;
       if (
@@ -124,6 +145,14 @@ export async function remindDue(
         .set({ remindedAt: now })
         .where(eq(signersTable.id, signer.id));
       const brand = await loadBrand(db, envelope.userId, getDeps().store);
+      let signUrl: string | undefined;
+      if (signer.tokenEnc) {
+        try {
+          signUrl = `/s/${openWebhookSecret(signer.tokenEnc)}`;
+        } catch {
+          // hash-only or corrupt token_enc: keep the unique-link sentence
+        }
+      }
       const reminder = reminderEmail({
         senderEmail: envelope.senderEmail,
         title: envelope.title,
@@ -132,6 +161,7 @@ export async function remindDue(
           displayName: brand.displayName,
           hasLogo: Boolean(brand.logoBytes),
         },
+        signUrl,
       });
       try {
         await mailer.sendMail({

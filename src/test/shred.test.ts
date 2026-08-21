@@ -203,14 +203,15 @@ describe("remindDue and shredDue", () => {
     expect(reminders[0]!.text).toContain("Repair authorization");
     expect(reminders[0]!.text).toContain("shop@example.com");
     expect(reminders[0]!.text).toContain("2026-08-27");
-    expect(reminders[0]!.text).toMatch(/already sent/i);
-    expect(reminders[0]!.text).toContain("http://localhost:3000/");
-    expect(reminders[0]!.text).not.toMatch(/\/s\//);
+    expect(reminders[0]!.text).toContain(`http://localhost:3000/s/${pending.token}`);
+    expect(reminders[0]!.text).not.toMatch(/already sent/i);
 
     const reminded = await signerHash(pending.db, pending.id);
     expect(reminded.remindedAt).not.toBeNull();
     expect(reminded.remindedAt!.getTime()).toBe(at.getTime());
     expect(reminded.tokenHash).toBe(hashBefore);
+    expect(reminded.tokenEnc).toMatch(/^enc:/);
+    expect(reminded.tokenEnc).not.toContain(pending.token);
 
     setDeps({
       db: pending.db,
@@ -225,6 +226,44 @@ describe("remindDue and shredDue", () => {
     expect(reminderMails(pending.sent)).toHaveLength(1);
 
     expect(inviteMails(completed.sent).length).toBe(completedInvitesBefore);
+  });
+
+  it("hash-only legacy reminder keeps unique-link sentence", { timeout: 60_000 }, async () => {
+    let at = new Date("2026-08-20T12:00:00Z");
+    const pending = await startEnvelope({ now: () => at });
+    const hashBefore = (await signerHash(pending.db, pending.id)).tokenHash;
+    await pending.db
+      .update(signersTable)
+      .set({ tokenEnc: null })
+      .where(eq(signersTable.envelopeId, pending.id));
+
+    at = new Date(at.getTime() + 3 * DAY);
+    await remindDue(pending.db, pending.mailer, at);
+
+    const reminders = reminderMails(pending.sent);
+    expect(reminders).toHaveLength(1);
+    expect(reminders[0]!.text).toMatch(/already sent/i);
+    expect(reminders[0]!.text).not.toMatch(/\/s\//);
+    expect((await signerHash(pending.db, pending.id)).tokenHash).toBe(hashBefore);
+  });
+
+  it("remindDue skips agent parties even if sentAt is old", { timeout: 60_000 }, async () => {
+    let at = new Date("2026-08-20T12:00:00Z");
+    const pending = await startEnvelope({ now: () => at });
+    await pending.db.insert(signersTable).values({
+      envelopeId: pending.id,
+      name: "Grok Legal",
+      email: "bot@example.com",
+      signingOrder: 2,
+      kind: "agent",
+      sentAt: at,
+    });
+
+    at = new Date(at.getTime() + 3 * DAY);
+    await remindDue(pending.db, pending.mailer, at);
+
+    expect(mailsTo(pending.sent, "bot@example.com")).toHaveLength(0);
+    expect(reminderMails(pending.sent).some((m) => m.to === "jane@example.com")).toBe(true);
   });
 
   it("sends at most two reminders", { timeout: 60_000 }, async () => {

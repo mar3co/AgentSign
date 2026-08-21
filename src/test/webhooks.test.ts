@@ -12,7 +12,12 @@ import { auditEvents, envelopes } from "../db/schema.js";
 import { setDeps } from "../lib/deps.js";
 import { makeDevP12 } from "../lib/pdf/devP12.js";
 import { createFsStore } from "../lib/storage.js";
-import { webhookUrlError } from "../lib/webhooks.js";
+import {
+  fireAgentWebhook,
+  newWebhookSecret,
+  sealWebhookSecret,
+  webhookUrlError,
+} from "../lib/webhooks.js";
 import { createTestDb } from "./db.js";
 import { minimalPdf } from "./pdf.js";
 
@@ -255,5 +260,55 @@ describe("envelope.completed webhook", () => {
       lookup: async () => [{ address: "127.0.0.1", family: 4 }],
     });
     expect(await webhookUrlError("https://evil.example/hook")).toBeTruthy();
+  });
+});
+
+describe("per-agent webhooks", () => {
+  it("fireAgentWebhook HMAC sha256= verifies and omits secrets", async () => {
+    const frozen = new Date("2026-08-20T12:00:00Z");
+    const posts: FetchCall[] = [];
+    setDeps({
+      now: () => frozen,
+      fetch: async (input, init) => {
+        posts.push({ url: String(input), init: init ?? {} });
+        return new Response("ok", { status: 200 });
+      },
+      lookup: async () => [{ address: "93.184.216.34", family: 4 }],
+    });
+    const secret = newWebhookSecret();
+    await fireAgentWebhook(
+      {
+        webhookUrl: "https://example.com/agent-hook",
+        webhookSecretHash: sealWebhookSecret(secret),
+      },
+      {
+        event: "party.ready",
+        id: "11111111-1111-1111-1111-111111111111",
+        agent: "grok-legal",
+        status: "pending",
+      },
+    );
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.url).toBe("https://example.com/agent-hook");
+    expect(posts[0]!.init.method).toBe("POST");
+    const rawBody = String(posts[0]!.init.body);
+    const payload = JSON.parse(rawBody) as Record<string, unknown>;
+    expect(payload).toEqual({
+      event: "party.ready",
+      id: "11111111-1111-1111-1111-111111111111",
+      agent: "grok-legal",
+      status: "pending",
+    });
+    expect(rawBody).not.toContain(secret);
+    expect(rawBody).not.toMatch(/sign_agent_/);
+    expect("sign_url" in payload).toBe(false);
+    expect("webhook_secret" in payload).toBe(false);
+    const timestamp = header(posts[0]!.init, "X-Sign-Timestamp");
+    const signature = header(posts[0]!.init, "X-Sign-Signature");
+    expect(timestamp).toBe(String(Math.floor(frozen.getTime() / 1000)));
+    const expected = createHmac("sha256", secret)
+      .update(`${timestamp}.${rawBody}`)
+      .digest("hex");
+    expect(signature).toBe(`sha256=${expected}`);
   });
 });
