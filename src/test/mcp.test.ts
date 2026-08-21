@@ -52,7 +52,13 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
     expect(body).toMatch(/send/);
     expect(body).toMatch(/status/);
     expect(body).toMatch(/download/);
+    expect(body).toMatch(/attest/);
+    expect(body).toMatch(/verify/);
+    expect(body).toMatch(/list_packets/);
+    expect(body).toMatch(/send_packet/);
     expect(body.toLowerCase()).toMatch(/human always signs/);
+    expect(body).toMatch(/No sign tool/);
+    expect(body).not.toMatch(/^- sign —/m);
   });
 
   it("GET /openapi.json lists the five HTTP paths", async () => {
@@ -66,27 +72,48 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
     expect(spec.paths["/v1/envelopes/{id}"]?.get).toBeTruthy();
     expect(spec.paths["/v1/envelopes/{id}"]?.delete).toBeTruthy();
     expect(spec.paths["/v1/envelopes/{id}.pdf"]?.get).toBeTruthy();
+    expect(spec.paths["/v1/envelopes/{id}/attest"]?.post).toBeTruthy();
+    expect(spec.paths["/v1/envelopes/{id}/reject"]?.post).toBeTruthy();
+    expect(spec.paths["/v1/verify"]?.post).toBeTruthy();
+    expect(spec.paths["/v1/agents"]?.get).toBeTruthy();
+    expect(spec.paths["/v1/agents"]?.post).toBeTruthy();
     const dumped = JSON.stringify(spec);
     expect(dumped).toMatch(/bearer/i);
     expect(dumped).toContain("error");
     expect(dumped).toContain("code");
   });
 
-  it("documents v1.1 rest and keeps three MCP tools", async () => {
-    expect(openapi.info.version).toBe("1.1.0");
+  it("documents v1.2 rest and MCP tools without a sign tool", async () => {
+    expect(openapi.info.version).toBe("1.2.0");
+    expect(openapi.openapi).toBe("3.1.0");
     expect(openapi.paths["/v1/branding"]).toBeTruthy();
     expect(openapi.paths["/v1/packets"]).toBeTruthy();
     expect(openapi.paths["/v1/team"]).toBeTruthy();
+    expect(openapi.paths["/v1/agents"]).toBeTruthy();
+    expect(openapi.paths["/v1/envelopes/{id}/attest"]).toBeTruthy();
+    expect(openapi.paths["/v1/envelopes/{id}/reject"]).toBeTruthy();
+    expect(openapi.paths["/v1/verify"]).toBeTruthy();
     const text = await (await getLlms()).text();
     expect(text).toMatch(/send/);
     expect(text).toMatch(/There is no sign/);
     expect(text).toMatch(/\/v1\/packets/);
+    expect(text).toMatch(/\/v1\/agents/);
     expect(text).not.toMatch(/Optional Bearer tmp or live key/);
     expect(text).toMatch(/sign_tmp_/);
     const bearer = openapi.components.securitySchemes.bearerAuth.description;
     expect(bearer).not.toMatch(/Optional on POST \/v1\/envelopes/);
     expect(bearer).toMatch(/sign_tmp_/);
     expect(bearer.toLowerCase()).toMatch(/list/);
+  });
+
+  it("tools/list includes attest and verify and list_packets, not sign", async () => {
+    const { client } = await connectMcp();
+    const listed = await client.listTools();
+    const names = listed.tools.map((t) => t.name);
+    expect(names).toContain("attest");
+    expect(names).toContain("verify");
+    expect(names).toContain("list_packets");
+    expect(names).not.toContain("sign");
   });
 
   it("POST /mcp Streamable HTTP uses protocolVersion 2025-11-25 and lists three tools", async () => {
@@ -132,12 +159,17 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
     const toolsBody = (await listed.json()) as {
       result?: { tools?: { name: string }[] };
     };
-    expect(toolsBody.result?.tools).toHaveLength(3);
     expect(toolsBody.result?.tools?.map((t) => t.name).sort()).toEqual([
+      "attest",
       "download",
+      "list_packets",
+      "reject",
       "send",
+      "send_packet",
       "status",
+      "verify",
     ]);
+    expect(toolsBody.result?.tools?.some((t) => t.name === "sign")).toBe(false);
   });
 
   it(
@@ -157,11 +189,15 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
 
       const { client } = await connectMcp();
       const listed = await client.listTools();
-      expect(listed.tools).toHaveLength(3);
       expect(listed.tools.map((t) => t.name).sort()).toEqual([
+        "attest",
         "download",
+        "list_packets",
+        "reject",
         "send",
+        "send_packet",
         "status",
+        "verify",
       ]);
       expect(listed.tools.some((t) => t.name === "sign")).toBe(false);
       expect(listed.tools.some((t) => t.name === "complete")).toBe(false);

@@ -63,6 +63,32 @@ const packetSchema = {
   },
 } as const;
 
+const agentSchema = {
+  type: "object",
+  properties: {
+    id: { type: "string", format: "uuid" },
+    slug: { type: "string" },
+    name: { type: "string" },
+    has_webhook: { type: "boolean" },
+    created_at: { type: "string", format: "date-time" },
+    revoked_at: { type: ["string", "null"], format: "date-time" },
+  },
+} as const;
+
+const verifySchema = {
+  type: "object",
+  required: ["valid"],
+  properties: {
+    valid: { type: "boolean" },
+    code: { type: "string" },
+    sha256: { type: "string" },
+    envelope_id: { type: "string", format: "uuid" },
+    human_signatures: { type: "integer" },
+    agent_attestations: { type: "integer" },
+    parties: { type: "array", items: { type: "object" } },
+  },
+} as const;
+
 const teamMemberSchema = {
   type: "object",
   properties: {
@@ -108,9 +134,9 @@ export const openapi = {
   openapi: "3.1.0",
   info: {
     title: "Sign",
-    version: "1.1.0",
+    version: "1.2.0",
     description:
-      "Signing primitive. Human always signs. Bearer keys authenticate the caller and never skip the signer. Branding, packets, and team are REST for logged-in Pro or SELF_HOST. Errors are JSON { error, code }.",
+      "Signing primitive. Human always signs. Bearer keys authenticate the caller and never skip the signer. No sign tool. Humans Finish. Agents Attest. Branding, packets, and team are REST for logged-in Pro or SELF_HOST. Errors are JSON { error, code }.",
   },
   components: {
     securitySchemes: {
@@ -118,13 +144,15 @@ export const openapi = {
         type: "http",
         scheme: "bearer",
         description:
-          "sign_live_ (user-minted) or sign_tmp_ (envelope-scoped). POST /v1/envelopes: omit Authorization for a sender OTP one-off, or send sign_live_ to skip OTP. sign_tmp_ cannot create or list envelopes; it can GET/DELETE/PDF that envelope. List, branding, packets, and team need a session cookie or sign_live_ (never sign_tmp_).",
+          "sign_live_ (user-minted), sign_tmp_ (envelope-scoped), or sign_agent_ (named-agent paste key). POST /v1/envelopes: omit Authorization for a sender OTP one-off, or send sign_live_ to skip OTP. sign_tmp_ cannot create or list envelopes; it can GET/DELETE/PDF that envelope. List, branding, packets, team, and agents need a session cookie or sign_live_ (never sign_tmp_). Attest/reject accept sign_agent_ or live/session naming { agent }. Verify is unauthenticated.",
       },
     },
     schemas: {
       Error: errorSchema,
       Branding: brandingSchema,
       Packet: packetSchema,
+      Agent: agentSchema,
+      Verify: verifySchema,
     },
   },
   paths: {
@@ -146,7 +174,8 @@ export const openapi = {
                   sender_email: { type: "string", format: "email" },
                   signers: {
                     type: "string",
-                    description: "JSON array of { name, email }",
+                    description:
+                      "JSON array of { name, email, kind?, agent? }. kind is human (default) or agent; agent is the cabinet slug when kind is agent.",
                   },
                   file: { type: "string", format: "binary", description: "PDF bytes" },
                 },
@@ -270,6 +299,293 @@ export const openapi = {
         },
       },
     },
+    "/v1/envelopes/{id}/attest": {
+      post: {
+        summary: "Attest as the current agent party",
+        description:
+          "Current party must be an agent this caller may use. sign_agent_ infers the slug. Live/session must JSON { agent }. Completes if last party and a human already Finished, or agent_only_attest is on. Otherwise pending. Keys never Finish. No sign tool. Humans Finish. Agents Attest.",
+        security: bearer,
+        parameters: [idParam],
+        requestBody: {
+          required: false,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  agent: {
+                    type: "string",
+                    description: "Named-agent slug. Required for live/session.",
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Attested (pending or completed)",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    status: { type: "string" },
+                    id: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "410": errorResponse,
+        },
+      },
+    },
+    "/v1/envelopes/{id}/reject": {
+      post: {
+        summary: "Reject as the current agent party",
+        description:
+          "Same auth as attest. Sets rejected_at and declines the envelope. No sign tool. Humans Finish. Agents Attest.",
+        security: bearer,
+        parameters: [idParam],
+        requestBody: {
+          required: false,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  agent: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Declined",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    status: { type: "string" },
+                    id: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "410": errorResponse,
+        },
+      },
+    },
+    "/v1/verify": {
+      post: {
+        summary: "Verify a sealed PDF",
+        description:
+          "Unauthenticated. Raw PDF bytes or multipart file. Checks our P12 seal. No DB. valid false with code not_our_seal if unsigned or not ours.",
+        security: [],
+        requestBody: {
+          required: true,
+          content: {
+            "application/pdf": {
+              schema: { type: "string", format: "binary" },
+            },
+            "multipart/form-data": {
+              schema: {
+                type: "object",
+                properties: {
+                  file: { type: "string", format: "binary", description: "PDF bytes" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Verify result",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Verify" },
+              },
+            },
+          },
+          "400": errorResponse,
+        },
+      },
+    },
+    "/v1/agents": {
+      get: {
+        summary: "List named agents",
+        description: `${liveKeyNote} Owner or member. No secrets. Pro required.`,
+        security: liveOrSession,
+        responses: {
+          "200": {
+            description: "List",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    agents: {
+                      type: "array",
+                      items: { $ref: "#/components/schemas/Agent" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "401": errorResponse,
+          "403": errorResponse,
+        },
+      },
+      post: {
+        summary: "Create a named agent",
+        description: `${liveKeyNote} Owner only. Returns sign_agent_ once. Cap 10 active. Optional webhook_url.`,
+        security: liveOrSession,
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["slug", "name"],
+                properties: {
+                  slug: { type: "string" },
+                  name: { type: "string" },
+                  webhook_url: { type: ["string", "null"] },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "201": {
+            description: "Created",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    id: { type: "string", format: "uuid" },
+                    slug: { type: "string" },
+                    name: { type: "string" },
+                    has_webhook: { type: "boolean" },
+                    created_at: { type: "string", format: "date-time" },
+                    revoked_at: { type: ["string", "null"] },
+                    key: { type: "string" },
+                    prefix: { type: "string" },
+                    webhook_secret: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "409": errorResponse,
+        },
+      },
+    },
+    "/v1/agents/{id}": {
+      delete: {
+        summary: "Revoke a named agent",
+        description: `${liveKeyNote} Owner only. Expires paste keys.`,
+        security: liveOrSession,
+        parameters: [idParam],
+        responses: {
+          "204": { description: "Revoked" },
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+        },
+      },
+    },
+    "/v1/agents/{id}/rotate": {
+      post: {
+        summary: "Rotate the named-agent paste key",
+        description: `${liveKeyNote} Owner only. New sign_agent_ shown once. Old hash dead.`,
+        security: liveOrSession,
+        parameters: [idParam],
+        responses: {
+          "200": {
+            description: "Rotated",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    id: { type: "string", format: "uuid" },
+                    slug: { type: "string" },
+                    name: { type: "string" },
+                    has_webhook: { type: "boolean" },
+                    key: { type: "string" },
+                    prefix: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+        },
+      },
+    },
+    "/v1/agents/{id}/webhook": {
+      put: {
+        summary: "Set or clear the agent webhook URL",
+        description: `${liveKeyNote} Owner only. New HMAC secret shown once when a URL is set.`,
+        security: liveOrSession,
+        parameters: [idParam],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["webhook_url"],
+                properties: {
+                  webhook_url: { type: ["string", "null"] },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Updated",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    webhook_secret: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+        },
+      },
+    },
     "/v1/branding": {
       get: {
         summary: "Get cabinet branding",
@@ -362,7 +678,7 @@ export const openapi = {
       },
       post: {
         summary: "Save a packet (PDF + ordered roles)",
-        description: `${liveKeyNote} Multipart title + roles JSON + file, or envelope_id to copy the original PDF. Roles are labels, not people. No MCP packet tool.`,
+        description: `${liveKeyNote} Multipart title + roles JSON + file, or envelope_id to copy the original PDF. Roles are labels, not people. MCP: list_packets / send_packet.`,
         security: liveOrSession,
         requestBody: {
           required: true,

@@ -5,15 +5,20 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import type { ServerNotification, ServerRequest } from "@modelcontextprotocol/sdk/types.js";
+import { attestEnvelope, rejectEnvelope } from "../routes/attest.js";
 import {
   createEnvelope,
   getEnvelope,
   getEnvelopePdf,
 } from "../routes/envelopes.js";
+import { listPackets, sendPacket } from "../routes/packets.js";
+import { verifyEnvelope } from "../routes/verify.js";
 
 const signerSchema = z.object({
   name: z.string().min(1),
   email: z.string().min(1),
+  kind: z.enum(["human", "agent"]).optional(),
+  agent: z.string().optional(),
 });
 
 type Extra = RequestHandlerExtra<ServerRequest, ServerNotification>;
@@ -72,7 +77,7 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
     { name: "sign", version: "0.1.0" },
     {
       instructions:
-        "Sign is a signing primitive. Human always signs. Keys authenticate the caller and never sign. Tools: send, status, download.",
+        "Sign is a signing primitive. Human always signs. Keys authenticate the caller and never sign. No sign tool. Humans Finish. Agents Attest. Tools: send, status, download, attest, reject, verify, list_packets, send_packet.",
     },
   );
 
@@ -81,7 +86,7 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
     {
       title: "Send envelope",
       description:
-        "Create and send a signing envelope (POST /v1/envelopes). Pass PDF bytes as base64, not a public pdf_url. Optional Bearer sign_live_ key. Without a key, starts a sender OTP one-off — tell the operator to check sender email. sign_tmp_ cannot send or list. Human always signs.",
+        "Create and send a signing envelope (POST /v1/envelopes). Pass PDF bytes as base64, not a public pdf_url. Optional Bearer sign_live_ key. Without a key, starts a sender OTP one-off — tell the operator to check sender email. sign_tmp_ cannot send or list. Signer objects may include kind (human|agent) and agent slug. No sign tool. Humans Finish. Agents Attest.",
       inputSchema: {
         title: z.string().min(1),
         sender_email: z.string().min(1),
@@ -191,6 +196,155 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
       }
       const bytes = new Uint8Array(await res.arrayBuffer());
       return toolText(new TextDecoder("latin1").decode(bytes));
+    },
+  );
+
+  server.registerTool(
+    "attest",
+    {
+      title: "Attest as an agent",
+      description:
+        "POST /v1/envelopes/{id}/attest. Current party must be an agent this caller may use. Named-agent sign_agent_ key infers the slug; live/session must pass agent. No sign tool. Humans Finish. Agents Attest.",
+      inputSchema: {
+        envelope_id: z.string(),
+        agent: z.string().optional(),
+        api_key: z.string().optional(),
+      },
+    },
+    async (args, extra) => {
+      const headers = new Headers({ "content-type": "application/json" });
+      const key = resolveKey(args, extra, allowEnvKey);
+      if (key) headers.set("authorization", `Bearer ${key}`);
+      const res = await attestEnvelope(
+        new Request(`http://sign.local/v1/envelopes/${args.envelope_id}/attest`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(args.agent ? { agent: args.agent } : {}),
+        }),
+        args.envelope_id,
+      );
+      return toolText(await jsonOrText(res), !res.ok);
+    },
+  );
+
+  server.registerTool(
+    "reject",
+    {
+      title: "Reject as an agent",
+      description:
+        "POST /v1/envelopes/{id}/reject. Agent decline for the current party. Same auth as attest. No sign tool. Humans Finish. Agents Attest.",
+      inputSchema: {
+        envelope_id: z.string(),
+        agent: z.string().optional(),
+        api_key: z.string().optional(),
+      },
+    },
+    async (args, extra) => {
+      const headers = new Headers({ "content-type": "application/json" });
+      const key = resolveKey(args, extra, allowEnvKey);
+      if (key) headers.set("authorization", `Bearer ${key}`);
+      const res = await rejectEnvelope(
+        new Request(`http://sign.local/v1/envelopes/${args.envelope_id}/reject`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(args.agent ? { agent: args.agent } : {}),
+        }),
+        args.envelope_id,
+      );
+      return toolText(await jsonOrText(res), !res.ok);
+    },
+  );
+
+  server.registerTool(
+    "verify",
+    {
+      title: "Verify a sealed PDF",
+      description:
+        "POST /v1/verify. Unauthenticated. Pass sealed PDF bytes as base64. Checks our P12 seal. Does not Finish or Attest.",
+      inputSchema: {
+        pdf: z.string().describe("Base64-encoded PDF bytes. Not a URL."),
+      },
+    },
+    async (args) => {
+      let bytes: Uint8Array;
+      try {
+        bytes = Uint8Array.from(Buffer.from(args.pdf, "base64"));
+      } catch {
+        return toolText(
+          JSON.stringify({ error: "A PDF is required", code: "invalid_request" }),
+          true,
+        );
+      }
+      const res = await verifyEnvelope(
+        new Request("http://sign.local/v1/verify", {
+          method: "POST",
+          headers: { "content-type": "application/pdf" },
+          body: Buffer.from(bytes),
+        }),
+      );
+      return toolText(await jsonOrText(res), !res.ok);
+    },
+  );
+
+  server.registerTool(
+    "list_packets",
+    {
+      title: "List packets",
+      description:
+        "GET /v1/packets. Requires a session or sign_live_ Bearer. sign_tmp_ cannot list. Returns saved packets for the cabinet.",
+      inputSchema: {
+        api_key: z.string().optional(),
+      },
+    },
+    async (args, extra) => {
+      const key = resolveKey(args, extra, allowEnvKey);
+      if (!key) {
+        return toolText(
+          JSON.stringify({ error: "Unauthorized", code: "unauthorized" }),
+          true,
+        );
+      }
+      const res = await listPackets(
+        new Request("http://sign.local/v1/packets", {
+          headers: { authorization: `Bearer ${key}` },
+        }),
+      );
+      return toolText(await jsonOrText(res), !res.ok);
+    },
+  );
+
+  server.registerTool(
+    "send_packet",
+    {
+      title: "Send a packet",
+      description:
+        "POST /v1/packets/{id}/send. Requires a session or sign_live_ Bearer. signers.length must equal packet role count; order is signing_order. Creates a normal envelope. Human always signs.",
+      inputSchema: {
+        id: z.string().min(1),
+        signers: z.array(signerSchema).min(1),
+        api_key: z.string().optional(),
+      },
+    },
+    async (args, extra) => {
+      const key = resolveKey(args, extra, allowEnvKey);
+      if (!key) {
+        return toolText(
+          JSON.stringify({ error: "Unauthorized", code: "unauthorized" }),
+          true,
+        );
+      }
+      const res = await sendPacket(
+        new Request(`http://sign.local/v1/packets/${args.id}/send`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${key}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ signers: args.signers }),
+        }),
+        args.id,
+      );
+      return toolText(await jsonOrText(res), !res.ok);
     },
   );
 
