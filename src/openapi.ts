@@ -133,10 +133,10 @@ const packetJson = {
 export const openapi = {
   openapi: "3.1.0",
   info: {
-    title: "Sign",
+    title: "AgentSign",
     version: "1.2.0",
     description:
-      "Signing primitive. Human always signs. Bearer keys authenticate the caller and never skip the signer. No sign tool. Humans Finish. Agents Attest. Branding, packets, and team are REST for logged-in Pro or SELF_HOST. Errors are JSON { error, code }.",
+      "AgentSign is a signing primitive. Human always signs. Bearer keys authenticate the caller and never skip the signer. No sign tool. Humans Finish. Agents Attest. Branding, packets, and team are REST for logged-in Pro or SELF_HOST. Errors are JSON { error, code }.",
   },
   components: {
     securitySchemes: {

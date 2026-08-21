@@ -87,10 +87,10 @@ async function jsonOrText(res: Response): Promise<string> {
 export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer {
   const allowEnvKey = opts?.allowEnvKey === true;
   const server = new McpServer(
-    { name: "sign", version: "0.1.0" },
+    { name: "agentsign", version: "1.2.0" },
     {
       instructions:
-        "Sign is a signing primitive. Human always signs. Keys authenticate the caller and never sign. No sign tool. Humans Finish. Agents Attest. Tools: send, status, download, attest, reject, verify, list_packets, send_packet.",
+        "AgentSign is a signing primitive. Human always signs. Keys authenticate the caller and never sign. No sign tool. Humans Finish. Agents Attest. Tools: send, status, download, attest, reject, verify, list_packets, send_packet.",
     },
   );
 

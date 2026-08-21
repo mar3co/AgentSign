@@ -49,16 +49,27 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
     const res = await getLlms(new Request("http://sign.test/llms.txt"));
     expect(res.status).toBe(200);
     const body = await res.text();
+    expect(body).toContain("AgentSign");
+    expect(body).toMatch(/attest/);
+    expect(body).not.toMatch(/AI signed/i);
     expect(body).toMatch(/send/);
     expect(body).toMatch(/status/);
     expect(body).toMatch(/download/);
-    expect(body).toMatch(/attest/);
     expect(body).toMatch(/verify/);
     expect(body).toMatch(/list_packets/);
     expect(body).toMatch(/send_packet/);
     expect(body.toLowerCase()).toMatch(/human always signs/);
     expect(body).toMatch(/No sign tool/);
     expect(body).not.toMatch(/^- sign —/m);
+  });
+
+  it("documents AgentSign in OpenAPI and MCP server metadata", async () => {
+    expect(openapi.info.title).toBe("AgentSign");
+    const { client, server } = await connectMcp();
+    void server;
+    const init = await client.getServerVersion();
+    expect(init?.name).toBe("agentsign");
+    expect(init?.version).toBe("1.2.0");
   });
 
   it("GET /openapi.json lists the five HTTP paths", async () => {

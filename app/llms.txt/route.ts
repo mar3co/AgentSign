@@ -1,8 +1,8 @@
 export const runtime = "nodejs";
 
-const LLMS_TXT = `# Sign
+const LLMS_TXT = `# AgentSign
 
-Sign is a signing primitive. Human always signs. Bearer keys authenticate the caller; they never skip the signer and never auto-sign. No sign tool. Humans Finish. Agents Attest.
+AgentSign is a signing primitive. Human always signs. Bearer keys authenticate the caller; they never skip the signer and never auto-sign. No sign tool. Humans Finish. Agents Attest.
 
 ## MCP tools
 

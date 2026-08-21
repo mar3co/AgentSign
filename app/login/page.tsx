@@ -12,7 +12,7 @@ export default async function LoginPage({
   return (
     <div className="mx-auto flex min-h-dvh max-w-lg flex-col gap-6 p-4">
       <header className="flex items-center justify-between">
-        <p className="text-base font-medium">Sign</p>
+        <p className="text-base font-medium">AgentSign</p>
         <a className="text-sm text-muted-foreground underline" href="/">
           Send a PDF
         </a>
@@ -21,7 +21,7 @@ export default async function LoginPage({
         <LoginForm email={sp.email ?? ""} next={safeNext(sp.next)} />
       </main>
       <footer className="pb-4 text-center text-sm text-muted-foreground">
-        Sign
+        AgentSign
       </footer>
     </div>
   );

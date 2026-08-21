@@ -12,8 +12,8 @@ export function makeDevP12(passphrase: string): Buffer {
   cert.validity.notAfter = new Date();
   cert.validity.notAfter.setFullYear(cert.validity.notBefore.getFullYear() + 1);
   const attrs = [
-    { name: "commonName", value: "Sign dev" },
-    { name: "organizationName", value: "Sign" },
+    { name: "commonName", value: "AgentSign dev" },
+    { name: "organizationName", value: "AgentSign" },
   ];
   cert.setSubject(attrs);
   cert.setIssuer(attrs);

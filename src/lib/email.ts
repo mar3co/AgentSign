@@ -115,7 +115,7 @@ export function createMailer(): Mailer {
 
 export function otpEmail(digits: string): Pick<MailMessage, "subject" | "text"> {
   return {
-    subject: "Your Sign verification code",
+    subject: "Your AgentSign verification code",
     text: `Your verification code is ${digits}. It expires in 10 minutes.`,
   };
 }
@@ -238,9 +238,9 @@ export function teamInviteEmail(input: {
   acceptUrl: string;
 }): Pick<MailMessage, "subject" | "text"> {
   return {
-    subject: "Join the Sign cabinet",
+    subject: "Join the AgentSign cabinet",
     text: [
-      "You were invited to a Sign cabinet.",
+      "You were invited to an AgentSign cabinet.",
       "",
       `Accept here: ${absoluteUrl(input.acceptUrl)}`,
       "",
