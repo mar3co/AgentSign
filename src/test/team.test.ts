@@ -9,6 +9,7 @@ import { POST as postInvite } from "../../app/v1/team/invites/route.js";
 import { DELETE as deleteMember } from "../../app/v1/team/members/[id]/route.js";
 import { accounts, cabinetMembers } from "../db/schema.js";
 import { setDeps } from "../lib/deps.js";
+import { teamSeatCount } from "../routes/team.js";
 import { createTestDb } from "./db.js";
 
 type AuthUser = { id: string; email: string };
@@ -420,5 +421,19 @@ describe("team API", () => {
     expect(res.status).toBe(409);
     const json = (await res.json()) as { error: string; code: string };
     expect(json.code).toBe("already_owns_a_team");
+  });
+});
+
+describe("teamSeatCount", () => {
+  it("coerces postgres bigint strings so owner + rows is a number", () => {
+    expect(1 + ("0" as unknown as number)).toBe("10");
+    expect(teamSeatCount("0")).toBe(1);
+    expect(teamSeatCount("9")).toBe(10);
+    expect(teamSeatCount(0)).toBe(1);
+    expect(teamSeatCount(9)).toBe(10);
+    expect(teamSeatCount(null)).toBe(1);
+    expect(teamSeatCount(undefined)).toBe(1);
+    expect(teamSeatCount("0") >= 10).toBe(false);
+    expect(teamSeatCount("9") >= 10).toBe(true);
   });
 });

@@ -11,6 +11,13 @@ import { hashSigningToken, newSigningToken } from "../lib/tokens.js";
 
 const INVITE_MS = 7 * 86_400_000;
 
+/** Owner is not a row. postgres count(*) is bigint and arrives as a string. */
+export function teamSeatCount(
+  rowCount: number | string | bigint | null | undefined,
+): number {
+  return 1 + Number(rowCount ?? 0);
+}
+
 function jsonError(status: number, error: string, code: string): Response {
   return Response.json({ error, code }, { status });
 }
@@ -144,7 +151,7 @@ export async function inviteMember(req: Request): Promise<Response> {
     .select({ n: count() })
     .from(cabinetMembers)
     .where(eq(cabinetMembers.ownerUserId, ownerUserId));
-  if (1 + (n?.n ?? 0) >= TEAM_CAP) {
+  if (teamSeatCount(n?.n) >= TEAM_CAP) {
     return jsonError(400, "Team is full", "team_full");
   }
 
