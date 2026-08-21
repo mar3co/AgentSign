@@ -662,6 +662,7 @@ export async function postDecline(
       signerName: signer.name,
       title: envelope.title,
       reason,
+      senderEmail: envelope.senderEmail,
       brand: {
         displayName: brand.displayName,
         hasLogo: Boolean(brand.logoBytes),

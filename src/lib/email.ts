@@ -234,11 +234,18 @@ export function declineEmail(input: {
   signerName: string;
   title: string;
   reason?: string;
+  senderEmail?: string;
   brand?: MailBrand;
 }): Pick<MailMessage, "subject" | "text" | "html"> {
-  const text = input.reason
-    ? `${input.signerName} declined to sign "${input.title}". Reason: ${input.reason}`
-    : `${input.signerName} declined to sign "${input.title}".`;
+  const lines = [
+    input.reason
+      ? `${input.signerName} declined to sign "${input.title}". Reason: ${input.reason}`
+      : `${input.signerName} declined to sign "${input.title}".`,
+  ];
+  if (input.brand?.displayName && input.senderEmail) {
+    lines.unshift(`${senderWho(input.senderEmail, input.brand)}`, ``);
+  }
+  const text = lines.join("\n");
   return {
     subject: `${input.signerName} declined to sign ${input.title}`,
     text,

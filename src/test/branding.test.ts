@@ -17,7 +17,7 @@ import { POST as postOtp } from "../../app/v1/envelopes/[id]/otp/route.js";
 import { POST as postKeys } from "../../app/v1/keys/route.js";
 import { accounts, cabinetMembers } from "../db/schema.js";
 import { setDeps } from "../lib/deps.js";
-import { inviteEmail, type MailMessage } from "../lib/email.js";
+import { declineEmail, inviteEmail, type MailMessage } from "../lib/email.js";
 import { LOGO_MAX_BYTES } from "../lib/entitlement.js";
 import { makeDevP12 } from "../lib/pdf/devP12.js";
 import { createFsStore } from "../lib/storage.js";
@@ -470,6 +470,20 @@ describe("branding on mail and signing page", () => {
       brand: { displayName: "Shop <Co>", hasLogo: true },
     });
     expect(mail.text).toContain("Shop <Co>");
+    expect(mail.html).toContain("Shop &lt;Co&gt;");
+    expect(mail.html).not.toContain("Shop <Co>");
+    expect(mail.html).toContain('<img src="cid:brand-logo" alt="" />');
+  });
+
+  it("html-escapes display_name in decline html and prepends sender who", () => {
+    const mail = declineEmail({
+      signerName: "Jane",
+      title: "Repair authorization",
+      senderEmail: "shop@example.com",
+      brand: { displayName: "Shop <Co>", hasLogo: true },
+    });
+    expect(mail.text).toContain("Shop <Co> (shop@example.com)");
+    expect(mail.text).toContain('Jane declined to sign "Repair authorization".');
     expect(mail.html).toContain("Shop &lt;Co&gt;");
     expect(mail.html).not.toContain("Shop <Co>");
     expect(mail.html).toContain('<img src="cid:brand-logo" alt="" />');
