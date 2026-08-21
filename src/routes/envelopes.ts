@@ -14,7 +14,14 @@ import { logEvent, type AuditDb } from "../lib/audit.js";
 import type { AuthUser } from "../lib/auth/supabase.js";
 import { getAuth } from "../lib/auth/supabase.js";
 import { getDeps, storeUnavailableResponse } from "../lib/deps.js";
-import { createMailer, inviteEmail, otpEmail, type Mailer } from "../lib/email.js";
+import { loadBrand } from "../lib/branding.js";
+import {
+  brandMailAttachments,
+  createMailer,
+  inviteEmail,
+  otpEmail,
+  type Mailer,
+} from "../lib/email.js";
 import { sha256Hex } from "../lib/hash.js";
 import {
   claimSends,
@@ -90,6 +97,7 @@ async function inviteFirstSigner(
     senderEmail: string;
     title: string;
     expiresAt: Date;
+    userId: string | null;
   },
   at: Date,
 ): Promise<string | null> {
@@ -106,6 +114,7 @@ async function inviteFirstSigner(
     .update(signersTable)
     .set({ tokenHash: token.hash })
     .where(eq(signersTable.id, first.id));
+  const brand = await loadBrand(db, envelope.userId, requireStore());
   try {
     await mailer.sendMail({
       to: first.email,
@@ -114,7 +123,12 @@ async function inviteFirstSigner(
         senderEmail: envelope.senderEmail,
         title: envelope.title,
         expiresAt: envelope.expiresAt,
+        brand: {
+          displayName: brand.displayName,
+          hasLogo: Boolean(brand.logoBytes),
+        },
       }),
+      attachments: brandMailAttachments(brand.logoBytes),
     });
     await db
       .update(signersTable)

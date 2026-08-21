@@ -1,4 +1,29 @@
+import type { AuditDb } from "./audit.js";
+import { cabinetForUser } from "./cabinet.js";
 import { LOGO_MAX_BYTES } from "./entitlement.js";
+import type { BlobStore } from "./storage.js";
+
+export type LoadedBrand = {
+  displayName: string | null;
+  logoBytes?: Uint8Array;
+};
+
+export async function loadBrand(
+  db: AuditDb,
+  userId: string | null | undefined,
+  store?: BlobStore | null,
+): Promise<LoadedBrand> {
+  if (!userId) return { displayName: null };
+  const cabinet = await cabinetForUser(db, userId);
+  if (!cabinet.logoPath || !store) {
+    return { displayName: cabinet.displayName };
+  }
+  const bytes = await store.get(cabinet.logoPath);
+  return {
+    displayName: cabinet.displayName,
+    ...(bytes ? { logoBytes: bytes } : {}),
+  };
+}
 
 export function brandingKey(ownerUserId: string): string {
   return `branding/${ownerUserId}/logo`;

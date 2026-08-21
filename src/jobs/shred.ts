@@ -7,7 +7,13 @@ import {
   signers as signersTable,
 } from "../db/schema.js";
 import { logEvent, type AuditDb } from "../lib/audit.js";
-import { reminderEmail, type Mailer } from "../lib/email.js";
+import { loadBrand } from "../lib/branding.js";
+import { getDeps } from "../lib/deps.js";
+import {
+  brandMailAttachments,
+  reminderEmail,
+  type Mailer,
+} from "../lib/email.js";
 import { appearanceKey, objectKey, type BlobStore } from "../lib/storage.js";
 
 const KINDS = ["original", "sealed", "certificate"] as const;
@@ -117,13 +123,22 @@ export async function remindDue(
         .update(signersTable)
         .set({ remindedAt: now })
         .where(eq(signersTable.id, signer.id));
+      const brand = await loadBrand(db, envelope.userId, getDeps().store);
       const reminder = reminderEmail({
         senderEmail: envelope.senderEmail,
         title: envelope.title,
         expiresAt: envelope.expiresAt,
+        brand: {
+          displayName: brand.displayName,
+          hasLogo: Boolean(brand.logoBytes),
+        },
       });
       try {
-        await mailer.sendMail({ to: signer.email, ...reminder });
+        await mailer.sendMail({
+          to: signer.email,
+          ...reminder,
+          attachments: brandMailAttachments(brand.logoBytes),
+        });
       } catch (err) {
         await logEvent(db, {
           envelopeId: envelope.id,

@@ -21,6 +21,8 @@ export type CeremonyState = {
   signed?: boolean;
   declined?: boolean;
   status?: string;
+  display_name?: string | null;
+  has_logo?: boolean;
 };
 
 export function SigningCeremony({
@@ -211,6 +213,16 @@ export function SigningCeremony({
     <main className="mx-auto max-w-md p-4">
       <Card>
         <CardHeader>
+          {state.has_logo ? (
+            <img
+              src={`/s/${token}/logo`}
+              alt={state.display_name ?? "Sender"}
+              className="mb-2 max-h-16 w-auto"
+            />
+          ) : null}
+          {state.display_name ? (
+            <p className="text-base text-muted-foreground">{state.display_name}</p>
+          ) : null}
           <CardTitle className="text-base">{state.title}</CardTitle>
           <CardDescription className="text-base">
             {state.signerName}

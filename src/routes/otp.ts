@@ -8,8 +8,10 @@ import {
   signers as signersTable,
 } from "../db/schema.js";
 import { logEvent } from "../lib/audit.js";
+import { loadBrand } from "../lib/branding.js";
 import { getDeps } from "../lib/deps.js";
 import {
+  brandMailAttachments,
   createMailer,
   inviteEmail,
   sendLiveEmail,
@@ -143,6 +145,11 @@ export async function verifyEnvelopeOtp(
   await logEvent(db, { envelopeId: envelope.id, event: "email_verified" });
 
   const mailer = requireMailer();
+  const brand = await loadBrand(db, envelope.userId, getDeps().store);
+  const mailBrand = {
+    displayName: brand.displayName,
+    hasLogo: Boolean(brand.logoBytes),
+  };
   const first = signerRows[0];
   if (first && firstSignUrl) {
     const invite = inviteEmail({
@@ -150,9 +157,14 @@ export async function verifyEnvelopeOtp(
       senderEmail: envelope.senderEmail,
       title: envelope.title,
       expiresAt: envelope.expiresAt,
+      brand: mailBrand,
     });
     try {
-      await mailer.sendMail({ to: first.email, ...invite });
+      await mailer.sendMail({
+        to: first.email,
+        ...invite,
+        attachments: brandMailAttachments(brand.logoBytes),
+      });
       await db
         .update(signersTable)
         .set({ sentAt: at })
@@ -181,8 +193,14 @@ export async function verifyEnvelopeOtp(
     const live = sendLiveEmail({
       title: envelope.title,
       tmpKeyShownInResponse: true,
+      senderEmail: envelope.senderEmail,
+      brand: mailBrand,
     });
-    await mailer.sendMail({ to: envelope.senderEmail, ...live });
+    await mailer.sendMail({
+      to: envelope.senderEmail,
+      ...live,
+      attachments: brandMailAttachments(brand.logoBytes),
+    });
   } catch (err) {
     await logEvent(db, {
       envelopeId: envelope.id,

@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { auditEvents, signers as signersTable } from "../db/schema.js";
 import { createMailer, type MailMessage } from "../lib/email.js";
+import { resetEnvCache } from "../env.js";
 import { getSigningState } from "../routes/signing.js";
 
 const png = Uint8Array.from(
@@ -251,6 +252,39 @@ describe("email templates", () => {
       expect(dumped).not.toContain("/s/");
     } finally {
       spy.mockRestore();
+    }
+  });
+
+  it("Resend JSON includes html and attachment content_id when present", async () => {
+    process.env.RESEND_API_KEY = "re_test";
+    process.env.FROM_EMAIL = "sign@localhost";
+    resetEnvCache();
+    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
+    const prev = globalThis.fetch;
+    globalThis.fetch = fetchMock as typeof fetch;
+    try {
+      const mailer = createMailer();
+      await mailer.sendMail({
+        to: "jane@example.com",
+        subject: "Please sign",
+        text: "Shop Co (shop@example.com) asked you to sign.",
+        html: "<p>Shop Co</p>",
+        attachments: [
+          { filename: "logo.png", bytes: png, contentId: "brand-logo" },
+        ],
+      });
+      expect(fetchMock).toHaveBeenCalled();
+      const [, init] = fetchMock.mock.calls[0]!;
+      const body = JSON.parse(String((init as RequestInit).body)) as {
+        html?: string;
+        attachments?: { content_id?: string }[];
+      };
+      expect(body.html).toBe("<p>Shop Co</p>");
+      expect(body.attachments?.[0]?.content_id).toBe("brand-logo");
+    } finally {
+      globalThis.fetch = prev;
+      delete process.env.RESEND_API_KEY;
+      resetEnvCache();
     }
   });
 });

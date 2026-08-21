@@ -3,14 +3,57 @@ import { absoluteUrl, appOrigin, getEnv } from "../env.js";
 export type MailAttachment = {
   filename: string;
   bytes: Uint8Array;
+  contentId?: string;
 };
 
 export type MailMessage = {
   to: string;
   subject: string;
   text: string;
+  html?: string;
   attachments?: MailAttachment[];
 };
+
+export type MailBrand = {
+  displayName: string | null;
+  hasLogo?: boolean;
+};
+
+export function brandLogoAttachment(bytes: Uint8Array): MailAttachment {
+  return { filename: "logo.png", bytes, contentId: "brand-logo" };
+}
+
+export function brandMailAttachments(
+  logoBytes?: Uint8Array,
+): MailAttachment[] | undefined {
+  if (!logoBytes) return undefined;
+  return [brandLogoAttachment(logoBytes)];
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function htmlFromText(text: string, hasLogo?: boolean): string {
+  const blocks = text.split(/\n{2,}/).map(
+    (block) => `<p>${escapeHtml(block).replaceAll("\n", "<br />")}</p>`,
+  );
+  if (hasLogo) {
+    return `<p><img src="cid:brand-logo" alt="" /></p>${blocks.join("")}`;
+  }
+  return blocks.join("");
+}
+
+function senderWho(senderEmail: string, brand?: MailBrand): string {
+  return brand?.displayName
+    ? `${brand.displayName} (${senderEmail})`
+    : senderEmail;
+}
 
 export type Mailer = {
   sendMail: (message: MailMessage) => Promise<void>;
@@ -54,9 +97,11 @@ export function createMailer(): Mailer {
           to: [message.to],
           subject: message.subject,
           text: message.text,
+          ...(message.html ? { html: message.html } : {}),
           attachments: message.attachments?.map((a) => ({
             filename: a.filename,
             content: Buffer.from(a.bytes).toString("base64"),
+            ...(a.contentId ? { content_id: a.contentId } : {}),
           })),
         }),
       });
@@ -80,18 +125,21 @@ export function inviteEmail(input: {
   senderEmail: string;
   title: string;
   expiresAt: Date;
-}): Pick<MailMessage, "subject" | "text"> {
+  brand?: MailBrand;
+}): Pick<MailMessage, "subject" | "text" | "html"> {
+  const text = [
+    `${senderWho(input.senderEmail, input.brand)} asked you to sign "${input.title}".`,
+    ``,
+    `Sign here: ${absoluteUrl(input.signUrl)}`,
+    ``,
+    `This link expires on ${input.expiresAt.toISOString()}.`,
+    ``,
+    `If you were not expecting this, contact the sender.`,
+  ].join("\n");
   return {
     subject: `Please sign: ${input.title}`,
-    text: [
-      `${input.senderEmail} asked you to sign "${input.title}".`,
-      ``,
-      `Sign here: ${absoluteUrl(input.signUrl)}`,
-      ``,
-      `This link expires on ${input.expiresAt.toISOString()}.`,
-      ``,
-      `If you were not expecting this, contact the sender.`,
-    ].join("\n"),
+    text,
+    html: htmlFromText(text, input.brand?.hasLogo),
   };
 }
 
@@ -100,18 +148,21 @@ export function reminderEmail(input: {
   senderEmail: string;
   title: string;
   expiresAt: Date;
-}): Pick<MailMessage, "subject" | "text"> {
+  brand?: MailBrand;
+}): Pick<MailMessage, "subject" | "text" | "html"> {
+  const text = [
+    `${senderWho(input.senderEmail, input.brand)} asked you to sign "${input.title}".`,
+    ``,
+    `Use the unique signing link we already sent you.`,
+    ``,
+    `This link expires on ${input.expiresAt.toISOString()}.`,
+    ``,
+    `This request is from ${appOrigin()}/.`,
+  ].join("\n");
   return {
     subject: `Reminder: please sign "${input.title}"`,
-    text: [
-      `${input.senderEmail} asked you to sign "${input.title}".`,
-      ``,
-      `Use the unique signing link we already sent you.`,
-      ``,
-      `This link expires on ${input.expiresAt.toISOString()}.`,
-      ``,
-      `This request is from ${appOrigin()}/.`,
-    ].join("\n"),
+    text,
+    html: htmlFromText(text, input.brand?.hasLogo),
   };
 }
 
@@ -119,16 +170,23 @@ export function sendLiveEmail(input: {
   title: string;
   tmpKeyShownInResponse: boolean;
   tmpKey?: string;
-}): Pick<MailMessage, "subject" | "text"> {
+  senderEmail?: string;
+  brand?: MailBrand;
+}): Pick<MailMessage, "subject" | "text" | "html"> {
   const lines = [
     `Your send "${input.title}" is live. Signers have been invited in order.`,
   ];
+  if (input.brand?.displayName && input.senderEmail) {
+    lines.unshift(`${senderWho(input.senderEmail, input.brand)}`, ``);
+  }
   if (!input.tmpKeyShownInResponse && input.tmpKey) {
     lines.push(``, `Your temporary API key (shown once): ${input.tmpKey}`);
   }
+  const text = lines.join("\n");
   return {
     subject: `Your send is live: ${input.title}`,
-    text: lines.join("\n"),
+    text,
+    html: htmlFromText(text, input.brand?.hasLogo),
   };
 }
 
@@ -137,7 +195,9 @@ export function completionEmail(input: {
   title: string;
   shredAt: Date;
   includeAttachments: boolean;
-}): { subject: string; text: string } {
+  senderEmail?: string;
+  brand?: MailBrand;
+}): Pick<MailMessage, "subject" | "text" | "html"> {
   const shred = input.shredAt.toISOString();
   const login = absoluteUrl(
     `/login?email=${encodeURIComponent(input.to)}&next=/envelopes`,
@@ -147,6 +207,9 @@ export function completionEmail(input: {
     ``,
     `Download this. We delete it on ${shred}.`,
   ];
+  if (input.brand?.displayName && input.senderEmail) {
+    lines.unshift(`${senderWho(input.senderEmail, input.brand)}`, ``);
+  }
   if (!input.includeAttachments) {
     lines.push(
       ``,
@@ -159,9 +222,27 @@ export function completionEmail(input: {
     ``,
     `Keep this a year: ${absoluteUrl("/upgrade")}`,
   );
+  const text = lines.join("\n");
   return {
     subject: `Signed: ${input.title}`,
-    text: lines.join("\n"),
+    text,
+    html: htmlFromText(text, input.brand?.hasLogo),
+  };
+}
+
+export function declineEmail(input: {
+  signerName: string;
+  title: string;
+  reason?: string;
+  brand?: MailBrand;
+}): Pick<MailMessage, "subject" | "text" | "html"> {
+  const text = input.reason
+    ? `${input.signerName} declined to sign "${input.title}". Reason: ${input.reason}`
+    : `${input.signerName} declined to sign "${input.title}".`;
+  return {
+    subject: `${input.signerName} declined to sign ${input.title}`,
+    text,
+    html: htmlFromText(text, input.brand?.hasLogo),
   };
 }
 

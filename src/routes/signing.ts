@@ -9,11 +9,15 @@ import {
 } from "../db/schema.js";
 import { getEnv } from "../env.js";
 import { logEvent, type AuditDb } from "../lib/audit.js";
+import { loadBrand, parseLogo } from "../lib/branding.js";
+import { cabinetForUser } from "../lib/cabinet.js";
 import { getDeps, storeUnavailableResponse } from "../lib/deps.js";
 import {
+  brandMailAttachments,
   completionAttachments,
   completionEmail,
   createMailer,
+  declineEmail,
   inviteEmail,
   type Mailer,
 } from "../lib/email.js";
@@ -151,6 +155,14 @@ export async function getSigningState(
     });
   }
 
+  let display_name: string | null = null;
+  let has_logo = false;
+  if (envelope.userId) {
+    const cabinet = await cabinetForUser(db, envelope.userId);
+    display_name = cabinet.displayName;
+    has_logo = Boolean(cabinet.logoPath);
+  }
+
   return Response.json({
     title: envelope.title,
     signerName: signer.name,
@@ -161,6 +173,44 @@ export async function getSigningState(
     signed: Boolean(signer.signedAt),
     declined: Boolean(signer.declinedAt),
     status: envelope.status,
+    display_name,
+    has_logo,
+  });
+}
+
+export async function getCeremonyLogo(
+  _req: Request,
+  token: string,
+): Promise<Response> {
+  const loaded = await loadSigner(token);
+  if (!loaded.ok) return loaded.error;
+  const { db, signer, envelope } = loaded;
+  if (envelope.status === "deleted") {
+    return jsonError(410, "This link has expired", "deleted");
+  }
+  if (!signer.signedAt && envelope.expiresAt.getTime() <= now().getTime()) {
+    return jsonError(410, "This link has expired", "expired");
+  }
+  if (!envelope.userId) {
+    return jsonError(404, "Not found", "not_found");
+  }
+  const cabinet = await cabinetForUser(db, envelope.userId);
+  if (!cabinet.logoPath) {
+    return jsonError(404, "Not found", "not_found");
+  }
+  const store = requireStore();
+  if (!store) return storeUnavailableResponse();
+  const bytes = await store.get(cabinet.logoPath);
+  if (!bytes) {
+    return jsonError(404, "Not found", "not_found");
+  }
+  const parsed = parseLogo(bytes);
+  if (!parsed.ok) {
+    return jsonError(404, "Not found", "not_found");
+  }
+  return new Response(Buffer.from(bytes), {
+    status: 200,
+    headers: { "content-type": parsed.contentType },
   });
 }
 
@@ -377,7 +427,10 @@ export async function postSign(req: Request, token: string): Promise<Response> {
     }
 
     const mailer = requireMailer();
-    const attachments = completionAttachments(result.sealed, result.certificate);
+    const docs = completionAttachments(result.sealed, result.certificate);
+    const brand = await loadBrand(db, envelope.userId, store);
+    const logo = brandMailAttachments(brand.logoBytes);
+    const attachments = [...(docs ?? []), ...(logo ?? [])];
     const recipients = new Set<string>([
       envelope.senderEmail,
       ...allSigners.map((s) => s.email),
@@ -388,13 +441,19 @@ export async function postSign(req: Request, token: string): Promise<Response> {
           to,
           title: envelope.title,
           shredAt,
-          includeAttachments: Boolean(attachments),
+          includeAttachments: Boolean(docs),
+          senderEmail: envelope.senderEmail,
+          brand: {
+            displayName: brand.displayName,
+            hasLogo: Boolean(brand.logoBytes),
+          },
         });
         await mailer.sendMail({
           to,
           subject: body.subject,
           text: body.text,
-          attachments,
+          html: body.html,
+          attachments: attachments.length ? attachments : undefined,
         });
         await logEvent(db, {
           envelopeId: envelope.id,
@@ -451,14 +510,23 @@ export async function postSign(req: Request, token: string): Promise<Response> {
       .update(signersTable)
       .set({ tokenHash: token.hash })
       .where(eq(signersTable.id, next.id));
+    const brand = await loadBrand(db, envelope.userId, store);
     const invite = inviteEmail({
       signUrl,
       senderEmail: envelope.senderEmail,
       title: envelope.title,
       expiresAt: envelope.expiresAt,
+      brand: {
+        displayName: brand.displayName,
+        hasLogo: Boolean(brand.logoBytes),
+      },
     });
     try {
-      await mailer.sendMail({ to: next.email, ...invite });
+      await mailer.sendMail({
+        to: next.email,
+        ...invite,
+        attachments: brandMailAttachments(brand.logoBytes),
+      });
       await db
         .update(signersTable)
         .set({ sentAt: at })
@@ -589,12 +657,20 @@ export async function postDecline(
     payload: reason ? { reason } : undefined,
   });
   try {
+    const brand = await loadBrand(db, envelope.userId, requireStore());
+    const body = declineEmail({
+      signerName: signer.name,
+      title: envelope.title,
+      reason,
+      brand: {
+        displayName: brand.displayName,
+        hasLogo: Boolean(brand.logoBytes),
+      },
+    });
     await mailer.sendMail({
       to: envelope.senderEmail,
-      subject: `${signer.name} declined to sign ${envelope.title}`,
-      text: reason
-        ? `${signer.name} declined to sign "${envelope.title}". Reason: ${reason}`
-        : `${signer.name} declined to sign "${envelope.title}".`,
+      ...body,
+      attachments: brandMailAttachments(brand.logoBytes),
     });
   } catch (err) {
     await logEvent(db, {
