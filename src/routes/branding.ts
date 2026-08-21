@@ -9,13 +9,18 @@ function jsonError(status: number, error: string, code: string): Response {
   return Response.json({ error, code }, { status });
 }
 
-function brandingJson(cabinet: {
-  displayName: string | null;
-  logoPath: string | null;
-}): { display_name: string | null; has_logo: boolean } {
+function brandingJson(
+  cabinet: {
+    displayName: string | null;
+    logoPath: string | null;
+    ownerUserId: string;
+  },
+  callerId: string,
+): { display_name: string | null; has_logo: boolean; can_edit: boolean } {
   return {
     display_name: cabinet.displayName,
     has_logo: Boolean(cabinet.logoPath),
+    can_edit: callerId === cabinet.ownerUserId,
   };
 }
 
@@ -69,7 +74,7 @@ function requireOwner(
 export async function getBranding(req: Request): Promise<Response> {
   const gate = await requireEntitledCabinet(req);
   if (!gate.ok) return gate.response;
-  return Response.json(brandingJson(gate.cabinet));
+  return Response.json(brandingJson(gate.cabinet, gate.caller.user.id));
 }
 
 export async function putBranding(req: Request): Promise<Response> {
@@ -139,7 +144,7 @@ export async function putBranding(req: Request): Promise<Response> {
   }
 
   const updated = await cabinetForUser(gate.caller.db, gate.caller.user.id);
-  return Response.json(brandingJson(updated));
+  return Response.json(brandingJson(updated, gate.caller.user.id));
 }
 
 export async function deleteBrandingLogo(req: Request): Promise<Response> {
@@ -157,5 +162,5 @@ export async function deleteBrandingLogo(req: Request): Promise<Response> {
     .where(eq(accounts.userId, gate.cabinet.ownerUserId));
 
   const updated = await cabinetForUser(gate.caller.db, gate.caller.user.id);
-  return Response.json(brandingJson(updated));
+  return Response.json(brandingJson(updated, gate.caller.user.id));
 }

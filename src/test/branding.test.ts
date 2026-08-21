@@ -247,12 +247,14 @@ describe("branding API", () => {
     expect(await put.json()).toEqual({
       display_name: "Shop Co",
       has_logo: false,
+      can_edit: true,
     });
     const got = await sessionGet(cookie);
     expect(got.status).toBe(200);
     expect(await got.json()).toEqual({
       display_name: "Shop Co",
       has_logo: false,
+      can_edit: true,
     });
   });
 
@@ -270,7 +272,11 @@ describe("branding API", () => {
       }),
     );
     expect(put.status).toBe(200);
-    expect(await put.json()).toEqual({ display_name: "Shop", has_logo: true });
+    expect(await put.json()).toEqual({
+      display_name: "Shop",
+      has_logo: true,
+      can_edit: true,
+    });
     expect(await store.get(`branding/${userId}/logo`)).toEqual(PNG);
   });
 
@@ -392,6 +398,7 @@ describe("branding API", () => {
     expect(await livePut.json()).toEqual({
       display_name: "Live Shop",
       has_logo: false,
+      can_edit: true,
     });
 
     const tmp = newTmpKey();
@@ -426,11 +433,13 @@ describe("branding API", () => {
     expect(await cleared.json()).toEqual({
       display_name: null,
       has_logo: false,
+      can_edit: true,
     });
     const got = await sessionGet(cookie);
     expect(await got.json()).toEqual({
       display_name: null,
       has_logo: false,
+      can_edit: true,
     });
   });
 
@@ -451,6 +460,11 @@ describe("branding API", () => {
 
     const got = await sessionGet(memberCookie);
     expect(got.status).toBe(200);
+    expect(await got.json()).toEqual({
+      display_name: null,
+      has_logo: false,
+      can_edit: false,
+    });
 
     const put = await jsonPut(memberCookie, { display_name: "Hijack" });
     expect(put.status).toBe(403);

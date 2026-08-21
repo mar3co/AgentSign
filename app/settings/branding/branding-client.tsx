@@ -46,13 +46,14 @@ export function BrandingClient() {
         const json = (await res.json()) as {
           display_name: string | null;
           has_logo: boolean;
+          can_edit: boolean;
         };
         if (!cancelled) {
           setState({
             entitled: true,
             displayName: json.display_name,
             hasLogo: json.has_logo,
-            canEdit: true,
+            canEdit: json.can_edit,
           });
         }
       } catch {

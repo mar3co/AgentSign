@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 import { createElement } from "react";
-import { afterEach, describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import { BrandingClient } from "../../app/settings/branding/branding-client.js";
 import { BrandingForm } from "../../app/settings/branding/branding-form.js";
 import { CabinetList } from "../../app/envelopes/cabinet-list.js";
 
@@ -55,5 +56,31 @@ describe("cabinet Branding link", () => {
     expect(screen.getByRole("link", { name: /branding/i }).getAttribute("href")).toBe(
       "/settings/branding",
     );
+  });
+});
+
+describe("BrandingClient", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("renders member read-only when GET can_edit is false", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            display_name: "Shop Co",
+            has_logo: false,
+            can_edit: false,
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      ),
+    );
+    render(createElement(BrandingClient));
+    expect(await screen.findByText("Shop Co")).toBeTruthy();
+    expect(document.querySelector('input[type="file"]')).toBeNull();
   });
 });
