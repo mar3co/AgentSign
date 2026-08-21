@@ -4,7 +4,7 @@ import { getEnv } from "../env.js";
 import { cabinetForUser } from "../lib/cabinet.js";
 import { requireCaller } from "../lib/caller.js";
 import { getDeps } from "../lib/deps.js";
-import { teamInviteEmail } from "../lib/email.js";
+import { createMailer, teamInviteEmail } from "../lib/email.js";
 import { TEAM_CAP } from "../lib/entitlement.js";
 import { equalHex } from "../lib/hash.js";
 import { hashSigningToken, newSigningToken } from "../lib/tokens.js";
@@ -99,7 +99,8 @@ async function readJson(req: Request): Promise<unknown> {
 
 async function sendInviteMail(email: string, rawToken: string): Promise<void> {
   const mail = teamInviteEmail({ acceptUrl: `/team/accept?token=${rawToken}` });
-  await getDeps().mailer.sendMail({ to: email, ...mail });
+  const mailer = getDeps().mailer ?? createMailer();
+  await mailer.sendMail({ to: email, ...mail });
 }
 
 export async function getTeam(req: Request): Promise<Response> {
