@@ -202,6 +202,50 @@ async function pinnedFetch(
   }) as unknown as Response;
 }
 
+/**
+ * HTTPS fetch after SSRF denylist, a second resolve, and DNS pin so a TTL=0
+ * rebind cannot hit a private IP on the real connection.
+ */
+export async function pinnedHttpsFetch(
+  url: string,
+  init: RequestInit,
+): Promise<{ ok: true; response: Response } | { ok: false; error: string }> {
+  const blocked = await webhookUrlError(url);
+  if (blocked) return { ok: false, error: blocked };
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return { ok: false, error: "Invalid webhook URL" };
+  }
+  const resolved = await resolveHost(normalizeHost(parsed.hostname));
+  if (
+    resolved.length === 0 ||
+    resolved.some((row) => isBlockedIp(normalizeHost(row.address)))
+  ) {
+    return { ok: false, error: "Webhook URL is not allowed" };
+  }
+  try {
+    const response = await pinnedFetch(
+      url,
+      {
+        method: init.method,
+        headers: init.headers,
+        body: init.body,
+        redirect: "error",
+        signal: init.signal ?? AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
+      },
+      resolved,
+    );
+    return { ok: true, response };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "fetch failed",
+    };
+  }
+}
+
 function now(): Date {
   return getDeps().now?.() ?? new Date();
 }

@@ -16,6 +16,7 @@ import {
   mcpResource,
   pkceMatches,
   resolveOauthClient,
+  revokeGrantOnRefreshReuse,
   rotateGrantTokens,
   type OauthClientRow,
 } from "../lib/oauth.js";
@@ -218,7 +219,19 @@ export async function postAuthorize(req: Request): Promise<Response> {
   const resource = asString(body.resource) || mcpResource();
 
   if (!clientId) return jsonError(400, "invalid_request", "client_id required");
+
+  const cookie = req.headers.get("cookie");
+  const user = await getAuth().userFromCookie(cookie);
+  if (!user) {
+    return new Response(null, {
+      status: 302,
+      headers: { location: loginNext(body) },
+    });
+  }
+
   const db = requireDb();
+  await ensureAccount(db, user);
+
   const resolved = await resolveOauthClient(db, clientId);
   if (!resolved.ok) {
     return jsonError(400, "invalid_client", resolved.error);
@@ -235,16 +248,6 @@ export async function postAuthorize(req: Request): Promise<Response> {
   if (resource !== mcpResource()) {
     return jsonError(400, "invalid_target", "resource must be this MCP");
   }
-
-  const cookie = req.headers.get("cookie");
-  const user = await getAuth().userFromCookie(cookie);
-  if (!user) {
-    return new Response(null, {
-      status: 302,
-      headers: { location: loginNext(body) },
-    });
-  }
-  await ensureAccount(db, user);
 
   const allowedAgentIds = await resolveAllowedAgentIds(
     db,
@@ -324,7 +327,10 @@ export async function postToken(req: Request): Promise<Response> {
     const refresh = params.refresh_token ?? "";
     if (!refresh) return jsonError(400, "invalid_request", "refresh_token required");
     const grant = await lookupOauthGrantByRefresh(db, refresh);
-    if (!grant) return jsonError(400, "invalid_grant", "refresh token is invalid");
+    if (!grant) {
+      await revokeGrantOnRefreshReuse(db, refresh);
+      return jsonError(400, "invalid_grant", "refresh token is invalid");
+    }
     if (grant.resource !== resource) {
       return jsonError(400, "invalid_target", "resource does not match grant");
     }

@@ -12,7 +12,7 @@ import type { AuditDb } from "./audit.js";
 import { getDeps } from "./deps.js";
 import { equalHex, sha256Hex } from "./hash.js";
 import { newOauthToken } from "./tokens.js";
-import { webhookUrlError } from "./webhooks.js";
+import { pinnedHttpsFetch } from "./webhooks.js";
 
 const CODE_TTL_MS = 10 * 60 * 1000;
 const ACCESS_TTL_MS = 60 * 60 * 1000;
@@ -68,20 +68,14 @@ function requireDb(db?: AuditDb): AuditDb {
 export async function fetchClientMetadata(
   clientIdUrl: string,
 ): Promise<ClientMetadata | { error: string }> {
-  const blocked = await webhookUrlError(clientIdUrl);
-  if (blocked) return { error: blocked };
-  const fetchFn = getDeps().fetch ?? fetch;
-  let res: Response;
-  try {
-    res = await fetchFn(clientIdUrl, {
-      method: "GET",
-      headers: { accept: "application/json" },
-      redirect: "error",
-      signal: AbortSignal.timeout(CIMD_TIMEOUT_MS),
-    });
-  } catch {
-    return { error: "Client metadata fetch failed" };
-  }
+  const got = await pinnedHttpsFetch(clientIdUrl, {
+    method: "GET",
+    headers: { accept: "application/json" },
+    redirect: "error",
+    signal: AbortSignal.timeout(CIMD_TIMEOUT_MS),
+  });
+  if (!got.ok) return { error: got.error };
+  const res = got.response;
   if (!res.ok) return { error: "Client metadata fetch failed" };
   let json: unknown;
   try {
@@ -146,6 +140,31 @@ export async function lookupOauthGrantByRefresh(
   if (!grant?.refreshHash || !equalHex(grant.refreshHash, hash)) return null;
   if (grant.revokedAt) return null;
   return grant;
+}
+
+/** OAuth 2.1: presenting a rotated-away refresh token revokes the grant family. */
+export async function revokeGrantOnRefreshReuse(
+  db: AuditDb,
+  raw: string,
+): Promise<boolean> {
+  if (!raw.startsWith("sign_oauth_")) return false;
+  const hash = sha256Hex(raw);
+  const [grant] = await db
+    .select()
+    .from(oauthGrants)
+    .where(eq(oauthGrants.previousRefreshHash, hash));
+  if (
+    !grant?.previousRefreshHash ||
+    !equalHex(grant.previousRefreshHash, hash)
+  ) {
+    return false;
+  }
+  if (grant.revokedAt) return true;
+  await db
+    .update(oauthGrants)
+    .set({ revokedAt: now() })
+    .where(eq(oauthGrants.id, grant.id));
+  return true;
 }
 
 export async function accountForOauthGrant(
@@ -318,6 +337,7 @@ export async function rotateGrantTokens(
     .set({
       accessHash: access.hash,
       refreshHash: refresh.hash,
+      previousRefreshHash: grant.refreshHash,
       expiresAt,
     })
     .where(eq(oauthGrants.id, grant.id));

@@ -249,6 +249,8 @@ export const oauthGrants = pgTable("oauth_grants", {
   allowedAgentIds: jsonb("allowed_agent_ids").$type<string[]>().notNull().default([]),
   accessHash: text("access_hash"),
   refreshHash: text("refresh_hash"),
+  /** Prior refresh hash; presenting it revokes the grant (OAuth 2.1 reuse). */
+  previousRefreshHash: text("previous_refresh_hash"),
   /** Audience: MCP canonical URI this access token was issued for. */
   resource: text("resource"),
   expiresAt: timestamptz("expires_at"),

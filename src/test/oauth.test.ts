@@ -170,7 +170,21 @@ async function registerPublicClient(redirectUri: string, name = "Test MCP") {
   return json.client_id;
 }
 
-async function issueAccessToken(opts: {
+async function refreshReq(refreshToken: string) {
+  return postToken(
+    new Request("http://sign.test/oauth/token", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+        resource: mcpResource(),
+      }).toString(),
+    }),
+  );
+}
+
+async function issueTokens(opts: {
   cookie: string;
   clientId: string;
   redirectUri: string;
@@ -221,12 +235,22 @@ async function issueAccessToken(opts: {
   const tokens = (await tokenRes.json()) as {
     access_token: string;
     token_type: string;
-    refresh_token?: string;
+    refresh_token: string;
     expires_in?: number;
   };
   expect(tokens.access_token).toMatch(/^sign_oauth_/);
+  expect(tokens.refresh_token).toMatch(/^sign_oauth_/);
   expect(tokens.token_type.toLowerCase()).toBe("bearer");
-  return tokens.access_token;
+  return tokens;
+}
+
+async function issueAccessToken(opts: {
+  cookie: string;
+  clientId: string;
+  redirectUri: string;
+  agentIds?: string[];
+}) {
+  return (await issueTokens(opts)).access_token;
 }
 
 afterEach(() => {
@@ -435,5 +459,83 @@ describe("MCP OAuth 2.1", () => {
     expect(blocked.status).toBeLessThan(500);
     const json = (await blocked.json()) as { error?: string; code?: string };
     expect(json.error).toBeTruthy();
+  });
+
+  it("does not fetch CIMD before login", async () => {
+    let fetches = 0;
+    setDeps({
+      fetch: async () => {
+        fetches += 1;
+        return new Response("{}", { status: 200 });
+      },
+      lookup: async () => [{ address: "93.184.216.34", family: 4 }],
+    });
+    const blocked = await postAuthorize(
+      new Request("http://sign.test/oauth/authorize", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          client_id: "https://cimd.example/client.json",
+          redirect_uri: "https://cimd.example/cb",
+          state: "x",
+          code_challenge: pkceS256("c".repeat(43)),
+          resource: mcpResource(),
+        }),
+      }),
+    );
+    expect(blocked.status).toBe(302);
+    expect(blocked.headers.get("location")).toMatch(/^\/login\?next=/);
+    expect(fetches).toBe(0);
+  });
+
+  it("refresh replay revokes the grant", { timeout: 60_000 }, async () => {
+    const { userFor } = await boot();
+    const cookie = await magicCookie("shop@example.com");
+    expect(userFor("shop@example.com").id).toBeTruthy();
+    const redirectUri = "https://client.example/cb";
+    const clientId = await registerPublicClient(redirectUri);
+    const first = await issueTokens({ cookie, clientId, redirectUri });
+
+    const rotatedRes = await refreshReq(first.refresh_token);
+    expect(rotatedRes.status).toBe(200);
+    const rotated = (await rotatedRes.json()) as {
+      access_token: string;
+      refresh_token: string;
+    };
+    expect(rotated.refresh_token).toMatch(/^sign_oauth_/);
+    expect(rotated.refresh_token).not.toBe(first.refresh_token);
+
+    const replay = await refreshReq(first.refresh_token);
+    expect(replay.status).toBe(400);
+    const replayJson = (await replay.json()) as { error?: string; code?: string };
+    expect(replayJson.error).toBe("invalid_grant");
+
+    const after = await refreshReq(rotated.refresh_token);
+    expect(after.status).toBe(400);
+    const afterJson = (await after.json()) as { error?: string };
+    expect(afterJson.error).toBe("invalid_grant");
+
+    const mcp = await handleMcpHttp(
+      new Request("http://sign.test/mcp", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${rotated.access_token}`,
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+          "mcp-protocol-version": "2025-11-25",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+          params: {
+            protocolVersion: "2025-11-25",
+            capabilities: {},
+            clientInfo: { name: "sign-test", version: "0.1.0" },
+          },
+        }),
+      }),
+    );
+    expect(mcp.status).toBe(401);
   });
 });
