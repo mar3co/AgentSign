@@ -134,6 +134,7 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
       "content-type": "application/json",
       accept: "application/json, text/event-stream",
       "mcp-protocol-version": "2025-11-25",
+      authorization: "Bearer sign_live_mcp_discovery",
     };
     const init = await postMcp(
       new Request("http://sign.test/mcp", {

@@ -5,6 +5,14 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import type { ServerNotification, ServerRequest } from "@modelcontextprotocol/sdk/types.js";
+import { getDb } from "../db/client.js";
+import { getDeps } from "../lib/deps.js";
+import {
+  lookupOauthGrant,
+  looksLikeJwt,
+  mcpResource,
+  mcpUnauthorized,
+} from "../lib/oauth.js";
 import { attestEnvelope, rejectEnvelope } from "../routes/attest.js";
 import {
   createEnvelope,
@@ -357,16 +365,21 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
 }
 
 export async function handleMcpHttp(req: Request): Promise<Response> {
+  const raw = bearerFromRequest(req);
+  if (!raw || looksLikeJwt(raw)) return mcpUnauthorized();
+  if (raw.startsWith("sign_oauth_")) {
+    const db = getDeps().db ?? getDb();
+    const grant = await lookupOauthGrant(db, raw);
+    if (!grant || grant.resource !== mcpResource()) return mcpUnauthorized();
+  }
+
   const server = createSignMcpServer();
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,
   });
   await server.connect(transport);
-  const raw = bearerFromRequest(req);
-  const authInfo: AuthInfo | undefined = raw
-    ? { token: raw, clientId: "sign", scopes: [] }
-    : undefined;
+  const authInfo: AuthInfo = { token: raw, clientId: "sign", scopes: [] };
   try {
     return await transport.handleRequest(req, { authInfo });
   } finally {

@@ -47,7 +47,7 @@ type LoadedEnvelope =
       allSigners: SignerRow[];
       party: SignerRow;
       agent: AgentRow;
-      attestMethod: "agent_key" | null;
+      attestMethod: "agent_key" | "oauth" | null;
       attestLabel: string | null;
     }
   | { ok: false; error: Response };
@@ -61,7 +61,7 @@ async function resolveAttestAgent(
   | {
       ok: true;
       agent: AgentRow;
-      attestMethod: "agent_key" | null;
+      attestMethod: "agent_key" | "oauth" | null;
       attestLabel: string | null;
     }
   | { ok: false; error: Response }
@@ -90,6 +90,35 @@ async function resolveAttestAgent(
       agent,
       attestMethod: "agent_key",
       attestLabel: caller.keyPrefix ? `agent_key:${caller.keyPrefix}` : null,
+    };
+  }
+
+  if (caller.via === "oauth") {
+    if (!caller.allowedAgentIds?.length) {
+      return { ok: false, error: jsonError(403, "Cannot attest this envelope", "cannot_attest") };
+    }
+    const slug =
+      body && typeof body === "object" && !Array.isArray(body)
+        ? parseAgentSlug((body as { agent?: unknown }).agent)
+        : null;
+    if (!slug) {
+      return {
+        ok: false,
+        error: jsonError(403, "Name an allowed agent to attest", "cannot_attest"),
+      };
+    }
+    const agent = await loadActiveAgentBySlug(db, cabinet.ownerUserId, slug);
+    if (!agent || !caller.allowedAgentIds.includes(agent.id)) {
+      return { ok: false, error: jsonError(403, "Cannot attest this envelope", "cannot_attest") };
+    }
+    if (!cabinet.memberUserIds.includes(caller.user.id)) {
+      return { ok: false, error: jsonError(403, "Cannot attest this envelope", "cannot_attest") };
+    }
+    return {
+      ok: true,
+      agent,
+      attestMethod: "oauth",
+      attestLabel: caller.oauthClientName ? `oauth:${caller.oauthClientName}` : "oauth",
     };
   }
 

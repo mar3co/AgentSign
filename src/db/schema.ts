@@ -249,6 +249,8 @@ export const oauthGrants = pgTable("oauth_grants", {
   allowedAgentIds: jsonb("allowed_agent_ids").$type<string[]>().notNull().default([]),
   accessHash: text("access_hash"),
   refreshHash: text("refresh_hash"),
+  /** Audience: MCP canonical URI this access token was issued for. */
+  resource: text("resource"),
   expiresAt: timestamptz("expires_at"),
   revokedAt: timestamptz("revoked_at"),
 }).enableRLS();

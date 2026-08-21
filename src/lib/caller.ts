@@ -5,14 +5,18 @@ import type { AuditDb } from "./audit.js";
 import { getAuth } from "./auth/supabase.js";
 import { getDeps } from "./deps.js";
 import { ensureAccount, lookupApiKey } from "./keys.js";
+import { accountForOauthGrant, lookupOauthGrant } from "./oauth.js";
 
 export type CallerOk = {
   ok: true;
   db: AuditDb;
   user: { id: string; email: string };
-  via: "session" | "live" | "agent";
+  via: "session" | "live" | "agent" | "oauth";
   agentId?: string;
   keyPrefix?: string;
+  allowedAgentIds?: string[];
+  oauthClientId?: string;
+  oauthClientName?: string;
 };
 
 export type CallerFail = { ok: false; response: Response };
@@ -44,8 +48,9 @@ function bearerToken(req: Request): string | null {
 }
 
 /**
- * Live key or session by default. Pass `{ allowAgent: true }` for attest/reject
- * so `sign_agent_` keys are accepted. Rejects `?apiKey=`, tmp keys, and missing auth.
+ * Live key, account OAuth (`sign_oauth_`), or session by default. Pass
+ * `{ allowAgent: true }` for attest/reject so `sign_agent_` keys are accepted.
+ * Rejects `?apiKey=`, tmp keys, and missing auth.
  */
 export async function requireCaller(
   req: Request,
@@ -82,6 +87,21 @@ export async function requireCaller(
         via: "agent",
         agentId: key.agentId,
         keyPrefix: key.prefix,
+      };
+    }
+    if (raw.startsWith("sign_oauth_")) {
+      const grant = await lookupOauthGrant(db, raw);
+      if (!grant) return unauthorized();
+      const account = await accountForOauthGrant(db, grant);
+      if (!account) return unauthorized();
+      return {
+        ok: true,
+        db,
+        user: { id: account.id, email: account.email },
+        via: "oauth",
+        allowedAgentIds: grant.allowedAgentIds ?? [],
+        oauthClientId: grant.clientId,
+        oauthClientName: account.clientName ?? undefined,
       };
     }
     if (!raw.startsWith("sign_live_")) return unauthorized();

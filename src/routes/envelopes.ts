@@ -32,6 +32,7 @@ import {
   ensureAccount,
   lookupApiKey,
 } from "../lib/keys.js";
+import { accountForOauthGrant, lookupOauthGrant } from "../lib/oauth.js";
 import { newOtp } from "../lib/otp.js";
 import { objectKey, type BlobStore } from "../lib/storage.js";
 import { newSigningToken, placeholderSigningTokenHash } from "../lib/tokens.js";
@@ -420,25 +421,33 @@ export async function createEnvelope(req: Request): Promise<Response> {
   let liveUserId: string | null = null;
   const raw = bearerToken(req);
   if (raw) {
-    if (!raw.startsWith("sign_live_")) {
+    if (raw.startsWith("sign_oauth_")) {
+      const grant = await lookupOauthGrant(db, raw);
+      if (!grant) return jsonError(401, "Unauthorized", "unauthorized");
+      const account = await accountForOauthGrant(db, grant);
+      if (!account) return jsonError(401, "Unauthorized", "unauthorized");
+      liveUserId = account.id;
+      senderEmail = account.email;
+    } else if (raw.startsWith("sign_live_")) {
+      const key = await lookupApiKey(db, raw);
+      if (
+        !key ||
+        key.kind !== "live" ||
+        !key.userId ||
+        key.expiresAt.getTime() <= at.getTime()
+      ) {
+        return jsonError(401, "Unauthorized", "unauthorized");
+      }
+      liveUserId = key.userId;
+      const [liveAccount] = await db
+        .select()
+        .from(accounts)
+        .where(eq(accounts.userId, liveUserId));
+      if (liveAccount?.email) {
+        senderEmail = liveAccount.email.trim().toLowerCase();
+      }
+    } else {
       return jsonError(401, "Unauthorized", "unauthorized");
-    }
-    const key = await lookupApiKey(db, raw);
-    if (
-      !key ||
-      key.kind !== "live" ||
-      !key.userId ||
-      key.expiresAt.getTime() <= at.getTime()
-    ) {
-      return jsonError(401, "Unauthorized", "unauthorized");
-    }
-    liveUserId = key.userId;
-    const [liveAccount] = await db
-      .select()
-      .from(accounts)
-      .where(eq(accounts.userId, liveUserId));
-    if (liveAccount?.email) {
-      senderEmail = liveAccount.email.trim().toLowerCase();
     }
   }
 
@@ -558,6 +567,14 @@ type Authed =
       user: AuthUser;
       canDelete: boolean;
     }
+  | {
+      ok: true;
+      db: AuditDb;
+      envelope: EnvelopeRow;
+      via: "oauth";
+      user: AuthUser;
+      canDelete: boolean;
+    }
   | { ok: false; response: Response };
 
 async function cabinetAccess(
@@ -599,6 +616,36 @@ async function authorizeEnvelope(req: Request, envelopeId: string): Promise<Auth
   const db = requireDb();
   const raw = bearerToken(req);
   if (raw) {
+    if (raw.startsWith("sign_oauth_")) {
+      const grant = await lookupOauthGrant(db, raw);
+      if (!grant) {
+        return { ok: false, response: jsonError(401, "Unauthorized", "unauthorized") };
+      }
+      const account = await accountForOauthGrant(db, grant);
+      if (!account) {
+        return { ok: false, response: jsonError(401, "Unauthorized", "unauthorized") };
+      }
+      const [envelope] = await db.select().from(envelopes).where(eq(envelopes.id, envelopeId));
+      if (!envelope) {
+        return { ok: false, response: jsonError(404, "Envelope not found", "not_found") };
+      }
+      const access = await cabinetAccess(db, envelope.userId, account.id);
+      let signed = false;
+      if (!access.sender && !access.member) {
+        signed = await isSignerEmail(db, envelopeId, account.email);
+      }
+      if (!access.sender && !access.member && !signed) {
+        return { ok: false, response: jsonError(401, "Unauthorized", "unauthorized") };
+      }
+      return {
+        ok: true,
+        db,
+        envelope,
+        via: "oauth",
+        user: { id: account.id, email: account.email },
+        canDelete: access.sender || access.owner,
+      };
+    }
     if (!raw.startsWith("sign_tmp_") && !raw.startsWith("sign_live_")) {
       return { ok: false, response: jsonError(401, "Unauthorized", "unauthorized") };
     }
@@ -707,20 +754,29 @@ export async function listEnvelopes(req: Request): Promise<Response> {
 
   const raw = bearerToken(req);
   if (raw) {
-    if (!raw.startsWith("sign_live_")) {
+    if (raw.startsWith("sign_oauth_")) {
+      const grant = await lookupOauthGrant(db, raw);
+      if (!grant) return jsonError(401, "Unauthorized", "unauthorized");
+      const account = await accountForOauthGrant(db, grant);
+      if (!account) return jsonError(401, "Unauthorized", "unauthorized");
+      userId = account.id;
+      email = account.email;
+      await claimSends(db, userId, email);
+    } else if (raw.startsWith("sign_live_")) {
+      const key = await lookupApiKey(db, raw);
+      if (!key || key.kind !== "live" || !key.userId || key.expiresAt.getTime() <= at.getTime()) {
+        return jsonError(401, "Unauthorized", "unauthorized");
+      }
+      userId = key.userId;
+      const [account] = await db
+        .select()
+        .from(accounts)
+        .where(eq(accounts.userId, key.userId));
+      email = account?.email?.trim().toLowerCase() ?? null;
+      if (email) await claimSends(db, userId, email);
+    } else {
       return jsonError(401, "Unauthorized", "unauthorized");
     }
-    const key = await lookupApiKey(db, raw);
-    if (!key || key.kind !== "live" || !key.userId || key.expiresAt.getTime() <= at.getTime()) {
-      return jsonError(401, "Unauthorized", "unauthorized");
-    }
-    userId = key.userId;
-    const [account] = await db
-      .select()
-      .from(accounts)
-      .where(eq(accounts.userId, key.userId));
-    email = account?.email?.trim().toLowerCase() ?? null;
-    if (email) await claimSends(db, userId, email);
   } else {
     const cookie = req.headers.get("cookie");
     if (!cookie) return jsonError(401, "Unauthorized", "unauthorized");
