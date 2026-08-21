@@ -21,6 +21,11 @@ const signerSchema = z.object({
   agent: z.string().optional(),
 });
 
+const packetSignerSchema = z.object({
+  name: z.string().min(1),
+  email: z.string().min(1),
+});
+
 type Extra = RequestHandlerExtra<ServerRequest, ServerNotification>;
 
 function headerValue(
@@ -318,10 +323,10 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
     {
       title: "Send a packet",
       description:
-        "POST /v1/packets/{id}/send. Requires a session or sign_live_ Bearer. signers.length must equal packet role count; order is signing_order. Creates a normal envelope. Human always signs.",
+        "POST /v1/packets/{id}/send. Requires a session or sign_live_ Bearer. signers.length must equal packet role count; order is signing_order. Each signer is { name, email } only — no kind/agent. Mixed parties use send. Human always signs.",
       inputSchema: {
         id: z.string().min(1),
-        signers: z.array(signerSchema).min(1),
+        signers: z.array(packetSignerSchema).min(1),
         api_key: z.string().optional(),
       },
     },

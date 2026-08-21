@@ -45,7 +45,7 @@ async function connectMcp() {
 }
 
 describe("MCP send/status/download + OpenAPI + llms.txt", () => {
-  it("GET /llms.txt lists the three tools and human always signs", async () => {
+  it("GET /llms.txt lists MCP tools and human always signs", async () => {
     const res = await getLlms(new Request("http://sign.test/llms.txt"));
     expect(res.status).toBe(200);
     const body = await res.text();
@@ -116,7 +116,20 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
     expect(names).not.toContain("sign");
   });
 
-  it("POST /mcp Streamable HTTP uses protocolVersion 2025-11-25 and lists three tools", async () => {
+  it("send_packet signers are name and email only; send may include kind/agent", async () => {
+    const { client } = await connectMcp();
+    const listed = await client.listTools();
+    const send = listed.tools.find((t) => t.name === "send");
+    const packet = listed.tools.find((t) => t.name === "send_packet");
+    const packetSchema = JSON.stringify(packet?.inputSchema);
+    expect(packetSchema).not.toMatch(/"kind"/);
+    expect(packetSchema).not.toMatch(/"agent"/);
+    const sendSchema = JSON.stringify(send?.inputSchema);
+    expect(sendSchema).toMatch(/"kind"/);
+    expect(sendSchema).toMatch(/"agent"/);
+  });
+
+  it("POST /mcp Streamable HTTP uses protocolVersion 2025-11-25 and lists MCP tools", async () => {
     const headers = {
       "content-type": "application/json",
       accept: "application/json, text/event-stream",
@@ -173,7 +186,7 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
   });
 
   it(
-    "registers three tools; send then status then download returns %PDF",
+    "registers MCP tools; send then status then download returns %PDF",
     { timeout: 60_000 },
     async () => {
       const db = await createTestDb();
