@@ -1,7 +1,8 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { getEnv } from "../env.js";
 import { accounts, apiKeys, envelopes, signers as signersTable } from "../db/schema.js";
 import type { AuditDb } from "./audit.js";
+import { cabinetForUser } from "./cabinet.js";
 import { getDeps } from "./deps.js";
 import { equalHex, sha256Hex } from "./hash.js";
 import { newLiveKey } from "./tokens.js";
@@ -76,10 +77,16 @@ export async function extendKeep(db: AuditDb, userId: string): Promise<void> {
     .where(eq(accounts.userId, userId));
   const email = account?.email ?? null;
 
+  const cabinet = await cabinetForUser(db, userId);
+  const senderIds =
+    cabinet.ownerUserId === userId ? cabinet.memberUserIds : [userId];
+
   const sent = await db
     .select()
     .from(envelopes)
-    .where(and(eq(envelopes.userId, userId), eq(envelopes.status, "completed")));
+    .where(
+      and(inArray(envelopes.userId, senderIds), eq(envelopes.status, "completed")),
+    );
 
   const byId = new Map(sent.map((e) => [e.id, e]));
   if (email) {

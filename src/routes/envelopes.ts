@@ -1,4 +1,4 @@
-import { and, count, eq, gte, ne, or } from "drizzle-orm";
+import { and, count, eq, gte, inArray, ne, or } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "../db/client.js";
 import {
@@ -13,6 +13,7 @@ import {
 import { logEvent, type AuditDb } from "../lib/audit.js";
 import type { AuthUser } from "../lib/auth/supabase.js";
 import { getAuth } from "../lib/auth/supabase.js";
+import { cabinetForUser } from "../lib/cabinet.js";
 import { getDeps, storeUnavailableResponse } from "../lib/deps.js";
 import { loadBrand } from "../lib/branding.js";
 import {
@@ -175,11 +176,8 @@ export async function sendPreparedPdf(opts: {
   const windowDays = Number(env.FREE_SEND_WINDOW_DAYS);
   const windowStart = new Date(at.getTime() - windowDays * 86_400_000);
 
-  const [account] = await db
-    .select()
-    .from(accounts)
-    .where(eq(accounts.userId, opts.userId));
-  if (account?.plan !== "pro") {
+  const cabinet = await cabinetForUser(db, opts.userId);
+  if (!cabinet.entitled) {
     const [cap] = await db
       .select({ n: count() })
       .from(envelopes)
@@ -473,6 +471,38 @@ type Authed =
     }
   | { ok: false; response: Response };
 
+async function cabinetAccess(
+  db: AuditDb,
+  envelopeUserId: string | null,
+  callerId: string,
+): Promise<{ sender: boolean; member: boolean; owner: boolean }> {
+  if (!envelopeUserId) {
+    return { sender: false, member: false, owner: false };
+  }
+  const cabinet = await cabinetForUser(db, envelopeUserId);
+  return {
+    sender: envelopeUserId === callerId,
+    member: cabinet.memberUserIds.includes(callerId),
+    owner: cabinet.ownerUserId === callerId,
+  };
+}
+
+async function isSignerEmail(
+  db: AuditDb,
+  envelopeId: string,
+  email: string | null | undefined,
+): Promise<boolean> {
+  const normalized = email?.trim().toLowerCase();
+  if (!normalized) return false;
+  const [signed] = await db
+    .select()
+    .from(signersTable)
+    .where(
+      and(eq(signersTable.envelopeId, envelopeId), eq(signersTable.email, normalized)),
+    );
+  return Boolean(signed);
+}
+
 async function authorizeEnvelope(req: Request, envelopeId: string): Promise<Authed> {
   if (hasApiKeyQuery(req)) {
     return { ok: false, response: jsonError(401, "Unauthorized", "unauthorized") };
@@ -498,31 +528,26 @@ async function authorizeEnvelope(req: Request, envelopeId: string): Promise<Auth
       if (!key.userId) {
         return { ok: false, response: jsonError(401, "Unauthorized", "unauthorized") };
       }
-      const isSender = Boolean(envelope.userId && envelope.userId === key.userId);
-      let isSigner = false;
-      if (!isSender) {
+      const access = await cabinetAccess(db, envelope.userId, key.userId);
+      let signed = false;
+      if (!access.sender && !access.member) {
         const [account] = await db
           .select()
           .from(accounts)
           .where(eq(accounts.userId, key.userId));
-        const email = account?.email?.trim().toLowerCase();
-        if (email) {
-          const [signed] = await db
-            .select()
-            .from(signersTable)
-            .where(
-              and(
-                eq(signersTable.envelopeId, envelopeId),
-                eq(signersTable.email, email),
-              ),
-            );
-          isSigner = Boolean(signed);
-        }
+        signed = await isSignerEmail(db, envelopeId, account?.email);
       }
-      if (!isSender && !isSigner) {
+      if (!access.sender && !access.member && !signed) {
         return { ok: false, response: jsonError(401, "Unauthorized", "unauthorized") };
       }
-      return { ok: true, db, envelope, via: "key", key, canDelete: isSender };
+      return {
+        ok: true,
+        db,
+        envelope,
+        via: "key",
+        key,
+        canDelete: access.sender || access.owner,
+      };
     }
     return { ok: true, db, envelope, via: "key", key, canDelete: true };
   }
@@ -541,20 +566,22 @@ async function authorizeEnvelope(req: Request, envelopeId: string): Promise<Auth
   if (!envelope) {
     return { ok: false, response: jsonError(404, "Envelope not found", "not_found") };
   }
-  const canDelete = Boolean(envelope.userId && envelope.userId === user.id);
-  const [signed] = await db
-    .select()
-    .from(signersTable)
-    .where(
-      and(
-        eq(signersTable.envelopeId, envelopeId),
-        eq(signersTable.email, user.email.trim().toLowerCase()),
-      ),
-    );
-  if (!canDelete && !signed) {
+  const access = await cabinetAccess(db, envelope.userId, user.id);
+  const signed =
+    access.sender || access.member
+      ? false
+      : await isSignerEmail(db, envelopeId, user.email);
+  if (!access.sender && !access.member && !signed) {
     return { ok: false, response: jsonError(401, "Unauthorized", "unauthorized") };
   }
-  return { ok: true, db, envelope, via: "session", user, canDelete };
+  return {
+    ok: true,
+    db,
+    envelope,
+    via: "session",
+    user,
+    canDelete: access.sender || access.owner,
+  };
 }
 
 function iso(d: Date | null): string | null {
@@ -605,10 +632,14 @@ export async function listEnvelopes(req: Request): Promise<Response> {
     email = user.email.trim().toLowerCase();
   }
 
+  if (!userId) return jsonError(401, "Unauthorized", "unauthorized");
+  const cabinet = await cabinetForUser(db, userId);
+  const senderIds =
+    cabinet.memberUserIds.length > 0 ? cabinet.memberUserIds : [userId];
   const sent = await db
     .select()
     .from(envelopes)
-    .where(and(eq(envelopes.userId, userId), ne(envelopes.status, "deleted")));
+    .where(and(inArray(envelopes.userId, senderIds), ne(envelopes.status, "deleted")));
   const byId = new Map(sent.map((e) => [e.id, e]));
   if (email) {
     const signed = await db
@@ -623,6 +654,7 @@ export async function listEnvelopes(req: Request): Promise<Response> {
   const rows = [...byId.values()].sort(
     (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
   );
+  const ownerUserId = cabinet.ownerUserId;
   return Response.json({
     envelopes: rows.map((e) => ({
       id: e.id,
@@ -632,7 +664,12 @@ export async function listEnvelopes(req: Request): Promise<Response> {
       created_at: e.createdAt.toISOString(),
       expires_at: e.expiresAt.toISOString(),
       shred_at: e.shredAt.toISOString(),
-      can_delete: Boolean(e.userId && e.userId === userId),
+      can_delete: Boolean(
+        (e.userId && e.userId === userId) ||
+          (userId === ownerUserId &&
+            e.userId &&
+            cabinet.memberUserIds.includes(e.userId)),
+      ),
     })),
   });
 }

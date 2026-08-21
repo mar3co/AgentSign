@@ -361,11 +361,8 @@ export async function postSign(req: Request, token: string): Promise<Response> {
     let keepDays = Number(getEnv().FREE_KEEP_DAYS);
     const proDays = Number(getEnv().PRO_KEEP_DAYS);
     if (envelope.userId) {
-      const [account] = await db
-        .select()
-        .from(accounts)
-        .where(eq(accounts.userId, envelope.userId));
-      if (account?.plan === "pro") keepDays = proDays;
+      const cabinet = await cabinetForUser(db, envelope.userId);
+      if (cabinet.entitled) keepDays = proDays;
     }
     const emails = new Set(
       allSigners.map((s) => s.email.trim().toLowerCase()).filter(Boolean),
