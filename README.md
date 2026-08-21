@@ -10,9 +10,9 @@ This folder is **its own product** under MAR3. Same public cloud for everyone. N
 
 **Legal:** same class as DocuSeal’s **default** product — SES designed for ESIGN + UETA (consent, intent, email-link attribution, PKCS#12 seal, completion certificate). We do **not** claim court admissibility, SOC 2, HIPAA, or QES.
 
-**Packaging:** two columns. **Free** (login optional): 7 days to sign, **7-day shredder** after keep window, live keys after login, quiet ~20 sends / 30 days. **Pro $19/mo** (Stripe Checkout): 1-year keep, cap lift, footer off. No seats, no per-document, no Enterprise page. Team later = invites on the same Pro cabinet. Self-host is forever.
+**Packaging:** two columns. **Free** (login optional): 7 days to sign, **7-day shredder** after keep window, live keys after login, quiet ~20 sends / 30 days. **Pro $19/mo** (Stripe Checkout): 1-year keep, cap lift, footer off, plus branding (display name + logo), saved packets, and team invites on the same cabinet (soft cap 10, not billed per person). No seats, no per-document, no Enterprise page. Self-host is forever: set `SELF_HOST=1` to entitle branding/packets/team without a Stripe plan.
 
-**Surface:** REST (`/v1/envelopes`) + **OpenAPI** (`/openapi.json`) + **llms.txt** + three **MCP** tools (`send`, `status`, `download` — stdio and HTTP). No `sign` tool; a human always signs.
+**Surface:** REST (`/v1/envelopes`; Pro/self-host `/v1/branding`, `/v1/packets`, `/v1/team`) + **OpenAPI** (`/openapi.json`) + **llms.txt** + three **MCP** tools (`send`, `status`, `download` — stdio and HTTP). No `sign` tool; a human always signs. Ceremony logo is `GET /s/:token/logo` (signing token, not a public account URL).
 
 **Platforms:** **Vercel** (Next.js App Router — pages **and** `/v1` Route Handlers, Fluid Compute **Node**, Cron) + **Supabase** (Postgres, Auth, Storage) + **Resend** (app mail) + **Stripe Checkout** (Pro). Pages: **shadcn/ui on Base UI** (Tailwind). Auth stays on Supabase (point custom SMTP at Resend). Self-host is `supabase start` + `next start`. No Hono. **Apache-2.0.**
 
@@ -22,12 +22,14 @@ This folder is **its own product** under MAR3. Same public cloud for everyone. N
 - [Name notes](docs/name.md) — constraints, not a final pick
 - [OSS competitor research](docs/research/2026-08-20-competitor-research.md) — DocuSeal, Documenso, OpenSign, SendSign, LibreSign, Signbee; steal/avoid
 - [v1 implementation plan](docs/superpowers/plans/2026-08-20-sign-v1.md) — walking skeleton, task-by-task
+- [v1.1 design](docs/superpowers/specs/2026-08-20-sign-v1.1-design.md) — branding, packets, team
+- [v1.1 implementation plan](docs/superpowers/plans/2026-08-20-sign-v1.1.md)
 
 License: **Apache-2.0** (`LICENSE`).
 
 ## Local run
 
-Copy `.env.example` to `.env` and fill what you need. A live Vercel or Supabase project is **not** required to develop or run tests — PGlite covers the suite; `STORAGE_DIR` is filesystem blobs for local dogfood (`pnpm dev`). Invite links in mail use `APP_URL` (default `http://localhost:3000`).
+Copy `.env.example` to `.env` and fill what you need. A live Vercel or Supabase project is **not** required to develop, run tests, or self-host locally — this slice does not create cloud projects. PGlite covers the suite; `STORAGE_DIR` is filesystem blobs for local dogfood (`pnpm dev`). Invite links in mail use `APP_URL` (default `http://localhost:3000`). For self-host entitlement, uncomment `SELF_HOST=1` in `.env` (see `.env.example`). Leave it unset on the public cloud.
 
 Optional Postgres for a fuller local stack (compose file is yours if you add one):
 

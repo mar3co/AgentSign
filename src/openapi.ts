@@ -18,6 +18,7 @@ const errorResponse = {
 
 const bearer = [{ bearerAuth: [] }];
 const optionalBearer = [{ bearerAuth: [] }, {}];
+const liveOrSession = [{ bearerAuth: [] }];
 
 const idParam = {
   name: "id",
@@ -26,24 +27,104 @@ const idParam = {
   schema: { type: "string", format: "uuid" },
 };
 
+const tokenParam = {
+  name: "token",
+  in: "path",
+  required: true,
+  schema: { type: "string" },
+  description: "Signing-ceremony token. Not a public account URL.",
+};
+
+const brandingSchema = {
+  type: "object",
+  required: ["display_name", "has_logo", "can_edit"],
+  properties: {
+    display_name: { type: ["string", "null"] },
+    has_logo: { type: "boolean" },
+    can_edit: { type: "boolean" },
+  },
+} as const;
+
+const packetRoleSchema = {
+  type: "object",
+  properties: {
+    signing_order: { type: "integer" },
+    role_name: { type: "string" },
+  },
+} as const;
+
+const packetSchema = {
+  type: "object",
+  properties: {
+    id: { type: "string", format: "uuid" },
+    title: { type: "string" },
+    roles: { type: "array", items: packetRoleSchema },
+    created_at: { type: "string", format: "date-time" },
+  },
+} as const;
+
+const teamMemberSchema = {
+  type: "object",
+  properties: {
+    id: { type: "string" },
+    email: { type: "string", format: "email" },
+    status: { type: "string", enum: ["invited", "active"] },
+    role: { type: "string", enum: ["owner", "member"] },
+  },
+} as const;
+
+const cabinetJson = {
+  type: "object",
+  properties: {
+    owner_email: { type: "string", format: "email" },
+    entitled: { type: "boolean" },
+    role: { type: "string", enum: ["owner", "member"] },
+    members: { type: "array", items: teamMemberSchema },
+  },
+} as const;
+
+const liveKeyNote =
+  "Session cookie or sign_live_ Bearer. Never sign_tmp_. Never ?apiKey=. Cloud Free gets 403 pro_required; SELF_HOST=1 is entitled.";
+
+const brandingJson = {
+  description: "Cabinet branding",
+  content: {
+    "application/json": {
+      schema: { $ref: "#/components/schemas/Branding" },
+    },
+  },
+};
+
+const packetJson = {
+  description: "Packet",
+  content: {
+    "application/json": {
+      schema: { $ref: "#/components/schemas/Packet" },
+    },
+  },
+};
+
 export const openapi = {
   openapi: "3.1.0",
   info: {
     title: "Sign",
-    version: "0.1.0",
+    version: "1.1.0",
     description:
-      "Signing primitive. Human always signs. Bearer keys authenticate the caller and never skip the signer. Errors are JSON { error, code }.",
+      "Signing primitive. Human always signs. Bearer keys authenticate the caller and never skip the signer. Branding, packets, and team are REST for logged-in Pro or SELF_HOST. Errors are JSON { error, code }.",
   },
   components: {
     securitySchemes: {
       bearerAuth: {
         type: "http",
         scheme: "bearer",
-        description: "sign_tmp_ (envelope-scoped) or sign_live_ (user-minted). Optional on POST /v1/envelopes.",
+        description:
+          "sign_tmp_ (envelope-scoped) or sign_live_ (user-minted). Optional on POST /v1/envelopes. Branding, packets, and team require a session cookie or sign_live_ (never sign_tmp_).",
       },
     },
     schemas: {
       Error: errorSchema,
+      Branding: brandingSchema,
+      Packet: packetSchema,
     },
   },
   paths: {
@@ -65,7 +146,7 @@ export const openapi = {
                   sender_email: { type: "string", format: "email" },
                   signers: {
                     type: "string",
-                    description: 'JSON array of { name, email }',
+                    description: "JSON array of { name, email }",
                   },
                   file: { type: "string", format: "binary", description: "PDF bytes" },
                 },
@@ -185,6 +266,398 @@ export const openapi = {
           "401": errorResponse,
           "404": errorResponse,
           "409": errorResponse,
+          "410": errorResponse,
+        },
+      },
+    },
+    "/v1/branding": {
+      get: {
+        summary: "Get cabinet branding",
+        description: `${liveKeyNote} Owner or member. JSON includes can_edit.`,
+        security: liveOrSession,
+        responses: {
+          "200": brandingJson,
+          "401": errorResponse,
+          "403": errorResponse,
+        },
+      },
+      put: {
+        summary: "Update display name and optional logo",
+        description: `${liveKeyNote} Owner only. Multipart or JSON. Empty display_name clears the name. Logo is PNG or JPEG under 256 KiB.`,
+        security: liveOrSession,
+        requestBody: {
+          required: true,
+          content: {
+            "multipart/form-data": {
+              schema: {
+                type: "object",
+                properties: {
+                  display_name: {
+                    type: "string",
+                    description: "1–80 chars, or empty to clear",
+                  },
+                  logo: {
+                    type: "string",
+                    format: "binary",
+                    description: "PNG or JPEG, max 256 KiB",
+                  },
+                },
+              },
+            },
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  display_name: { type: ["string", "null"] },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": brandingJson,
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+        },
+      },
+    },
+    "/v1/branding/logo": {
+      delete: {
+        summary: "Remove the cabinet logo",
+        description: `${liveKeyNote} Owner only.`,
+        security: liveOrSession,
+        responses: {
+          "200": brandingJson,
+          "401": errorResponse,
+          "403": errorResponse,
+        },
+      },
+    },
+    "/v1/packets": {
+      get: {
+        summary: "List saved packets",
+        description: `${liveKeyNote} Owner or member. Quiet cap 50 per cabinet.`,
+        security: liveOrSession,
+        responses: {
+          "200": {
+            description: "List",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    packets: {
+                      type: "array",
+                      items: { $ref: "#/components/schemas/Packet" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "401": errorResponse,
+          "403": errorResponse,
+        },
+      },
+      post: {
+        summary: "Save a packet (PDF + ordered roles)",
+        description: `${liveKeyNote} Multipart title + roles JSON + file, or envelope_id to copy the original PDF. Roles are labels, not people. No MCP packet tool.`,
+        security: liveOrSession,
+        requestBody: {
+          required: true,
+          content: {
+            "multipart/form-data": {
+              schema: {
+                type: "object",
+                properties: {
+                  title: { type: "string" },
+                  roles: {
+                    type: "string",
+                    description: 'JSON array of { role_name }',
+                  },
+                  file: { type: "string", format: "binary", description: "PDF bytes" },
+                  envelope_id: {
+                    type: "string",
+                    format: "uuid",
+                    description: "Copy original PDF and default role names from an envelope",
+                  },
+                },
+              },
+            },
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  title: { type: "string" },
+                  roles: {
+                    type: "array",
+                    items: { type: "object", properties: { role_name: { type: "string" } } },
+                  },
+                  envelope_id: { type: "string", format: "uuid" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "201": packetJson,
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+        },
+      },
+    },
+    "/v1/packets/{id}": {
+      get: {
+        summary: "Get a packet",
+        description: liveKeyNote,
+        security: liveOrSession,
+        parameters: [idParam],
+        responses: {
+          "200": packetJson,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+        },
+      },
+      patch: {
+        summary: "Update packet title and/or roles",
+        description: `${liveKeyNote} Does not replace the PDF.`,
+        security: liveOrSession,
+        parameters: [idParam],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  title: { type: "string" },
+                  roles: {
+                    type: "array",
+                    items: { type: "object", properties: { role_name: { type: "string" } } },
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": packetJson,
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+        },
+      },
+      delete: {
+        summary: "Delete a packet and its PDF",
+        description: liveKeyNote,
+        security: liveOrSession,
+        parameters: [idParam],
+        responses: {
+          "204": { description: "Deleted" },
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+        },
+      },
+    },
+    "/v1/packets/{id}/send": {
+      post: {
+        summary: "Send a packet as a new envelope",
+        description: `${liveKeyNote} signers.length must equal role count; order is signing_order. Creates a normal envelope (same clocks, invite, cap). Human always signs.`,
+        security: liveOrSession,
+        parameters: [idParam],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["signers"],
+                properties: {
+                  signers: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["name", "email"],
+                      properties: {
+                        name: { type: "string" },
+                        email: { type: "string", format: "email" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "201": {
+            description: "Envelope created",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    id: { type: "string" },
+                    status: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "429": errorResponse,
+        },
+      },
+    },
+    "/v1/team": {
+      get: {
+        summary: "List the cabinet team",
+        description:
+          "Session cookie or sign_live_ Bearer. Never sign_tmp_. Returns owner plus members. entitled is false for cloud Free (not 403).",
+        security: liveOrSession,
+        responses: {
+          "200": {
+            description: "Team",
+            content: {
+              "application/json": {
+                schema: cabinetJson,
+              },
+            },
+          },
+          "401": errorResponse,
+        },
+      },
+    },
+    "/v1/team/invites": {
+      post: {
+        summary: "Invite a teammate",
+        description: `${liveKeyNote} Owner only. Cap 10 including the owner. Re-invite of an invited email remints the token.`,
+        security: liveOrSession,
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["email"],
+                properties: {
+                  email: { type: "string", format: "email" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "201": {
+            description: "Invited",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    id: { type: "string" },
+                    email: { type: "string" },
+                    status: { type: "string", enum: ["invited"] },
+                  },
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "409": errorResponse,
+        },
+      },
+    },
+    "/v1/team/members/{id}": {
+      delete: {
+        summary: "Remove an invited or active member",
+        description: `${liveKeyNote} Owner only. Cannot delete the owner.`,
+        security: liveOrSession,
+        parameters: [idParam],
+        responses: {
+          "204": { description: "Removed" },
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+        },
+      },
+    },
+    "/team/accept": {
+      post: {
+        summary: "Accept a team invite",
+        description:
+          "Logged-in session only (not a live key). Session email must match the invite. JSON { token } or form token.",
+        security: [],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["token"],
+                properties: { token: { type: "string" } },
+              },
+            },
+            "application/x-www-form-urlencoded": {
+              schema: {
+                type: "object",
+                required: ["token"],
+                properties: { token: { type: "string" } },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Accepted",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    id: { type: "string" },
+                    email: { type: "string" },
+                    status: { type: "string", enum: ["active"] },
+                  },
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "410": errorResponse,
+        },
+      },
+    },
+    "/s/{token}/logo": {
+      get: {
+        summary: "Ceremony logo bytes",
+        description:
+          "Signing token only. 200 image bytes if that envelope's cabinet has a logo; 404 otherwise. Not a public account URL.",
+        parameters: [tokenParam],
+        responses: {
+          "200": {
+            description: "PNG or JPEG",
+            content: {
+              "image/png": { schema: { type: "string", format: "binary" } },
+              "image/jpeg": { schema: { type: "string", format: "binary" } },
+            },
+          },
+          "404": errorResponse,
           "410": errorResponse,
         },
       },

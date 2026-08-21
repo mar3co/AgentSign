@@ -6,6 +6,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { GET as getLlms } from "../../app/llms.txt/route.js";
 import { GET as getOpenApi } from "../../app/openapi.json/route.js";
+import { openapi } from "../openapi.js";
 import { POST as postMcp } from "../../app/mcp/route.js";
 import { POST as postOtp } from "../../app/v1/envelopes/[id]/otp/route.js";
 import { POST as postConsent } from "../../app/s/[token]/consent/route.js";
@@ -69,6 +70,17 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
     expect(dumped).toMatch(/bearer/i);
     expect(dumped).toContain("error");
     expect(dumped).toContain("code");
+  });
+
+  it("documents v1.1 rest and keeps three MCP tools", async () => {
+    expect(openapi.info.version).toBe("1.1.0");
+    expect(openapi.paths["/v1/branding"]).toBeTruthy();
+    expect(openapi.paths["/v1/packets"]).toBeTruthy();
+    expect(openapi.paths["/v1/team"]).toBeTruthy();
+    const text = await (await getLlms()).text();
+    expect(text).toMatch(/send/);
+    expect(text).toMatch(/There is no sign/);
+    expect(text).toMatch(/\/v1\/packets/);
   });
 
   it("POST /mcp Streamable HTTP uses protocolVersion 2025-11-25 and lists three tools", async () => {

@@ -10,7 +10,7 @@ Sign is a signing primitive. Human always signs. Bearer keys authenticate the ca
 - status — GET /v1/envelopes/{id}. Requires a tmp or live key.
 - download — GET /v1/envelopes/{id}.pdf. Requires a tmp or live key. Returns the sealed PDF after the human ceremony.
 
-There is no sign, complete, or create_template tool.
+There is no sign, complete, or create_template tool. Branding, packets, and team are REST only — not MCP tools.
 
 ## REST
 
@@ -20,7 +20,23 @@ GET /v1/envelopes/{id}
 GET /v1/envelopes/{id}.pdf
 DELETE /v1/envelopes/{id}
 
-Optional Bearer on POST. Errors are JSON { error, code }.
+GET /v1/branding
+PUT /v1/branding
+DELETE /v1/branding/logo
+GET /v1/packets
+POST /v1/packets
+GET /v1/packets/{id}
+PATCH /v1/packets/{id}
+DELETE /v1/packets/{id}
+POST /v1/packets/{id}/send
+GET /v1/team
+POST /v1/team/invites
+DELETE /v1/team/members/{id}
+POST /team/accept
+
+GET /s/{token}/logo — ceremony token only; not a public account URL.
+
+Optional Bearer on POST /v1/envelopes. Branding, packets, and team need a logged-in Pro session or sign_live_ key (self-host: SELF_HOST=1 is entitled). Tmp keys cannot call them. Errors are JSON { error, code }.
 `;
 
 export function GET(): Response {
