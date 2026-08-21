@@ -234,13 +234,12 @@ export async function attestEnvelope(req: Request, envelopeId: string): Promise<
     return jsonError(409, "Envelope is not awaiting attestation", "invalid_state");
   }
 
-  await logEvent(db, {
-    envelopeId: envelope.id,
-    signerId: party.id,
-    event: "attested",
-  });
-
   if (last && !anySigned && !allowAgentOnly) {
+    await logEvent(db, {
+      envelopeId: envelope.id,
+      signerId: party.id,
+      event: "attested",
+    });
     return jsonError(
       400,
       "A human electronic signature is required to complete this envelope",
@@ -262,6 +261,12 @@ export async function attestEnvelope(req: Request, envelopeId: string): Promise<
     },
   );
   if (inviteFail) return inviteFail;
+
+  await logEvent(db, {
+    envelopeId: envelope.id,
+    signerId: party.id,
+    event: "attested",
+  });
 
   return Response.json({ status: "pending" });
 }

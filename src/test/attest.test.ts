@@ -536,5 +536,51 @@ describe("POST /v1/envelopes/:id/attest", () => {
       .where(eq(auditEvents.envelopeId, id));
     expect(audit.some((a) => a.event === "rejected")).toBe(true);
   });
+
+  it("next-human invite mail throw rolls back attestedAt and does not audit attested", {
+    timeout: 60_000,
+  }, async () => {
+    const { db, userFor } = await boot();
+    const { cookie } = await asPro(db, userFor);
+    const agent = await createNamedAgent(cookie, "grok-legal", "Grok Legal");
+    const live = await mintLive(cookie);
+    const id = await sendEnvelope(live, [
+      {
+        name: "Grok Legal",
+        email: "shop@example.com",
+        kind: "agent",
+        agent: "grok-legal",
+      },
+      { name: "Jane", email: "jane@example.com" },
+    ]);
+
+    setDeps({
+      mailer: {
+        sendMail: async (m) => {
+          if (/please sign/i.test(m.subject) && /jane@example.com/i.test(m.to)) {
+            throw new Error("resend down");
+          }
+        },
+      },
+    });
+
+    const res = await postAttest(attestReq(id, agent.key), envCtx(id));
+    expect(res.status).toBe(503);
+
+    const rows = await db
+      .select()
+      .from(signersTable)
+      .where(eq(signersTable.envelopeId, id));
+    rows.sort((a, b) => a.signingOrder - b.signingOrder);
+    expect(rows[0]!.attestedAt).toBeNull();
+    expect(rows[1]!.sentAt).toBeNull();
+
+    const audit = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.envelopeId, id));
+    expect(audit.some((a) => a.event === "attested")).toBe(false);
+  });
 });
+
 
