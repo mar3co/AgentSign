@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getDb } from "../db/client.js";
 import {
   accounts,
+  agents,
   apiKeys,
   auditEvents,
   documents,
@@ -10,11 +11,13 @@ import {
   otpChallenges,
   signers as signersTable,
 } from "../db/schema.js";
+import { loadActiveAgentBySlug, parseAgentSlug } from "../lib/agents.js";
 import { logEvent, type AuditDb } from "../lib/audit.js";
 import type { AuthUser } from "../lib/auth/supabase.js";
 import { getAuth } from "../lib/auth/supabase.js";
 import { cabinetForUser } from "../lib/cabinet.js";
 import { getDeps, storeUnavailableResponse } from "../lib/deps.js";
+import { flagOn } from "../lib/flags.js";
 import { loadBrand } from "../lib/branding.js";
 import {
   brandMailAttachments,
@@ -46,8 +49,103 @@ const OTP_TTL_MS = 10 * 60 * 1000;
 const signerSchema = z.object({
   name: z.string().min(1),
   email: z.string().min(1),
+  kind: z.enum(["human", "agent"]).optional(),
+  agent: z.string().optional(),
 });
 const signersSchema = z.array(signerSchema).min(1);
+
+type ParsedSigner = z.infer<typeof signerSchema>;
+type ResolvedParty = {
+  name: string;
+  email: string;
+  kind: "human" | "agent";
+  agentId: string | null;
+};
+
+async function resolveSignerParties(
+  db: AuditDb,
+  parsed: ParsedSigner[],
+  userId: string | null,
+): Promise<
+  { ok: true; parties: ResolvedParty[] } | { ok: false; response: Response }
+> {
+  const wantsAgent = parsed.some((s) => (s.kind ?? "human") === "agent");
+  if (!wantsAgent) {
+    return {
+      ok: true,
+      parties: parsed.map((s) => ({
+        name: s.name,
+        email: s.email.trim().toLowerCase(),
+        kind: "human" as const,
+        agentId: null,
+      })),
+    };
+  }
+
+  if (!(await flagOn("agent_parties"))) {
+    return {
+      ok: false,
+      response: jsonError(403, "Agent parties are disabled", "flag_off"),
+    };
+  }
+  if (!userId) {
+    return {
+      ok: false,
+      response: jsonError(403, "Pro plan required", "pro_required"),
+    };
+  }
+
+  const cabinet = await cabinetForUser(db, userId);
+  if (!cabinet.entitled) {
+    return {
+      ok: false,
+      response: jsonError(403, "Pro plan required", "pro_required"),
+    };
+  }
+
+  const ownerEmail = cabinet.ownerEmail?.trim().toLowerCase() ?? "";
+  const parties: ResolvedParty[] = [];
+  for (const s of parsed) {
+    const kind = s.kind ?? "human";
+    const email = s.email.trim().toLowerCase();
+    if (kind !== "agent") {
+      parties.push({ name: s.name, email, kind: "human", agentId: null });
+      continue;
+    }
+    const slug = parseAgentSlug(s.agent);
+    if (!slug) {
+      return { ok: false, response: jsonError(400, "Unknown agent", "unknown_agent") };
+    }
+    const agent = await loadActiveAgentBySlug(db, cabinet.ownerUserId, slug);
+    if (!agent) {
+      return { ok: false, response: jsonError(400, "Unknown agent", "unknown_agent") };
+    }
+    if (!ownerEmail || email !== ownerEmail) {
+      return {
+        ok: false,
+        response: jsonError(
+          400,
+          "Agent party email must match the agent owner's account",
+          "invalid_request",
+        ),
+      };
+    }
+    parties.push({ name: s.name, email, kind: "agent", agentId: agent.id });
+  }
+  return { ok: true, parties };
+}
+
+function signerInsertValues(envelopeId: string, parties: ResolvedParty[]) {
+  return parties.map((s, i) => ({
+    envelopeId,
+    name: s.name,
+    email: s.email,
+    signingOrder: i + 1,
+    kind: s.kind,
+    agentId: s.agentId,
+    tokenHash: s.kind === "agent" ? null : placeholderSigningTokenHash(),
+  }));
+}
 
 function jsonError(status: number, error: string, code: string): Response {
   return Response.json({ error, code }, { status });
@@ -109,6 +207,7 @@ async function inviteFirstSigner(
   signerRows.sort((a, b) => a.signingOrder - b.signingOrder);
   const first = signerRows[0];
   if (!first) return null;
+  if (first.kind === "agent") return null;
   const token = newSigningToken();
   const signUrl = `/s/${token.raw}`;
   await db
@@ -160,7 +259,7 @@ export async function sendPreparedPdf(opts: {
   title: string;
   senderEmail: string;
   userId: string;
-  signers: { name: string; email: string }[];
+  signers: ParsedSigner[];
   bytes: Uint8Array;
   webhookUrl?: string | null;
   webhookSecret?: string | null;
@@ -175,6 +274,9 @@ export async function sendPreparedPdf(opts: {
   const limit = Number(env.FREE_SEND_LIMIT);
   const windowDays = Number(env.FREE_SEND_WINDOW_DAYS);
   const windowStart = new Date(at.getTime() - windowDays * 86_400_000);
+
+  const resolved = await resolveSignerParties(db, opts.signers, opts.userId);
+  if (!resolved.ok) return resolved.response;
 
   const cabinet = await cabinetForUser(db, opts.userId);
   if (!cabinet.entitled) {
@@ -235,15 +337,7 @@ export async function sendPreparedPdf(opts: {
     storagePath,
     documentHash,
   });
-  await db.insert(signersTable).values(
-    opts.signers.map((s, i) => ({
-      envelopeId: envelope.id,
-      name: s.name,
-      email: s.email.trim().toLowerCase(),
-      signingOrder: i + 1,
-      tokenHash: placeholderSigningTokenHash(),
-    })),
-  );
+  await db.insert(signersTable).values(signerInsertValues(envelope.id, resolved.parties));
 
   const signUrl = await inviteFirstSigner(db, mailer, envelope, at);
   return Response.json(
@@ -360,6 +454,9 @@ export async function createEnvelope(req: Request): Promise<Response> {
     });
   }
 
+  const resolved = await resolveSignerParties(db, parsedSigners, liveUserId);
+  if (!resolved.ok) return resolved.response;
+
   const [cap] = await db
     .select({ n: count() })
     .from(envelopes)
@@ -412,15 +509,7 @@ export async function createEnvelope(req: Request): Promise<Response> {
     documentHash,
   });
 
-  await db.insert(signersTable).values(
-    parsedSigners.map((s, i) => ({
-      envelopeId: envelope.id,
-      name: s.name,
-      email: s.email.trim().toLowerCase(),
-      signingOrder: i + 1,
-      tokenHash: placeholderSigningTokenHash(),
-    })),
-  );
+  await db.insert(signersTable).values(signerInsertValues(envelope.id, resolved.parties));
 
   const otp = await newOtp();
   await db.insert(otpChallenges).values({
@@ -588,6 +677,16 @@ function iso(d: Date | null): string | null {
   return d ? d.toISOString() : null;
 }
 
+function agentSlugField(
+  kind: "human" | "agent",
+  agentId: string | null,
+  slugById: Map<string, string>,
+): { agent?: string } {
+  if (kind !== "agent" || !agentId) return {};
+  const slug = slugById.get(agentId);
+  return slug ? { agent: slug } : {};
+}
+
 function keyExpired(authed: Extract<Authed, { ok: true }>): boolean {
   if (authed.via !== "key") return false;
   const keyDead = authed.key.expiresAt.getTime() <= now().getTime();
@@ -690,6 +789,35 @@ export async function getEnvelope(req: Request, envelopeId: string): Promise<Res
     .where(eq(signersTable.envelopeId, envelope.id));
   signerRows.sort((a, b) => a.signingOrder - b.signingOrder);
 
+  const agentIds = [
+    ...new Set(
+      signerRows
+        .map((s) => s.agentId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const agentRows =
+    agentIds.length === 0
+      ? []
+      : await db.select().from(agents).where(inArray(agents.id, agentIds));
+  const slugById = new Map(agentRows.map((a) => [a.id, a.slug]));
+
+  const currentIndex =
+    envelope.status === "pending"
+      ? signerRows.findIndex(
+          (s) => !s.signedAt && !s.attestedAt && !s.declinedAt && !s.rejectedAt,
+        )
+      : -1;
+  const current = currentIndex >= 0 ? signerRows[currentIndex] : null;
+  const current_party = current
+    ? {
+        index: currentIndex,
+        kind: current.kind,
+        email: current.email,
+        ...agentSlugField(current.kind, current.agentId, slugById),
+      }
+    : null;
+
   const auditRows = await db
     .select()
     .from(auditEvents)
@@ -702,13 +830,18 @@ export async function getEnvelope(req: Request, envelopeId: string): Promise<Res
     title: envelope.title,
     expires_at: envelope.expiresAt.toISOString(),
     shred_at: envelope.shredAt.toISOString(),
+    current_party,
     signers: signerRows.map((s) => ({
+      kind: s.kind,
       email: s.email,
+      ...agentSlugField(s.kind, s.agentId, slugById),
       sent_at: iso(s.sentAt),
       opened_at: iso(s.openedAt),
       consented_at: iso(s.consentedAt),
       signed_at: iso(s.signedAt),
+      attested_at: iso(s.attestedAt),
       declined_at: iso(s.declinedAt),
+      rejected_at: iso(s.rejectedAt),
       reminded_at: iso(s.remindedAt),
     })),
     audit: auditRows.map((a) => ({ event: a.event, at: a.createdAt.toISOString() })),

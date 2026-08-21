@@ -38,3 +38,23 @@ export async function loadAgent(
     .where(and(eq(agents.id, id), eq(agents.ownerUserId, ownerUserId)));
   return row ?? null;
 }
+
+/** Active (unrevoked) named agent for a cabinet owner + slug. */
+export async function loadActiveAgentBySlug(
+  db: AuditDb,
+  ownerUserId: string,
+  slug: string,
+): Promise<AgentRow | null> {
+  if (!slug) return null;
+  const [row] = await db
+    .select()
+    .from(agents)
+    .where(
+      and(
+        eq(agents.ownerUserId, ownerUserId),
+        eq(agents.slug, slug),
+        isNull(agents.revokedAt),
+      ),
+    );
+  return row ?? null;
+}

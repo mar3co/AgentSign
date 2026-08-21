@@ -2,14 +2,24 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { GET as getAuthCallback } from "../../app/auth/callback/route.js";
 import { POST as postLogin } from "../../app/login/session/route.js";
+import { POST as postAgents } from "../../app/v1/agents/route.js";
 import { POST as postEnvelope } from "../../app/v1/envelopes/route.js";
+import { GET as getEnvelope } from "../../app/v1/envelopes/[id]/route.js";
 import { POST as postOtp } from "../../app/v1/envelopes/[id]/otp/route.js";
-import { apiKeys, envelopes, otpChallenges } from "../db/schema.js";
-import { setDeps } from "../lib/deps.js";
+import { POST as postKeys } from "../../app/v1/keys/route.js";
+import {
+  accounts,
+  apiKeys,
+  envelopes,
+  otpChallenges,
+  signers as signersTable,
+} from "../db/schema.js";
+import { resetEnvCache } from "../env.js";
+import { resetDeps, setDeps } from "../lib/deps.js";
 import { createFsStore } from "../lib/storage.js";
 import { createTestDb } from "./db.js";
 import { minimalPdf } from "./pdf.js";
@@ -32,6 +42,7 @@ function createFakeAuth() {
   }
 
   return {
+    userFor,
     adapter: {
       async sendMagicLink({ email }: { email: string }) {
         const u = userFor(email);
@@ -484,5 +495,310 @@ describe("POST /v1/envelopes", () => {
     expect(json.code).toBe("send_limit");
     const [row] = await db.select().from(envelopes).where(eq(envelopes.id, ids[20]!));
     expect(row!.status).toBe("pending_sender");
+  });
+});
+
+type EnvelopeStatusJson = {
+  id: string;
+  status: string;
+  current_party: {
+    index: number;
+    kind: "human" | "agent";
+    email: string;
+    agent?: string;
+  } | null;
+  signers: Array<{
+    kind: "human" | "agent";
+    email: string;
+    agent?: string;
+    signed_at: string | null;
+    attested_at: string | null;
+    declined_at: string | null;
+    rejected_at: string | null;
+  }>;
+};
+
+async function bootAuth() {
+  const db = await createTestDb();
+  const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+  const sent: { to: string; subject: string; text: string }[] = [];
+  const { adapter, userFor } = createFakeAuth();
+  setDeps({
+    db,
+    store,
+    auth: adapter,
+    mailer: {
+      sendMail: async (m) => {
+        sent.push(m);
+      },
+    },
+  });
+  return { db, sent, userFor };
+}
+
+async function mintLive(cookie: string) {
+  const minted = await postKeys(
+    new Request("http://sign.test/v1/keys", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: "{}",
+    }),
+  );
+  expect(minted.status).toBe(201);
+  const { key } = (await minted.json()) as { key: string };
+  expect(key).toMatch(/^sign_live_/);
+  return key;
+}
+
+async function envelopeBody(signers: unknown, sender = "shop@example.com") {
+  const pdf = await minimalPdf();
+  const body = new FormData();
+  body.set("title", "Repair authorization");
+  body.set("sender_email", sender);
+  body.set("signers", JSON.stringify(signers));
+  body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
+  return body;
+}
+
+afterEach(() => {
+  delete process.env.SIGN_FLAG_AGENT_PARTIES;
+  resetEnvCache();
+  resetDeps();
+});
+
+describe("POST /v1/envelopes agent parties", () => {
+  it("omitted kind still creates a human party", async () => {
+    await bootAuth();
+    const cookie = await magicCookie("shop@example.com");
+    const key = await mintLive(cookie);
+    const res = await postEnvelope(
+      new Request("http://sign.test/v1/envelopes", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}` },
+        body: await envelopeBody([{ name: "Jane", email: "jane@example.com" }]),
+      }),
+    );
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as { id: string; status: string };
+    expect(created.status).toBe("pending");
+
+    const status = await getEnvelope(
+      new Request(`http://sign.test/v1/envelopes/${created.id}`, {
+        headers: { authorization: `Bearer ${key}` },
+      }),
+      { params: Promise.resolve({ id: created.id }) },
+    );
+    expect(status.status).toBe(200);
+    const json = (await status.json()) as EnvelopeStatusJson;
+    expect(json.signers).toHaveLength(1);
+    expect(json.signers[0]!.kind).toBe("human");
+    expect(json.signers[0]!.email).toBe("jane@example.com");
+    expect(json.signers[0]!.agent).toBeUndefined();
+    expect(json.current_party).toEqual({
+      index: 0,
+      kind: "human",
+      email: "jane@example.com",
+    });
+  });
+
+  it("Pro live key can send A then H and GET shows current_party agent", async () => {
+    const { db, sent, userFor } = await bootAuth();
+    const cookie = await magicCookie("shop@example.com");
+    const userId = userFor("shop@example.com").id;
+    await db.update(accounts).set({ plan: "pro" }).where(eq(accounts.userId, userId));
+
+    const createdAgent = await postAgents(
+      new Request("http://sign.test/v1/agents", {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ slug: "grok-legal", name: "Grok Legal" }),
+      }),
+    );
+    expect(createdAgent.status).toBe(201);
+
+    const key = await mintLive(cookie);
+    const beforeMail = sent.length;
+    const res = await postEnvelope(
+      new Request("http://sign.test/v1/envelopes", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}` },
+        body: await envelopeBody([
+          {
+            name: "Grok Legal",
+            email: "shop@example.com",
+            kind: "agent",
+            agent: "grok-legal",
+          },
+          { name: "Jane", email: "jane@example.com" },
+        ]),
+      }),
+    );
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as { id: string; status: string };
+    expect(created.status).toBe("pending");
+
+    const rows = await db
+      .select()
+      .from(signersTable)
+      .where(eq(signersTable.envelopeId, created.id));
+    rows.sort((a, b) => a.signingOrder - b.signingOrder);
+    expect(rows[0]!.kind).toBe("agent");
+    expect(rows[0]!.agentId).toBeTruthy();
+    expect(rows[0]!.tokenHash).toBeNull();
+    expect(rows[0]!.tokenEnc).toBeNull();
+    expect(rows[1]!.kind).toBe("human");
+    expect(rows[1]!.agentId).toBeNull();
+
+    const afterMail = sent.slice(beforeMail);
+    expect(afterMail.some((m) => /please sign/i.test(m.subject))).toBe(false);
+    expect(afterMail.some((m) => m.to === "jane@example.com")).toBe(false);
+    expect(afterMail.some((m) => m.to === "shop@example.com" && /please sign/i.test(m.subject))).toBe(
+      false,
+    );
+
+    const status = await getEnvelope(
+      new Request(`http://sign.test/v1/envelopes/${created.id}`, {
+        headers: { authorization: `Bearer ${key}` },
+      }),
+      { params: Promise.resolve({ id: created.id }) },
+    );
+    expect(status.status).toBe(200);
+    const json = (await status.json()) as EnvelopeStatusJson;
+    expect(json.current_party).toEqual({
+      index: 0,
+      kind: "agent",
+      email: "shop@example.com",
+      agent: "grok-legal",
+    });
+    expect(json.signers).toHaveLength(2);
+    expect(json.signers[0]).toMatchObject({
+      kind: "agent",
+      email: "shop@example.com",
+      agent: "grok-legal",
+      signed_at: null,
+      attested_at: null,
+      declined_at: null,
+      rejected_at: null,
+    });
+    expect(json.signers[1]).toMatchObject({
+      kind: "human",
+      email: "jane@example.com",
+      signed_at: null,
+      attested_at: null,
+      declined_at: null,
+      rejected_at: null,
+    });
+    expect(json.signers[1]!.agent).toBeUndefined();
+  });
+
+  it("Free live key send with kind agent is 403 pro_required", async () => {
+    await bootAuth();
+    const cookie = await magicCookie("shop@example.com");
+    const key = await mintLive(cookie);
+    const res = await postEnvelope(
+      new Request("http://sign.test/v1/envelopes", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}` },
+        body: await envelopeBody([
+          {
+            name: "Grok Legal",
+            email: "shop@example.com",
+            kind: "agent",
+            agent: "grok-legal",
+          },
+        ]),
+      }),
+    );
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as { error: string; code: string };
+    expect(json.error).toBeTruthy();
+    expect(json.code).toBe("pro_required");
+  });
+
+  it("unknown agent slug is 400 unknown_agent", async () => {
+    const { db, userFor } = await bootAuth();
+    const cookie = await magicCookie("shop@example.com");
+    await db
+      .update(accounts)
+      .set({ plan: "pro" })
+      .where(eq(accounts.userId, userFor("shop@example.com").id));
+    const key = await mintLive(cookie);
+    const res = await postEnvelope(
+      new Request("http://sign.test/v1/envelopes", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}` },
+        body: await envelopeBody([
+          {
+            name: "Grok Legal",
+            email: "shop@example.com",
+            kind: "agent",
+            agent: "missing",
+          },
+        ]),
+      }),
+    );
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as { error: string; code: string };
+    expect(json.error).toBeTruthy();
+    expect(json.code).toBe("unknown_agent");
+  });
+
+  it("agent party is 403 flag_off when agent_parties is off", async () => {
+    const { db, userFor } = await bootAuth();
+    const cookie = await magicCookie("shop@example.com");
+    await db
+      .update(accounts)
+      .set({ plan: "pro" })
+      .where(eq(accounts.userId, userFor("shop@example.com").id));
+    const createdAgent = await postAgents(
+      new Request("http://sign.test/v1/agents", {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ slug: "grok-legal", name: "Grok Legal" }),
+      }),
+    );
+    expect(createdAgent.status).toBe(201);
+    process.env.SIGN_FLAG_AGENT_PARTIES = "0";
+    resetEnvCache();
+    const key = await mintLive(cookie);
+    const res = await postEnvelope(
+      new Request("http://sign.test/v1/envelopes", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}` },
+        body: await envelopeBody([
+          {
+            name: "Grok Legal",
+            email: "shop@example.com",
+            kind: "agent",
+            agent: "grok-legal",
+          },
+        ]),
+      }),
+    );
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as { error: string; code: string };
+    expect(json.error).toBeTruthy();
+    expect(json.code).toBe("flag_off");
+  });
+
+  it("unauthenticated one-off with kind agent is 403 pro_required", async () => {
+    await bootAuth();
+    const res = await postEnvelope(
+      new Request("http://sign.test/v1/envelopes", {
+        method: "POST",
+        body: await envelopeBody([
+          {
+            name: "Grok Legal",
+            email: "shop@example.com",
+            kind: "agent",
+            agent: "grok-legal",
+          },
+        ]),
+      }),
+    );
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as { error: string; code: string };
+    expect(json.error).toBeTruthy();
+    expect(json.code).toBe("pro_required");
   });
 });
