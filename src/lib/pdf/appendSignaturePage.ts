@@ -16,7 +16,7 @@ import {
 } from "pdf-lib";
 
 export type SignatureAppearance = {
-  png: Uint8Array;
+  png?: Uint8Array;
   name: string;
   email: string;
   signedAt: Date;
@@ -62,20 +62,23 @@ export async function appendSignaturePage(
   const page = doc.addPage(PageSizes.Letter);
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const fontKey = page.node.newFontDictionary(font.name, font.ref);
-  const image = await doc.embedPng(appearance.png);
 
   const margin = 72;
-  const imageWidth = Math.min(200, image.width);
-  const imageHeight = (image.height / image.width) * imageWidth;
   const { height } = page.getSize();
-  let y = height - margin - imageHeight;
-
-  page.drawImage(image, {
-    x: margin,
-    y,
-    width: imageWidth,
-    height: imageHeight,
-  });
+  let y = height - margin;
+  if (appearance.png && appearance.png.byteLength > 0) {
+    const image = await doc.embedPng(appearance.png);
+    const imageWidth = Math.min(200, image.width);
+    const imageHeight =
+      image.width === 0 ? 0 : (image.height / image.width) * imageWidth;
+    y = height - margin - imageHeight;
+    page.drawImage(image, {
+      x: margin,
+      y,
+      width: imageWidth,
+      height: imageHeight,
+    });
+  }
 
   const size = 12;
   y -= 24;

@@ -78,8 +78,15 @@ function signingP12(): { p12: Buffer; passphrase: string } {
   return loadSigningP12();
 }
 
-type SignerRow = typeof signersTable.$inferSelect;
-type EnvelopeRow = typeof envelopes.$inferSelect;
+export type SignerRow = typeof signersTable.$inferSelect;
+export type EnvelopeRow = typeof envelopes.$inferSelect;
+
+/** A party has acted if they signed, attested, declined, or rejected. */
+export function partyDone(
+  s: Pick<SignerRow, "signedAt" | "attestedAt" | "declinedAt" | "rejectedAt">,
+): boolean {
+  return Boolean(s.signedAt || s.attestedAt || s.declinedAt || s.rejectedAt);
+}
 
 type Loaded =
   | { ok: true; db: AuditDb; signer: SignerRow; envelope: EnvelopeRow }
@@ -115,8 +122,393 @@ async function sequentialWait(
         eq(signersTable.signingOrder, signer.signingOrder - 1),
       ),
     );
-  if (prev && !prev.signedAt) {
+  if (prev && !partyDone(prev)) {
     return jsonError(409, "Waiting on previous signer.", "sequential_wait");
+  }
+  return null;
+}
+
+export async function buildCompleteAppearances(
+  store: BlobStore,
+  envelopeId: string,
+  allSigners: SignerRow[],
+  currentId: string,
+  at: Date,
+  currentPng?: Uint8Array,
+): Promise<
+  { ok: true; appearances: SignatureAppearance[] } | { ok: false; error: Response }
+> {
+  const appearances: SignatureAppearance[] = [];
+  for (const s of allSigners) {
+    const isCurrent = s.id === currentId;
+    if (s.kind === "agent") {
+      appearances.push({
+        name: s.name,
+        email: s.email,
+        signedAt: isCurrent ? at : (s.attestedAt ?? s.signedAt ?? at),
+      });
+      continue;
+    }
+    if (isCurrent) {
+      if (!currentPng) {
+        return {
+          ok: false,
+          error: jsonError(500, "Prior signature missing", "missing_appearance"),
+        };
+      }
+      appearances.push({
+        png: currentPng,
+        name: s.name,
+        email: s.email,
+        signedAt: at,
+      });
+      continue;
+    }
+    if (s.attestedAt && !s.signedAt) {
+      appearances.push({
+        name: s.name,
+        email: s.email,
+        signedAt: s.attestedAt,
+      });
+      continue;
+    }
+    if (!s.signedAt) continue;
+    const prior = await store.get(appearanceKey(envelopeId, s.id));
+    if (!prior) {
+      return {
+        ok: false,
+        error: jsonError(500, "Prior signature missing", "missing_appearance"),
+      };
+    }
+    appearances.push({
+      png: prior,
+      name: s.name,
+      email: s.email,
+      signedAt: s.signedAt,
+    });
+  }
+  return { ok: true, appearances };
+}
+
+type CompleteClaim = "sign" | "attest";
+
+export async function commitCompletedEnvelope(opts: {
+  db: AuditDb;
+  envelope: EnvelopeRow;
+  signer: SignerRow;
+  allSigners: SignerRow[];
+  at: Date;
+  ip: string | null;
+  ua: string | null;
+  appearances: SignatureAppearance[];
+  claim: CompleteClaim;
+  attestMethod?: "agent_key" | "oauth" | null;
+  attestLabel?: string | null;
+}): Promise<Response> {
+  const {
+    db,
+    envelope,
+    signer,
+    allSigners,
+    at,
+    ip,
+    ua,
+    appearances,
+    claim,
+    attestMethod = null,
+    attestLabel = null,
+  } = opts;
+  const store = requireStore();
+  if (!store) return storeUnavailableResponse();
+
+  const original = await store.get(objectKey(envelope.id, "original"));
+  if (!original) {
+    return jsonError(500, "Original document missing", "missing_original");
+  }
+
+  let result: Awaited<ReturnType<typeof completeEnvelopePdf>>;
+  try {
+    const { p12, passphrase } = signingP12();
+    result = await completeEnvelopePdf({
+      original,
+      appearances,
+      p12,
+      passphrase,
+      meta: {
+        envelopeId: envelope.id,
+        title: envelope.title,
+        senderEmail: envelope.senderEmail,
+        consentText: CONSENT_TEXT,
+        signers: allSigners.map((s) => ({
+          name: s.name,
+          email: s.email,
+          sentAt: s.sentAt,
+          openedAt: s.openedAt,
+          consentedAt:
+            s.id === signer.id && claim === "sign" ? s.consentedAt ?? at : s.consentedAt,
+          signedAt: s.id === signer.id && claim === "sign" ? at : s.signedAt,
+          declinedAt: s.declinedAt,
+          ip: s.id === signer.id ? ip : s.ip,
+          ua: s.id === signer.id ? ua : s.ua,
+        })),
+      },
+    });
+  } catch {
+    return jsonError(500, "Failed to complete envelope", "complete_failed");
+  }
+
+  let keepDays = Number(getEnv().FREE_KEEP_DAYS);
+  const proDays = Number(getEnv().PRO_KEEP_DAYS);
+  if (envelope.userId) {
+    const cabinet = await cabinetForUser(db, envelope.userId);
+    if (cabinet.entitled) keepDays = proDays;
+  }
+  const emails = new Set(
+    allSigners.map((s) => s.email.trim().toLowerCase()).filter(Boolean),
+  );
+  if (emails.size > 0) {
+    const signerAccounts = await db
+      .select()
+      .from(accounts)
+      .where(inArray(accounts.email, [...emails]));
+    if (signerAccounts.some((a) => a.plan === "pro")) keepDays = proDays;
+  }
+  const shredAt = new Date(at.getTime() + keepDays * 86_400_000);
+  const sealedPath = objectKey(envelope.id, "sealed");
+  const certPath = objectKey(envelope.id, "certificate");
+
+  try {
+    await db.transaction(async (tx) => {
+      const [claimed] =
+        claim === "sign"
+          ? await tx
+              .update(signersTable)
+              .set({ signedAt: at, ip, ua })
+              .where(
+                and(
+                  eq(signersTable.id, signer.id),
+                  isNull(signersTable.signedAt),
+                  isNull(signersTable.declinedAt),
+                ),
+              )
+              .returning()
+          : await tx
+              .update(signersTable)
+              .set({
+                attestedAt: at,
+                attestMethod,
+                attestLabel,
+              })
+              .where(
+                and(
+                  eq(signersTable.id, signer.id),
+                  eq(signersTable.kind, "agent"),
+                  isNull(signersTable.attestedAt),
+                  isNull(signersTable.rejectedAt),
+                ),
+              )
+              .returning();
+      if (!claimed) throw new Error("complete_conflict");
+      const [updated] = await tx
+        .update(envelopes)
+        .set({ status: "completed", sha256: result.sha256, shredAt })
+        .where(and(eq(envelopes.id, envelope.id), eq(envelopes.status, "pending")))
+        .returning();
+      if (!updated) throw new Error("complete_conflict");
+      await tx.insert(documents).values([
+        {
+          envelopeId: envelope.id,
+          kind: "sealed",
+          storagePath: sealedPath,
+          documentHash: result.sha256,
+        },
+        {
+          envelopeId: envelope.id,
+          kind: "certificate",
+          storagePath: certPath,
+          documentHash: sha256Hex(result.certificate),
+        },
+      ]);
+    });
+  } catch {
+    return jsonError(409, "Envelope is not awaiting signature", "invalid_state");
+  }
+  try {
+    await store.put(sealedPath, result.sealed);
+    await store.put(certPath, result.certificate);
+  } catch {
+    await db
+      .update(envelopes)
+      .set({
+        status: "pending",
+        sha256: null,
+        shredAt: envelope.shredAt,
+      })
+      .where(eq(envelopes.id, envelope.id));
+    await db
+      .delete(documents)
+      .where(
+        and(
+          eq(documents.envelopeId, envelope.id),
+          inArray(documents.kind, ["sealed", "certificate"]),
+        ),
+      );
+    if (claim === "sign") {
+      await db
+        .update(signersTable)
+        .set({ signedAt: null })
+        .where(eq(signersTable.id, signer.id));
+    } else {
+      await db
+        .update(signersTable)
+        .set({ attestedAt: null, attestMethod: null, attestLabel: null })
+        .where(eq(signersTable.id, signer.id));
+    }
+    return jsonError(500, "Failed to complete envelope", "complete_failed");
+  }
+  await logEvent(db, {
+    envelopeId: envelope.id,
+    signerId: signer.id,
+    event: claim === "sign" ? "signed" : "attested",
+    ip: claim === "sign" ? ip ?? undefined : undefined,
+    ua: claim === "sign" ? ua ?? undefined : undefined,
+  });
+  try {
+    await syncTmpKeyExpiry(db, envelope.id, shredAt);
+  } catch {
+    // envelope is already completed
+  }
+
+  const mailer = requireMailer();
+  const docs = completionAttachments(result.sealed, result.certificate);
+  const brand = await loadBrand(db, envelope.userId, store);
+  const logo = brandMailAttachments(brand.logoBytes);
+  const attachments = [...(docs ?? []), ...(logo ?? [])];
+  const recipients = new Set<string>([
+    envelope.senderEmail,
+    ...allSigners.map((s) => s.email),
+  ]);
+  for (const to of recipients) {
+    try {
+      const body = completionEmail({
+        to,
+        title: envelope.title,
+        shredAt,
+        includeAttachments: Boolean(docs),
+        senderEmail: envelope.senderEmail,
+        brand: {
+          displayName: brand.displayName,
+          hasLogo: Boolean(brand.logoBytes),
+        },
+      });
+      await mailer.sendMail({
+        to,
+        subject: body.subject,
+        text: body.text,
+        html: body.html,
+        attachments: attachments.length ? attachments : undefined,
+      });
+      await logEvent(db, {
+        envelopeId: envelope.id,
+        event: "emailed",
+        payload: { to, kind: "completion" },
+      });
+    } catch (err) {
+      await logEvent(db, {
+        envelopeId: envelope.id,
+        event: "emailed_failed",
+        payload: {
+          to,
+          error: err instanceof Error ? err.message : "mail_failed",
+        },
+      });
+    }
+  }
+
+  try {
+    await fireEnvelopeCompleted(db, envelope, {
+      event: "envelope.completed",
+      id: envelope.id,
+      status: "completed",
+      sha256: result.sha256,
+      shred_at: shredAt,
+    });
+  } catch (err) {
+    await logEvent(db, {
+      envelopeId: envelope.id,
+      event: "webhook_failed",
+      payload: { error: err instanceof Error ? err.message : "webhook_failed" },
+    });
+  }
+  return Response.json({
+    status: "completed",
+    shred_at: shredAt.toISOString(),
+    sha256: result.sha256,
+  });
+}
+
+export async function inviteNextHumanIfNeeded(
+  db: AuditDb,
+  envelope: EnvelopeRow,
+  allSigners: SignerRow[],
+  current: SignerRow,
+  at: Date,
+  rollbackCurrent: () => Promise<void>,
+): Promise<Response | null> {
+  const next = allSigners.find((s) => s.signingOrder === current.signingOrder + 1);
+  if (!next || partyDone(next) || next.sentAt) return null;
+  if (next.kind === "agent") return null;
+
+  const mailer = requireMailer();
+  const store = requireStore();
+  const token = newSigningToken();
+  const signUrl = `/s/${token.raw}`;
+  const [slot] = await db
+    .update(signersTable)
+    .set({ tokenHash: token.hash })
+    .where(and(eq(signersTable.id, next.id), isNull(signersTable.sentAt)))
+    .returning();
+  if (!slot) return null;
+  const brand = await loadBrand(db, envelope.userId, store);
+  const invite = inviteEmail({
+    signUrl,
+    senderEmail: envelope.senderEmail,
+    title: envelope.title,
+    expiresAt: envelope.expiresAt,
+    brand: {
+      displayName: brand.displayName,
+      hasLogo: Boolean(brand.logoBytes),
+    },
+  });
+  try {
+    await mailer.sendMail({
+      to: next.email,
+      ...invite,
+      attachments: brandMailAttachments(brand.logoBytes),
+    });
+    await db
+      .update(signersTable)
+      .set({ sentAt: at })
+      .where(eq(signersTable.id, next.id));
+    await logEvent(db, {
+      envelopeId: envelope.id,
+      signerId: next.id,
+      event: "sent",
+    });
+    await logEvent(db, {
+      envelopeId: envelope.id,
+      signerId: next.id,
+      event: "emailed",
+    });
+  } catch (err) {
+    await rollbackCurrent();
+    await logEvent(db, {
+      envelopeId: envelope.id,
+      signerId: next.id,
+      event: "emailed_failed",
+      payload: { error: err instanceof Error ? err.message : "mail_failed" },
+    });
+    return jsonError(503, "Could not email the next signer", "invite_failed");
   }
   return null;
 }
@@ -297,233 +689,29 @@ export async function postSign(req: Request, token: string): Promise<Response> {
     .from(signersTable)
     .where(eq(signersTable.envelopeId, envelope.id));
   allSigners.sort((a, b) => a.signingOrder - b.signingOrder);
-  const last = allSigners.every((s) => s.id === signer.id || s.signedAt);
+  const last = allSigners.every((s) => s.id === signer.id || partyDone(s));
 
   if (last) {
-    const original = await store.get(objectKey(envelope.id, "original"));
-    if (!original) {
-      return jsonError(500, "Original document missing", "missing_original");
-    }
-    const appearances: SignatureAppearance[] = [];
-    for (const s of allSigners) {
-      if (s.id === signer.id) {
-        appearances.push({
-          png,
-          name: signer.name,
-          email: signer.email,
-          signedAt: at,
-        });
-        continue;
-      }
-      if (!s.signedAt) continue;
-      const prior = await store.get(appearanceKey(envelope.id, s.id));
-      if (!prior) {
-        return jsonError(500, "Prior signature missing", "missing_appearance");
-      }
-      appearances.push({
-        png: prior,
-        name: s.name,
-        email: s.email,
-        signedAt: s.signedAt,
-      });
-    }
-    await store.put(appearanceKey(envelope.id, signer.id), png);
-    let result: Awaited<ReturnType<typeof completeEnvelopePdf>>;
-    try {
-      const { p12, passphrase } = signingP12();
-      result = await completeEnvelopePdf({
-        original,
-        appearances,
-        p12,
-        passphrase,
-        meta: {
-          envelopeId: envelope.id,
-          title: envelope.title,
-          senderEmail: envelope.senderEmail,
-          consentText: CONSENT_TEXT,
-          signers: allSigners.map((s) => ({
-            name: s.name,
-            email: s.email,
-            sentAt: s.sentAt,
-            openedAt: s.openedAt,
-            consentedAt: s.id === signer.id ? s.consentedAt ?? at : s.consentedAt,
-            signedAt: s.id === signer.id ? at : s.signedAt,
-            declinedAt: s.declinedAt,
-            ip: s.id === signer.id ? ip : s.ip,
-            ua: s.id === signer.id ? ua : s.ua,
-          })),
-        },
-      });
-    } catch {
-      return jsonError(500, "Failed to complete envelope", "complete_failed");
-    }
-
-    let keepDays = Number(getEnv().FREE_KEEP_DAYS);
-    const proDays = Number(getEnv().PRO_KEEP_DAYS);
-    if (envelope.userId) {
-      const cabinet = await cabinetForUser(db, envelope.userId);
-      if (cabinet.entitled) keepDays = proDays;
-    }
-    const emails = new Set(
-      allSigners.map((s) => s.email.trim().toLowerCase()).filter(Boolean),
+    const built = await buildCompleteAppearances(
+      store,
+      envelope.id,
+      allSigners,
+      signer.id,
+      at,
+      png,
     );
-    if (emails.size > 0) {
-      const signerAccounts = await db
-        .select()
-        .from(accounts)
-        .where(inArray(accounts.email, [...emails]));
-      if (signerAccounts.some((a) => a.plan === "pro")) keepDays = proDays;
-    }
-    const shredAt = new Date(at.getTime() + keepDays * 86_400_000);
-    const sealedPath = objectKey(envelope.id, "sealed");
-    const certPath = objectKey(envelope.id, "certificate");
-
-    try {
-      await db.transaction(async (tx) => {
-        const [claimed] = await tx
-          .update(signersTable)
-          .set({ signedAt: at, ip, ua })
-          .where(
-            and(
-              eq(signersTable.id, signer.id),
-              isNull(signersTable.signedAt),
-              isNull(signersTable.declinedAt),
-            ),
-          )
-          .returning();
-        if (!claimed) throw new Error("complete_conflict");
-        const [updated] = await tx
-          .update(envelopes)
-          .set({ status: "completed", sha256: result.sha256, shredAt })
-          .where(and(eq(envelopes.id, envelope.id), eq(envelopes.status, "pending")))
-          .returning();
-        if (!updated) throw new Error("complete_conflict");
-        await tx.insert(documents).values([
-          {
-            envelopeId: envelope.id,
-            kind: "sealed",
-            storagePath: sealedPath,
-            documentHash: result.sha256,
-          },
-          {
-            envelopeId: envelope.id,
-            kind: "certificate",
-            storagePath: certPath,
-            documentHash: sha256Hex(result.certificate),
-          },
-        ]);
-      });
-    } catch {
-      return jsonError(409, "Envelope is not awaiting signature", "invalid_state");
-    }
-    try {
-      await store.put(sealedPath, result.sealed);
-      await store.put(certPath, result.certificate);
-    } catch {
-      await db
-        .update(envelopes)
-        .set({
-          status: "pending",
-          sha256: null,
-          shredAt: envelope.shredAt,
-        })
-        .where(eq(envelopes.id, envelope.id));
-      await db
-        .delete(documents)
-        .where(
-          and(
-            eq(documents.envelopeId, envelope.id),
-            inArray(documents.kind, ["sealed", "certificate"]),
-          ),
-        );
-      await db
-        .update(signersTable)
-        .set({ signedAt: null })
-        .where(eq(signersTable.id, signer.id));
-      return jsonError(500, "Failed to complete envelope", "complete_failed");
-    }
-    await logEvent(db, {
-      envelopeId: envelope.id,
-      signerId: signer.id,
-      event: "signed",
-      ip: ip ?? undefined,
-      ua: ua ?? undefined,
-    });
-    try {
-      await syncTmpKeyExpiry(db, envelope.id, shredAt);
-    } catch {
-      // envelope is already completed
-    }
-
-    const mailer = requireMailer();
-    const docs = completionAttachments(result.sealed, result.certificate);
-    const brand = await loadBrand(db, envelope.userId, store);
-    const logo = brandMailAttachments(brand.logoBytes);
-    const attachments = [...(docs ?? []), ...(logo ?? [])];
-    const recipients = new Set<string>([
-      envelope.senderEmail,
-      ...allSigners.map((s) => s.email),
-    ]);
-    for (const to of recipients) {
-      try {
-        const body = completionEmail({
-          to,
-          title: envelope.title,
-          shredAt,
-          includeAttachments: Boolean(docs),
-          senderEmail: envelope.senderEmail,
-          brand: {
-            displayName: brand.displayName,
-            hasLogo: Boolean(brand.logoBytes),
-          },
-        });
-        await mailer.sendMail({
-          to,
-          subject: body.subject,
-          text: body.text,
-          html: body.html,
-          attachments: attachments.length ? attachments : undefined,
-        });
-        await logEvent(db, {
-          envelopeId: envelope.id,
-          event: "emailed",
-          payload: { to, kind: "completion" },
-        });
-      } catch (err) {
-        await logEvent(db, {
-          envelopeId: envelope.id,
-          event: "emailed_failed",
-          payload: {
-            to,
-            error: err instanceof Error ? err.message : "mail_failed",
-          },
-        });
-      }
-    }
-
-    try {
-      await fireEnvelopeCompleted(
-        db,
-        envelope,
-        {
-          event: "envelope.completed",
-          id: envelope.id,
-          status: "completed",
-          sha256: result.sha256,
-          shred_at: shredAt,
-        },
-      );
-    } catch (err) {
-      await logEvent(db, {
-        envelopeId: envelope.id,
-        event: "webhook_failed",
-        payload: { error: err instanceof Error ? err.message : "webhook_failed" },
-      });
-    }
-    return Response.json({
-      status: "completed",
-      shred_at: shredAt.toISOString(),
-      sha256: result.sha256,
+    if (!built.ok) return built.error;
+    await store.put(appearanceKey(envelope.id, signer.id), png);
+    return commitCompletedEnvelope({
+      db,
+      envelope,
+      signer,
+      allSigners,
+      at,
+      ip,
+      ua,
+      appearances: built.appearances,
+      claim: "sign",
     });
   }
 
@@ -544,64 +732,20 @@ export async function postSign(req: Request, token: string): Promise<Response> {
     return jsonError(409, "Envelope is not awaiting signature", "invalid_state");
   }
 
-  const next = allSigners.find((s) => s.signingOrder === signer.signingOrder + 1);
-  // First mint + invite only; never rotate a token that was already sent.
-  if (next && !next.signedAt && !next.declinedAt && !next.sentAt) {
-    const mailer = requireMailer();
-    const token = newSigningToken();
-    const signUrl = `/s/${token.raw}`;
-    const [slot] = await db
-      .update(signersTable)
-      .set({ tokenHash: token.hash })
-      .where(and(eq(signersTable.id, next.id), isNull(signersTable.sentAt)))
-      .returning();
-    if (slot) {
-      const brand = await loadBrand(db, envelope.userId, store);
-      const invite = inviteEmail({
-        signUrl,
-        senderEmail: envelope.senderEmail,
-        title: envelope.title,
-        expiresAt: envelope.expiresAt,
-        brand: {
-          displayName: brand.displayName,
-          hasLogo: Boolean(brand.logoBytes),
-        },
-      });
-      try {
-        await mailer.sendMail({
-          to: next.email,
-          ...invite,
-          attachments: brandMailAttachments(brand.logoBytes),
-        });
-        await db
-          .update(signersTable)
-          .set({ sentAt: at })
-          .where(eq(signersTable.id, next.id));
-        await logEvent(db, {
-          envelopeId: envelope.id,
-          signerId: next.id,
-          event: "sent",
-        });
-        await logEvent(db, {
-          envelopeId: envelope.id,
-          signerId: next.id,
-          event: "emailed",
-        });
-      } catch (err) {
-        await db
-          .update(signersTable)
-          .set({ signedAt: null, ip: signer.ip, ua: signer.ua })
-          .where(eq(signersTable.id, signer.id));
-        await logEvent(db, {
-          envelopeId: envelope.id,
-          signerId: next.id,
-          event: "emailed_failed",
-          payload: { error: err instanceof Error ? err.message : "mail_failed" },
-        });
-        return jsonError(503, "Could not email the next signer", "invite_failed");
-      }
-    }
-  }
+  const inviteFail = await inviteNextHumanIfNeeded(
+    db,
+    envelope,
+    allSigners,
+    signer,
+    at,
+    async () => {
+      await db
+        .update(signersTable)
+        .set({ signedAt: null, ip: signer.ip, ua: signer.ua })
+        .where(eq(signersTable.id, signer.id));
+    },
+  );
+  if (inviteFail) return inviteFail;
 
   await logEvent(db, {
     envelopeId: envelope.id,

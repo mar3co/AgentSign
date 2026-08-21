@@ -10,10 +10,17 @@ export type CallerOk = {
   ok: true;
   db: AuditDb;
   user: { id: string; email: string };
-  via: "session" | "live";
+  via: "session" | "live" | "agent";
+  agentId?: string;
+  keyPrefix?: string;
 };
 
 export type CallerFail = { ok: false; response: Response };
+
+export type RequireCallerOpts = {
+  /** Allow `sign_agent_` paste keys (attest/reject only). */
+  allowAgent?: boolean;
+};
 
 function unauthorized(): CallerFail {
   return {
@@ -37,10 +44,12 @@ function bearerToken(req: Request): string | null {
 }
 
 /**
- * Live key or session only. Rejects `?apiKey=`, tmp keys, and missing auth.
+ * Live key or session by default. Pass `{ allowAgent: true }` for attest/reject
+ * so `sign_agent_` keys are accepted. Rejects `?apiKey=`, tmp keys, and missing auth.
  */
 export async function requireCaller(
   req: Request,
+  opts?: RequireCallerOpts,
 ): Promise<CallerOk | CallerFail> {
   if (hasApiKeyQuery(req)) return unauthorized();
 
@@ -49,6 +58,32 @@ export async function requireCaller(
   const raw = bearerToken(req);
 
   if (raw) {
+    if (opts?.allowAgent && raw.startsWith("sign_agent_")) {
+      const key = await lookupApiKey(db, raw);
+      if (
+        !key ||
+        key.kind !== "agent" ||
+        !key.userId ||
+        !key.agentId ||
+        key.expiresAt.getTime() <= at.getTime()
+      ) {
+        return unauthorized();
+      }
+      const [account] = await db
+        .select()
+        .from(accounts)
+        .where(eq(accounts.userId, key.userId));
+      const email = account?.email?.trim().toLowerCase();
+      if (!email) return unauthorized();
+      return {
+        ok: true,
+        db,
+        user: { id: key.userId, email },
+        via: "agent",
+        agentId: key.agentId,
+        keyPrefix: key.prefix,
+      };
+    }
     if (!raw.startsWith("sign_live_")) return unauthorized();
     const key = await lookupApiKey(db, raw);
     if (
