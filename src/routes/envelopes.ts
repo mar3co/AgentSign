@@ -244,6 +244,17 @@ export async function createEnvelope(req: Request): Promise<Response> {
     if (liveAccount?.email) {
       senderEmail = liveAccount.email.trim().toLowerCase();
     }
+  } else {
+    // Session cookie is a live send (pending + invite), same as sign_live_.
+    const cookie = req.headers.get("cookie");
+    if (cookie) {
+      const user = await getAuth().userFromCookie(cookie);
+      if (user) {
+        await ensureAccount(db, user);
+        liveUserId = user.id;
+        senderEmail = user.email.trim().toLowerCase();
+      }
+    }
   }
 
   if (liveUserId) {
