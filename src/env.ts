@@ -25,6 +25,9 @@ const envSchema = z.object({
   P12_PATH: z.string().default(""),
   P12_PASSPHRASE: z.string().default(""),
   SELF_HOST: z.string().default(""),
+  SIGN_FLAG_AGENT_PARTIES: z.string().default(""),
+  SIGN_FLAG_AGENT_ONLY_ATTEST: z.string().default(""),
+  FLAGS_SECRET: z.string().default(""),
 });
 
 export type Env = z.infer<typeof envSchema>;

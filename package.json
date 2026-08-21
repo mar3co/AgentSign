@@ -27,6 +27,7 @@
     "@signpdf/signer-p12": "^3.3.0",
     "@signpdf/signpdf": "^3.3.0",
     "@supabase/supabase-js": "^2.112.3",
+    "@vercel/flags-core": "^1.7.1",
     "bcrypt": "^6.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
