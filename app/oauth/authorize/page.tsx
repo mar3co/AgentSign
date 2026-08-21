@@ -9,6 +9,7 @@ import { getDeps } from "../../../src/lib/deps.js";
 import { flagOn } from "../../../src/lib/flags.js";
 import { mcpResource, resolveOauthClient } from "../../../src/lib/oauth.js";
 import { safeNext } from "../../../src/lib/safeNext.js";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { PageShell } from "@/components/page-shell";
 import { AuthorizeForm } from "./authorize-form";
 
@@ -86,7 +87,9 @@ export default async function AuthorizePage({
   return (
     <PageShell variant="app">
       {error ? (
-        <p className="text-sm text-destructive">{error}</p>
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       ) : (
         <AuthorizeForm
           clientName={clientName}

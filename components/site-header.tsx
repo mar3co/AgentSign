@@ -39,7 +39,7 @@ function AppLinks({ className }: { className?: string }) {
 
 export function SiteHeader({ variant }: { variant: SiteHeaderVariant }) {
   return (
-    <header className="flex items-center justify-between gap-4 px-4 py-4">
+    <header className="flex min-w-0 items-center justify-between gap-4 px-4 py-4">
       <a
         href="/"
         className="font-heading text-xl leading-none tracking-tight text-foreground"
@@ -47,12 +47,20 @@ export function SiteHeader({ variant }: { variant: SiteHeaderVariant }) {
         AgentSign
       </a>
       {variant === "public" ? (
-        <a
-          className="text-sm text-muted-foreground underline-offset-4 hover:underline"
-          href="/login"
-        >
-          Log in
-        </a>
+        <nav aria-label="Account" className="flex items-center gap-4">
+          <a
+            className="text-sm text-muted-foreground underline-offset-4 hover:underline"
+            href="/upgrade"
+          >
+            Upgrade
+          </a>
+          <a
+            className="text-sm text-muted-foreground underline-offset-4 hover:underline"
+            href="/login"
+          >
+            Log in
+          </a>
+        </nav>
       ) : null}
       {variant === "auth" ? (
         <a

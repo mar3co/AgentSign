@@ -22,6 +22,9 @@ describe("SiteHeader", () => {
     expect(screen.getByRole("link", { name: /log in/i }).getAttribute("href")).toBe(
       "/login",
     );
+    expect(screen.getByRole("link", { name: /^upgrade$/i }).getAttribute("href")).toBe(
+      "/upgrade",
+    );
     expect(screen.queryByRole("link", { name: /^packets$/i })).toBeNull();
     expect(screen.queryByRole("link", { name: /^branding$/i })).toBeNull();
   });
@@ -44,13 +47,16 @@ describe("SiteFooter", () => {
     cleanup();
   });
 
-  it("links privacy, terms, OpenAPI, and llms.txt", () => {
+  it("links privacy, terms, upgrade, OpenAPI, and llms.txt", () => {
     render(createElement(SiteFooter));
     expect(screen.getByRole("link", { name: /privacy/i }).getAttribute("href")).toBe(
       "/privacy",
     );
     expect(screen.getByRole("link", { name: /terms/i }).getAttribute("href")).toBe(
       "/terms",
+    );
+    expect(screen.getByRole("link", { name: /^upgrade$/i }).getAttribute("href")).toBe(
+      "/upgrade",
     );
     expect(screen.getByRole("link", { name: /openapi/i }).getAttribute("href")).toBe(
       "/openapi.json",
@@ -82,6 +88,7 @@ describe("legal pages", () => {
   it("privacy says what we keep and shred", () => {
     render(createElement(PrivacyPage));
     expect(screen.getByRole("heading", { name: /privacy/i })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /what we keep/i })).toBeTruthy();
     expect(document.body.textContent).toMatch(/shred/i);
     expect(document.body.textContent).not.toMatch(/statutory POA/i);
   });
@@ -89,6 +96,7 @@ describe("legal pages", () => {
   it("terms name the Apache-2.0 license and $19 Pro", () => {
     render(createElement(TermsPage));
     expect(screen.getByRole("heading", { name: /terms/i })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /finish and attest/i })).toBeTruthy();
     expect(document.body.textContent).toMatch(/Apache-2\.0/);
     expect(document.body.textContent).toMatch(/\$19/);
   });

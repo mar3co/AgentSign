@@ -2,6 +2,8 @@
 
 import { useRef, useState } from "react";
 import { ByteRange } from "@/components/byte-range";
+import { LinkButton } from "@/components/link-button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -32,6 +34,28 @@ export type CeremonyState = {
   attested?: CeremonyAttested[];
 };
 
+export function CeremonyNotice({
+  title,
+  body,
+  sealed = false,
+}: {
+  title: string;
+  body?: string;
+  sealed?: boolean;
+}) {
+  return (
+    <div className="flex flex-col gap-4">
+      <ByteRange sealed={sealed} />
+      <Card>
+        <CardHeader>
+          <h1 className="font-heading text-2xl tracking-tight">{title}</h1>
+          {body ? <CardDescription className="text-base">{body}</CardDescription> : null}
+        </CardHeader>
+      </Card>
+    </div>
+  );
+}
+
 export function SigningCeremony({
   token,
   state,
@@ -52,12 +76,7 @@ export function SigningCeremony({
   const drawing = useRef(false);
 
   if (declined) {
-    return (
-      <div className="flex flex-col gap-4">
-        <ByteRange />
-        <p className="text-base">You declined to sign.</p>
-      </div>
-    );
+    return <CeremonyNotice title="You declined to sign." />;
   }
 
   if (done) {
@@ -72,7 +91,7 @@ export function SigningCeremony({
               <CardTitle>Signed</CardTitle>
               <CardDescription>{state.title}</CardDescription>
             </CardHeader>
-            <CardContent className="flex flex-col gap-4">
+            <CardContent>
               <p className="text-base">You&apos;re done. Waiting on the next signer.</p>
             </CardContent>
           </Card>
@@ -87,29 +106,27 @@ export function SigningCeremony({
             <CardTitle>Signed</CardTitle>
             <CardDescription>{state.title}</CardDescription>
           </CardHeader>
-          <CardContent className="flex flex-col gap-4">
+          <CardContent className="flex flex-col gap-3">
             <p className="text-base">
               Download this. We delete it on {when}.
             </p>
-            <Button
-              nativeButton={false}
-              className="h-11 w-full text-base"
-              render={<a href={`/s/${token}/pdf`} />}
-            >
+            <LinkButton href={`/s/${token}/pdf`} className="h-11 w-full text-base">
               Download
-            </Button>
-            <a
-              className="text-base underline"
+            </LinkButton>
+            <LinkButton
               href={`/s/${token}/pdf?kind=certificate`}
+              variant="outline"
+              className="h-11 w-full text-base"
             >
               Certificate
-            </a>
-            <a
-              className="text-base underline"
+            </LinkButton>
+            <LinkButton
               href={`/login?email=${email}&next=/envelopes`}
+              variant="outline"
+              className="h-11 w-full text-base"
             >
               Keep it in a cabinet
-            </a>
+            </LinkButton>
           </CardContent>
         </Card>
       </div>
@@ -256,23 +273,32 @@ export function SigningCeremony({
             />
             <span>{consentText}</span>
           </label>
-          <div className="relative">
-            <p className="mb-1 font-mono text-[0.7rem] uppercase tracking-[0.2em] text-muted-foreground">
+          <div className="rounded-md border border-border bg-card p-3">
+            <p className="mb-2 font-mono text-[0.7rem] uppercase tracking-[0.2em] text-muted-foreground">
               Sign here
             </p>
-            <canvas
-              ref={canvasRef}
-              width={320}
-              height={160}
-              className="h-40 w-full touch-none rounded-md border border-border bg-card"
-              onPointerDown={onPointerDown}
-              onPointerMove={onPointerMove}
-              onPointerUp={onPointerUp}
-              onPointerCancel={onPointerUp}
-            />
-            <span className="pointer-events-none absolute inset-x-4 bottom-6 border-b border-foreground/35" />
+            <div className="relative">
+              <canvas
+                ref={canvasRef}
+                width={320}
+                height={160}
+                className="h-40 w-full touch-none bg-muted/40"
+                onPointerDown={onPointerDown}
+                onPointerMove={onPointerMove}
+                onPointerUp={onPointerUp}
+                onPointerCancel={onPointerUp}
+              />
+              <span className="pointer-events-none absolute inset-x-4 bottom-10 border-b border-foreground/35" />
+            </div>
+            <p className="mt-2 text-center font-heading text-sm tracking-tight">
+              {state.signerName}
+            </p>
           </div>
-          {error ? <p className="text-base text-destructive">{error}</p> : null}
+          {error ? (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          ) : null}
           <Button
             className="h-11 w-full text-base"
             type="button"

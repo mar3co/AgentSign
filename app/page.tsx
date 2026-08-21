@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,6 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageShell } from "@/components/page-shell";
+import { cn } from "@/lib/utils";
 
 const CURL_EXAMPLE = `curl -F title=Repair\\ authorization \\
      -F sender_email=shop@example.com \\
@@ -21,6 +22,82 @@ const CURL_EXAMPLE = `curl -F title=Repair\\ authorization \\
      http://localhost:3000/v1/envelopes`;
 
 type Done = { key: string; signUrl: string };
+
+function PdfField() {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [name, setName] = useState<string | null>(null);
+  const [over, setOver] = useState(false);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <Label htmlFor="file">PDF</Label>
+      <label
+        htmlFor="file"
+        onDragOver={(e) => {
+          e.preventDefault();
+          setOver(true);
+        }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setOver(false);
+          const files = e.dataTransfer.files;
+          if (!inputRef.current || !files?.length) return;
+          inputRef.current.files = files;
+          setName(files[0]?.name ?? null);
+        }}
+        className={cn(
+          "flex min-h-28 cursor-pointer flex-col items-center justify-center gap-1 rounded-md border border-dashed px-4 py-6 text-center",
+          over ? "border-primary bg-secondary" : "border-input bg-muted/50",
+        )}
+      >
+        <input
+          ref={inputRef}
+          id="file"
+          name="file"
+          type="file"
+          accept="application/pdf,.pdf"
+          required
+          className="sr-only"
+          onChange={(e) => setName(e.target.files?.[0]?.name ?? null)}
+        />
+        <span className="font-heading text-lg tracking-tight">Drop a PDF</span>
+        <span className="text-sm text-muted-foreground">
+          {name ?? "or choose a file"}
+        </span>
+      </label>
+    </div>
+  );
+}
+
+function CurlAside() {
+  return (
+    <aside className="flex min-w-0 flex-col gap-6">
+      <section className="flex min-w-0 flex-col gap-2">
+        <h2 className="font-mono text-[0.7rem] uppercase tracking-[0.2em] text-muted-foreground">
+          Or curl
+        </h2>
+        <pre className="overflow-x-auto rounded-md bg-muted p-3 text-xs leading-relaxed whitespace-pre">
+          {CURL_EXAMPLE}
+        </pre>
+      </section>
+      <ol className="flex flex-col gap-3 text-sm text-muted-foreground">
+        <li>
+          <span className="font-mono text-foreground">send</span> the PDF. No
+          account.
+        </li>
+        <li>
+          <span className="font-mono text-foreground">sign</span> — a human
+          Finishes.
+        </li>
+        <li>
+          <span className="font-mono text-foreground">fetch</span> the sealed
+          file.
+        </li>
+      </ol>
+    </aside>
+  );
+}
 
 export default function Home() {
   const [sent, setSent] = useState(false);
@@ -101,12 +178,12 @@ export default function Home() {
   }
 
   return (
-    <PageShell variant="public" width="lg">
+    <PageShell variant="public" width="xl">
       <section className="flex flex-col gap-3">
         <p className="font-mono text-[0.7rem] uppercase tracking-[0.2em] text-muted-foreground">
           send · sign · fetch
         </p>
-        <h1 className="font-heading text-pretty text-4xl leading-[0.95] tracking-tight md:text-6xl">
+        <h1 className="font-heading text-pretty text-4xl leading-[0.95] tracking-tight break-words md:text-6xl">
           Send a PDF. A human signs. You get a sealed file.
         </h1>
         <p className="max-w-prose text-base text-muted-foreground">
@@ -115,6 +192,7 @@ export default function Home() {
         </p>
       </section>
 
+      <div className="grid min-w-0 items-start gap-8 lg:grid-cols-[minmax(0,1fr)_min(100%,22rem)]">
         {done ? (
           <Alert>
             <AlertDescription className="flex flex-col gap-2">
@@ -133,7 +211,7 @@ export default function Home() {
             </AlertDescription>
           </Alert>
         ) : sent ? (
-          <>
+          <div className="flex flex-col gap-4">
             <Alert>
               <AlertDescription>Check your email for a code.</AlertDescription>
             </Alert>
@@ -174,7 +252,7 @@ export default function Home() {
                 </form>
               </CardContent>
             </Card>
-          </>
+          </div>
         ) : (
           <Card>
             <CardHeader>
@@ -222,20 +300,11 @@ export default function Home() {
                     name="signer_email"
                     type="email"
                     required
+                    autoComplete="email"
                     className="h-11 text-base md:text-base"
                   />
                 </div>
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="file">PDF</Label>
-                  <Input
-                    id="file"
-                    name="file"
-                    type="file"
-                    accept="application/pdf,.pdf"
-                    required
-                    className="h-11 text-base md:text-base"
-                  />
-                </div>
+                <PdfField />
                 {error ? (
                   <Alert variant="destructive">
                     <AlertDescription>{error}</AlertDescription>
@@ -252,15 +321,8 @@ export default function Home() {
             </CardContent>
           </Card>
         )}
-
-        <section className="flex flex-col gap-2">
-          <h2 className="font-mono text-[0.7rem] uppercase tracking-[0.2em] text-muted-foreground">
-            Or curl
-          </h2>
-          <pre className="overflow-x-auto rounded-md bg-muted p-3 text-xs leading-relaxed whitespace-pre-wrap">
-            {CURL_EXAMPLE}
-          </pre>
-        </section>
+        <CurlAside />
+      </div>
     </PageShell>
   );
 }

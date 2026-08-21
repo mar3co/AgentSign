@@ -1,5 +1,6 @@
 "use client";
 
+import { LinkButton } from "@/components/link-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -42,7 +43,12 @@ export function CabinetList({
       </CardHeader>
       <CardContent>
         {envelopes.length === 0 ? (
-          <p className="text-base text-muted-foreground">No envelopes yet.</p>
+          <div className="flex flex-col gap-4">
+            <p className="text-base text-muted-foreground">No envelopes yet.</p>
+            <LinkButton href="/" className="h-11 w-full text-base sm:w-auto">
+              Send a PDF
+            </LinkButton>
+          </div>
         ) : (
           <Table>
             <TableHeader>
@@ -65,18 +71,20 @@ export function CabinetList({
                     <span className="flex flex-wrap items-center justify-end gap-2">
                       {env.status === "completed" ? (
                         <>
-                          <a
-                            className="text-sm underline"
+                          <LinkButton
                             href={`/v1/envelopes/${env.id}/pdf`}
+                            variant="outline"
+                            className="h-8 text-sm"
                           >
                             Download
-                          </a>
-                          <a
-                            className="text-sm underline"
+                          </LinkButton>
+                          <LinkButton
                             href={`/v1/envelopes/${env.id}/pdf?kind=certificate`}
+                            variant="outline"
+                            className="h-8 text-sm"
                           >
                             Certificate
-                          </a>
+                          </LinkButton>
                         </>
                       ) : null}
                       {env.status === "completed" && env.canDelete ? (

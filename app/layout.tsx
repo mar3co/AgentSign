@@ -21,12 +21,22 @@ const mono = IBM_Plex_Mono({
   variable: "--font-mono-face",
 });
 
+const description = "Send a PDF. A human signs. You get a sealed file.";
+
 export const metadata: Metadata = {
+  metadataBase: new URL("https://agentsign.co"),
   title: {
     default: "AgentSign",
     template: "%s · AgentSign",
   },
-  description: "Send a PDF. A human signs. You get a sealed file.",
+  description,
+  openGraph: {
+    title: "AgentSign",
+    description,
+    url: "/",
+    siteName: "AgentSign",
+    type: "website",
+  },
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

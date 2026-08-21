@@ -41,6 +41,7 @@ describe("Home", () => {
     render(createElement(Home));
 
     expect(document.querySelector('input[type="file"]')).toBeTruthy();
+    expect(screen.getByText(/or choose a file/i)).toBeTruthy();
     const pre = document.querySelector("pre");
     expect(pre).toBeTruthy();
     expect(pre!.textContent).toMatch(/curl/i);

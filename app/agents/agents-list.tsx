@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { LinkButton } from "@/components/link-button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -54,9 +55,9 @@ export function AgentsList({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <a className="text-sm underline" href="/upgrade">
+          <LinkButton href="/upgrade" className="h-11 w-full text-base">
             Upgrade
-          </a>
+          </LinkButton>
         </CardContent>
       </Card>
     );

@@ -1,17 +1,13 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { LinkButton } from "@/components/link-button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
 
 export function LoginForm({ email, next }: { email: string; next: string }) {
   const [message, setMessage] = useState<string | null>(null);
@@ -74,12 +70,6 @@ export function LoginForm({ email, next }: { email: string; next: string }) {
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Log in</CardTitle>
-        <CardDescription>
-          Magic link, password, or Google / GitHub. Same account.
-        </CardDescription>
-      </CardHeader>
       <CardContent>
         <form className="flex flex-col gap-4" onSubmit={onSubmit}>
           <div className="flex flex-col gap-2">
@@ -143,12 +133,24 @@ export function LoginForm({ email, next }: { email: string; next: string }) {
           >
             Create account
           </Button>
-          <a className="text-base underline" href={`/login/google${oauthNext}`}>
+          <Separator />
+          <p className="text-center font-mono text-[0.7rem] uppercase tracking-[0.2em] text-muted-foreground">
+            or
+          </p>
+          <LinkButton
+            href={`/login/google${oauthNext}`}
+            variant="outline"
+            className="h-11 w-full text-base"
+          >
             Continue with Google
-          </a>
-          <a className="text-base underline" href={`/login/github${oauthNext}`}>
+          </LinkButton>
+          <LinkButton
+            href={`/login/github${oauthNext}`}
+            variant="outline"
+            className="h-11 w-full text-base"
+          >
             Continue with GitHub
-          </a>
+          </LinkButton>
         </form>
       </CardContent>
     </Card>

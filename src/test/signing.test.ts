@@ -285,6 +285,17 @@ describe("signing ceremony", () => {
     expect(screen.queryByText(/Keep it in a cabinet/i)).toBeNull();
   });
 
+  it("unknown token page uses a Not found heading", { timeout: 30_000 }, async () => {
+    const db = await createTestDb();
+    setDeps({
+      db,
+      store: createFsStore(await mkdtemp(join(tmpdir(), "sign-"))),
+    });
+    const ui = await SigningPage({ params: Promise.resolve({ token: "missing" }) });
+    render(ui);
+    expect(screen.getByRole("heading", { name: /not found/i })).toBeTruthy();
+  });
+
   it("leaves envelope pending and returns 500 if complete throws", { timeout: 30_000 }, async () => {
     const { db, store, id, token } = await startVerified();
     setDeps({ p12: Buffer.from("not-a-pkcs12"), p12Passphrase: "nope" });

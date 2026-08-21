@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { LinkButton } from "@/components/link-button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Card,
@@ -36,9 +37,12 @@ export function TeamAccept({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <a className="text-sm underline" href={loginHref(token, email)}>
+          <LinkButton
+            href={loginHref(token, email)}
+            className="h-11 w-full text-base"
+          >
             Log in
-          </a>
+          </LinkButton>
         </CardContent>
       </Card>
     );
@@ -108,9 +112,9 @@ function TeamAcceptSession({ token }: { token: string }) {
           <CardDescription>You are on this cabinet.</CardDescription>
         </CardHeader>
         <CardContent>
-          <a className="text-sm underline" href="/team">
+          <LinkButton href="/team" className="h-11 w-full text-base">
             Team
-          </a>
+          </LinkButton>
         </CardContent>
       </Card>
     );

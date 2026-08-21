@@ -3,6 +3,7 @@ import { Separator } from "@/components/ui/separator";
 const LINKS = [
   { href: "/privacy", label: "Privacy" },
   { href: "/terms", label: "Terms" },
+  { href: "/upgrade", label: "Upgrade" },
   { href: "/openapi.json", label: "OpenAPI" },
   { href: "/llms.txt", label: "llms.txt" },
 ] as const;
