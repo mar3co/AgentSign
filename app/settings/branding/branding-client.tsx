@@ -1,0 +1,87 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { BrandingForm } from "./branding-form";
+
+type Loaded = {
+  entitled: boolean;
+  displayName?: string | null;
+  hasLogo?: boolean;
+  canEdit?: boolean;
+};
+
+export function BrandingClient() {
+  const [state, setState] = useState<Loaded | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/v1/branding", { credentials: "include" });
+        if (res.status === 401) {
+          window.location.href = `/login?next=${encodeURIComponent("/settings/branding")}`;
+          return;
+        }
+        if (res.status === 403) {
+          const body = (await res.json().catch(() => null)) as {
+            code?: string;
+            error?: string;
+          } | null;
+          if (body?.code === "pro_required") {
+            if (!cancelled) setState({ entitled: false });
+            return;
+          }
+          if (!cancelled) setError(body?.error ?? "Could not load branding.");
+          return;
+        }
+        if (!res.ok) {
+          const body = (await res.json().catch(() => null)) as {
+            error?: string;
+          } | null;
+          if (!cancelled) setError(body?.error ?? "Could not load branding.");
+          return;
+        }
+        const json = (await res.json()) as {
+          display_name: string | null;
+          has_logo: boolean;
+        };
+        if (!cancelled) {
+          setState({
+            entitled: true,
+            displayName: json.display_name,
+            hasLogo: json.has_logo,
+            canEdit: true,
+          });
+        }
+      } catch {
+        if (!cancelled) setError("Could not load branding.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (error) {
+    return (
+      <Alert variant="destructive">
+        <AlertDescription>{error}</AlertDescription>
+      </Alert>
+    );
+  }
+
+  if (state === null) {
+    return <p className="text-base text-muted-foreground">Loading…</p>;
+  }
+
+  return (
+    <BrandingForm
+      entitled={state.entitled}
+      displayName={state.displayName}
+      hasLogo={state.hasLogo}
+      canEdit={state.canEdit}
+    />
+  );
+}

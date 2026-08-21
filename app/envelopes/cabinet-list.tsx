@@ -3,6 +3,7 @@
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -30,6 +31,11 @@ export function CabinetList({
         <CardDescription>
           Envelopes you sent or signed.
         </CardDescription>
+        <CardAction>
+          <a className="text-sm underline" href="/settings/branding">
+            Branding
+          </a>
+        </CardAction>
       </CardHeader>
       <CardContent>
         {envelopes.length === 0 ? (
