@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { createElement } from "react";
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { CabinetList } from "../../app/envelopes/cabinet-list.js";
 import { TeamAccept } from "../../app/team/accept/team-accept.js";
 import { TeamClient } from "../../app/team/team-client.js";
@@ -25,6 +25,7 @@ const ownerMembers = [
 describe("TeamList", () => {
   afterEach(() => {
     cleanup();
+    vi.unstubAllGlobals();
   });
 
   it("shows upgrade link when not entitled", () => {
@@ -59,6 +60,38 @@ describe("TeamList", () => {
     expect(screen.getByText("tech@example.com")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /invite/i })).toBeNull();
     expect(screen.queryByLabelText(/email/i)).toBeNull();
+  });
+
+  it("inviting the same email twice shows one row", async () => {
+    const invited = {
+      id: "mem_1",
+      email: "tech@example.com",
+      status: "invited",
+    };
+    const fetchMock = vi.fn().mockImplementation(
+      () =>
+        new Response(JSON.stringify(invited), {
+          status: 201,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      createElement(TeamList, {
+        entitled: true,
+        isOwner: true,
+        members: [ownerMembers[0]!],
+      }),
+    );
+    const input = screen.getByLabelText(/email/i);
+    const form = input.closest("form")!;
+    fireEvent.change(input, { target: { value: "tech@example.com" } });
+    fireEvent.submit(form);
+    expect(await screen.findByText("tech@example.com")).toBeTruthy();
+    fireEvent.change(input, { target: { value: "tech@example.com" } });
+    fireEvent.submit(form);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(screen.getAllByText("tech@example.com")).toHaveLength(1);
   });
 });
 

@@ -84,7 +84,14 @@ export function TeamList({
         return;
       }
       const json = (await res.json()) as Omit<TeamMember, "role">;
-      setItems((prev) => [...prev, { ...json, role: "member" }]);
+      const row = { ...json, role: "member" as const };
+      setItems((prev) => {
+        const i = prev.findIndex((m) => m.id === row.id || m.email === row.email);
+        if (i === -1) return [...prev, row];
+        const next = [...prev];
+        next[i] = { ...next[i], ...row };
+        return next;
+      });
       form.reset();
     } catch {
       setError("Could not invite.");
