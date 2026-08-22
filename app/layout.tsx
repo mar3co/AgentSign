@@ -1,6 +1,11 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { Big_Shoulders, IBM_Plex_Mono, Public_Sans } from "next/font/google";
+import {
+  Big_Shoulders,
+  IBM_Plex_Mono,
+  IBM_Plex_Serif,
+  Public_Sans,
+} from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 
@@ -21,7 +26,15 @@ const mono = IBM_Plex_Mono({
   variable: "--font-mono-face",
 });
 
-const description = "Send a PDF. A human signs. You get a sealed file.";
+const serif = IBM_Plex_Serif({
+  subsets: ["latin"],
+  weight: ["400", "500"],
+  style: ["normal", "italic"],
+  variable: "--font-serif-face",
+});
+
+const description =
+  "Easy signing for everything, by people and their AI agents.";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://agentsign.co"),
@@ -43,7 +56,13 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html
       lang="en"
-      className={cn("font-sans", sans.variable, display.variable, mono.variable)}
+      className={cn(
+        "font-sans",
+        sans.variable,
+        display.variable,
+        mono.variable,
+        serif.variable,
+      )}
     >
       <body>{children}</body>
     </html>

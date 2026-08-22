@@ -1,19 +1,25 @@
 import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
 
 const LINKS = [
-  { href: "/privacy", label: "Privacy" },
-  { href: "/terms", label: "Terms" },
-  { href: "/upgrade", label: "Upgrade" },
   { href: "/openapi.json", label: "OpenAPI" },
   { href: "/llms.txt", label: "llms.txt" },
+  { href: "/privacy", label: "Privacy" },
+  { href: "/terms", label: "Terms" },
+  { href: "/upgrade", label: "Pricing" },
 ] as const;
 
-export function SiteFooter() {
+export function SiteFooter({ className }: { className?: string }) {
   return (
-    <footer className="mt-auto px-4 pb-8 pt-6">
+    <footer className={cn("mt-auto px-4 pb-8 pt-6", className)}>
       <Separator className="mb-4" />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="font-heading text-sm tracking-tight">AgentSign</p>
+        <div className="flex flex-col gap-1">
+          <p className="font-heading text-sm tracking-tight">AgentSign</p>
+          <p className="text-xs text-muted-foreground">
+            Easy signing for everything.
+          </p>
+        </div>
         <nav aria-label="Legal" className="flex flex-wrap gap-x-4 gap-y-2">
           {LINKS.map((link) => (
             <a

@@ -163,7 +163,7 @@ describe("login", () => {
     const html = renderToStaticMarkup(createElement(Home));
     expect(html).toMatch(/type="file"/);
     expect(html).toContain('href="/login"');
-    expect(html).toMatch(/>Send</);
+    expect(html).toMatch(/>Choose a PDF</);
   });
 
   it("password signup + sign-in yields a session that can mint a live key", async () => {

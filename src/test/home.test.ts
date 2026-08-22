@@ -5,6 +5,9 @@ import { cleanup, render, screen, fireEvent, waitFor } from "@testing-library/re
 import Home from "../../app/page.js";
 
 async function fillSendForm() {
+  // The hero starts compact; the send fields appear once a PDF is being chosen.
+  // The sticky send bar repeats the button, so scope to the hero's (first).
+  fireEvent.click(screen.getAllByText("Choose a PDF")[0]!);
   fireEvent.change(screen.getByLabelText(/title/i), {
     target: { value: "Repair authorization" },
   });
@@ -20,7 +23,7 @@ async function fillSendForm() {
   const file = new File(["%PDF-1.4"], "form.pdf", { type: "application/pdf" });
   const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
   fireEvent.change(fileInput, { target: { files: [file] } });
-  fireEvent.submit(screen.getByRole("button", { name: /send/i }).closest("form")!);
+  fireEvent.submit(screen.getByRole("button", { name: /^send$/i }).closest("form")!);
 }
 
 describe("Home", () => {
@@ -41,25 +44,25 @@ describe("Home", () => {
     render(createElement(Home));
 
     expect(document.querySelector('input[type="file"]')).toBeTruthy();
-    expect(screen.getByText(/or choose a file/i)).toBeTruthy();
+    expect(screen.getAllByText("Drop a PDF to send it").length).toBeGreaterThan(0);
     const pre = document.querySelector("pre");
     expect(pre).toBeTruthy();
     expect(pre!.textContent).toMatch(/curl/i);
     expect(pre!.textContent).toContain("/v1/envelopes");
     expect(pre!.textContent).toContain("Repair");
-    expect(pre!.textContent).toContain("shop@example.com");
+    expect(pre!.textContent).toContain("you@example.com");
     expect(pre!.textContent).toContain("file=@form.pdf");
     expect(screen.getByRole("link", { name: /log in/i }).getAttribute("href")).toBe(
       "/login",
     );
     expect(
       screen.getByRole("heading", {
-        name: /send a pdf\. a human signs\. you get a sealed file/i,
+        name: /easy signing for everything, by people and their ai agents/i,
       }),
     ).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/20 envelopes/i);
     expect(document.body.textContent).not.toMatch(/AI signing/i);
-    expect(screen.getByRole("img", { name: /byterange/i })).toBeTruthy();
+    expect(screen.queryByRole("img", { name: /byterange/i })).toBeNull();
     expect(screen.getByRole("link", { name: /privacy/i }).getAttribute("href")).toBe(
       "/privacy",
     );

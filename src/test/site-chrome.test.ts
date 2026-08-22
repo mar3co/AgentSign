@@ -22,7 +22,7 @@ describe("SiteHeader", () => {
     expect(screen.getByRole("link", { name: /log in/i }).getAttribute("href")).toBe(
       "/login",
     );
-    expect(screen.getByRole("link", { name: /^upgrade$/i }).getAttribute("href")).toBe(
+    expect(screen.getByRole("link", { name: /^pricing$/i }).getAttribute("href")).toBe(
       "/upgrade",
     );
     expect(screen.queryByRole("link", { name: /^packets$/i })).toBeNull();
@@ -47,7 +47,7 @@ describe("SiteFooter", () => {
     cleanup();
   });
 
-  it("links privacy, terms, upgrade, OpenAPI, and llms.txt", () => {
+  it("links privacy, terms, pricing, OpenAPI, and llms.txt", () => {
     render(createElement(SiteFooter));
     expect(screen.getByRole("link", { name: /privacy/i }).getAttribute("href")).toBe(
       "/privacy",
@@ -55,7 +55,7 @@ describe("SiteFooter", () => {
     expect(screen.getByRole("link", { name: /terms/i }).getAttribute("href")).toBe(
       "/terms",
     );
-    expect(screen.getByRole("link", { name: /^upgrade$/i }).getAttribute("href")).toBe(
+    expect(screen.getByRole("link", { name: /^pricing$/i }).getAttribute("href")).toBe(
       "/upgrade",
     );
     expect(screen.getByRole("link", { name: /openapi/i }).getAttribute("href")).toBe(

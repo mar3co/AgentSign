@@ -8,6 +8,12 @@
     --font-heading: "Big Shoulders", "Public Sans", ui-sans-serif, sans-serif;
     --font-sans: "Public Sans", ui-sans-serif, system-ui, sans-serif;
     --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+    --font-serif: var(--font-serif-face), Georgia, serif;
+    --color-bond: var(--bond);
+    --color-ink: var(--ink);
+    --color-tint: var(--tint);
+    --color-terminal: var(--terminal);
+    --color-ledger: var(--ledger);
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -39,7 +45,7 @@
     --color-card: var(--card);
     --color-foreground: var(--foreground);
     --color-background: var(--background);
-    --color-seal: oklch(0.48 0.14 25);
+    --color-seal: var(--seal);
     --radius-sm: calc(var(--radius) * 0.6);
     --radius-md: calc(var(--radius) * 0.8);
     --radius-lg: var(--radius);
@@ -68,7 +74,12 @@
     --border: oklch(0.88 0.018 250);
     --input: oklch(0.88 0.018 250);
     --ring: oklch(0.38 0.08 250);
-    --seal: oklch(0.48 0.14 25);
+    --bond: #faf9f6;
+    --ink: #1c2733;
+    --tint: #2b4c9b;
+    --terminal: #0e1420;
+    --ledger: #c9d6ee;
+    --seal: #8c2b2b;
     --chart-1: oklch(0.38 0.08 250);
     --chart-2: oklch(0.48 0.14 25);
     --chart-3: oklch(0.55 0.04 250);
@@ -119,6 +130,24 @@
     --sidebar-ring: oklch(0.556 0 0);
 }
 
+[data-surface="public"] {
+    --background: var(--bond);
+    --foreground: var(--ink);
+    --card: #ffffff;
+    --card-foreground: var(--ink);
+    --border: #e6e3da;
+    --input: #c9cdd4;
+    --primary: var(--tint);
+    --primary-foreground: var(--bond);
+    --ring: var(--tint);
+    --muted: #f1efe9;
+    --muted-foreground: #6b7280;
+    --secondary: #f1efe9;
+    --secondary-foreground: var(--ink);
+    --accent: #f1efe9;
+    --accent-foreground: var(--ink);
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -134,5 +163,22 @@
   }
   .font-mono, pre, code, kbd {
     font-family: var(--font-mono-face), "IBM Plex Mono", ui-monospace, monospace;
+  }
+}
+
+/* Unlayered: must outrank Tailwind's `.font-heading` utility, which lives in a
+   later cascade layer than @layer base. */
+[data-surface="public"] :is(.font-heading, h1, h2, h3) {
+  font-family: var(--font-serif-face), Georgia, serif;
+  font-weight: 500;
+}
+[data-surface="public"] .font-heading.font-semibold {
+  font-weight: 600;
+}
+/* Home scroll story: gentle snap on the root scroller, only while the story is
+   on the page and only for people who have not asked for reduced motion. */
+@media (prefers-reduced-motion: no-preference) {
+  html:has([data-scroll-story]) {
+    scroll-snap-type: y proximity;
   }
 }
