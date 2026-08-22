@@ -52,10 +52,16 @@ export function SiteHeader({ variant }: { variant: SiteHeaderVariant }) {
             className="text-sm text-muted-foreground underline-offset-4 hover:underline"
             href="/upgrade"
           >
-            Upgrade
+            Pricing
           </a>
           <a
-            className="text-sm text-muted-foreground underline-offset-4 hover:underline"
+            className="font-mono text-xs text-tint underline-offset-4 hover:underline"
+            href="/llms.txt"
+          >
+            /llms.txt
+          </a>
+          <a
+            className="rounded-md border border-input px-4 py-2 text-sm transition-colors hover:bg-accent"
             href="/login"
           >
             Log in

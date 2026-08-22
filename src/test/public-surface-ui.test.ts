@@ -1,8 +1,10 @@
 // @vitest-environment happy-dom
 import { createElement } from "react";
 import { afterEach, describe, it, expect } from "vitest";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { PageShell } from "../../components/page-shell.js";
+import { SiteHeader } from "../../components/site-header.js";
+import { SiteFooter } from "../../components/site-footer.js";
 
 describe("PageShell public surface", () => {
   afterEach(() => cleanup());
@@ -29,5 +31,54 @@ describe("PageShell public surface", () => {
       expect(container.querySelector("[data-surface]")).toBeNull();
       cleanup();
     }
+  });
+});
+
+describe("public chrome", () => {
+  afterEach(() => cleanup());
+
+  it("public header shows Pricing, llms.txt, and Log in", () => {
+    render(createElement(SiteHeader, { variant: "public" }));
+    expect(screen.getByRole("link", { name: "Pricing" }).getAttribute("href")).toBe(
+      "/upgrade",
+    );
+    expect(screen.getByRole("link", { name: "/llms.txt" }).getAttribute("href")).toBe(
+      "/llms.txt",
+    );
+    expect(screen.getByRole("link", { name: "Log in" }).getAttribute("href")).toBe(
+      "/login",
+    );
+  });
+
+  it("public header keeps the wordmark on font-heading", () => {
+    render(createElement(SiteHeader, { variant: "public" }));
+    const wordmark = screen.getByRole("link", { name: "AgentSign" });
+    expect(wordmark.className).toContain("font-heading");
+  });
+
+  it("auth header still offers Send a PDF", () => {
+    render(createElement(SiteHeader, { variant: "auth" }));
+    expect(screen.getByRole("link", { name: "Send a PDF" }).getAttribute("href")).toBe(
+      "/",
+    );
+  });
+
+  it("footer carries the tagline", () => {
+    render(createElement(SiteFooter));
+    expect(screen.getByText("Easy signing for everything.")).toBeTruthy();
+  });
+
+  it("footer leads with the machine links and keeps all five", () => {
+    render(createElement(SiteFooter));
+    const labels = screen
+      .getAllByRole("link")
+      .map((link) => link.textContent);
+    expect(labels).toEqual([
+      "OpenAPI",
+      "llms.txt",
+      "Privacy",
+      "Terms",
+      "Upgrade",
+    ]);
   });
 });

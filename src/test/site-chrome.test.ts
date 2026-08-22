@@ -22,7 +22,7 @@ describe("SiteHeader", () => {
     expect(screen.getByRole("link", { name: /log in/i }).getAttribute("href")).toBe(
       "/login",
     );
-    expect(screen.getByRole("link", { name: /^upgrade$/i }).getAttribute("href")).toBe(
+    expect(screen.getByRole("link", { name: /^pricing$/i }).getAttribute("href")).toBe(
       "/upgrade",
     );
     expect(screen.queryByRole("link", { name: /^packets$/i })).toBeNull();
