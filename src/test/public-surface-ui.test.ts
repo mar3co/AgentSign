@@ -78,7 +78,7 @@ describe("public chrome", () => {
       "llms.txt",
       "Privacy",
       "Terms",
-      "Upgrade",
+      "Pricing",
     ]);
   });
 });

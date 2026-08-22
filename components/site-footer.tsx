@@ -5,7 +5,7 @@ const LINKS = [
   { href: "/llms.txt", label: "llms.txt" },
   { href: "/privacy", label: "Privacy" },
   { href: "/terms", label: "Terms" },
-  { href: "/upgrade", label: "Upgrade" },
+  { href: "/upgrade", label: "Pricing" },
 ] as const;
 
 export function SiteFooter() {
