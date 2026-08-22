@@ -24,11 +24,16 @@ export function PageShell({
   children: ReactNode;
 }) {
   return (
-    <div className={cn("mx-auto flex min-h-dvh w-full min-w-0 flex-col", WIDTH[width])}>
-      <SiteHeader variant={variant} />
-      {showRange ? <ByteRange sealed={sealed} /> : null}
-      <main className="flex flex-1 flex-col gap-6 px-4 py-6">{children}</main>
-      <SiteFooter />
+    <div
+      data-surface={variant === "public" || variant === "auth" ? "public" : undefined}
+      className="flex min-h-dvh w-full flex-col bg-background"
+    >
+      <div className={cn("mx-auto flex w-full min-w-0 flex-1 flex-col", WIDTH[width])}>
+        <SiteHeader variant={variant} />
+        {showRange ? <ByteRange sealed={sealed} /> : null}
+        <main className="flex flex-1 flex-col gap-6 px-4 py-6">{children}</main>
+        <SiteFooter />
+      </div>
     </div>
   );
 }
