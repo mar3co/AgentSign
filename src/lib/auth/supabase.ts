@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
-import { appOrigin, getEnv } from "../../env.js";
+import { appOrigin, devOffline, getEnv } from "../../env.js";
 import { getDeps } from "../deps.js";
+import { devOfflineAuth } from "./dev-offline.js";
 
 export type AuthUser = { id: string; email: string };
 
@@ -200,5 +201,9 @@ export function createSupabaseAuth(): AuthAdapter {
 }
 
 export function getAuth(): AuthAdapter {
-  return getDeps().auth ?? createSupabaseAuth();
+  const injected = getDeps().auth;
+  if (injected) return injected;
+  // Real Supabase always wins; the offline adapter only fills a total absence.
+  if (devOffline() && !getEnv().SUPABASE_URL) return devOfflineAuth;
+  return createSupabaseAuth();
 }

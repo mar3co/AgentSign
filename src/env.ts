@@ -24,6 +24,7 @@ const envSchema = z.object({
   FREE_SEND_WINDOW_DAYS: z.string().default("30"),
   P12_PATH: z.string().default(""),
   P12_PASSPHRASE: z.string().default(""),
+  DEV_OFFLINE: z.string().default(""),
   SELF_HOST: z.string().default(""),
   SIGN_FLAG_AGENT_PARTIES: z.string().default(""),
   SIGN_FLAG_AGENT_ONLY_ATTEST: z.string().default(""),
@@ -44,6 +45,17 @@ export function getEnv(): Env {
 
 export function resetEnvCache(): void {
   cached = undefined;
+}
+
+/**
+ * Offline dev mode: fake auth and an embedded PGlite DB so `npm run dev`
+ * works with no cloud services. Opt-in via DEV_OFFLINE=1, and never active
+ * on Vercel or in a production build, whatever the env file says.
+ */
+export function devOffline(): boolean {
+  if (getEnv().DEV_OFFLINE !== "1") return false;
+  if (process.env.VERCEL) return false;
+  return process.env.NODE_ENV !== "production";
 }
 
 /** Public origin for mail CTAs. APP_URL, else APP_ORIGIN, else localhost. */
