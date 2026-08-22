@@ -337,9 +337,8 @@ export default function Home() {
   );
 
   const sealed = done ? (
-    <Alert className="border-seal/40">
+    <Alert>
       <AlertDescription className="flex flex-col gap-2">
-        <span className={cn(EYEBROW, "text-seal")}>Sealed</span>
         <p>Keep this key; it is shown once.</p>
         <pre className="overflow-x-auto whitespace-pre-wrap text-xs">
           {done.key}
