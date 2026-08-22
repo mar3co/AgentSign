@@ -5,8 +5,8 @@ export function AgentAside() {
         For agents &amp; developers
       </p>
       <p className="text-sm text-muted-foreground">
-        Agents don&apos;t log in. They hold keys. Send with a throwaway sign_tmp_ key, or mint live
-        keys after you log in.
+        Agents don&apos;t log in. They hold keys. Send with no key and we hand back a throwaway
+        sign_tmp_ key, or mint live keys after you log in.
       </p>
     </aside>
   );
