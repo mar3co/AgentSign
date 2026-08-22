@@ -161,11 +161,14 @@
   .font-heading, h1, h2, h3 {
     font-family: var(--font-heading-face), "Big Shoulders", ui-sans-serif, sans-serif;
   }
-  [data-surface="public"] :is(.font-heading, h1, h2, h3) {
-    font-family: var(--font-serif-face), Georgia, serif;
-    font-weight: 500;
-  }
   .font-mono, pre, code, kbd {
     font-family: var(--font-mono-face), "IBM Plex Mono", ui-monospace, monospace;
   }
+}
+
+/* Unlayered: must outrank Tailwind's `.font-heading` utility, which lives in a
+   later cascade layer than @layer base. */
+[data-surface="public"] :is(.font-heading, h1, h2, h3) {
+  font-family: var(--font-serif-face), Georgia, serif;
+  font-weight: 500;
 }

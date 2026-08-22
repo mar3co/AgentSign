@@ -28,12 +28,13 @@ $ curl -X POST \\
     -H 'authorization: Bearer sign_agent_...'
 > receipt 4c19…9e2f · recorded 14:02:59 UTC`;
 
-const STATUS_BLOCK = `$ curl https://agentsign.co/v1/envelopes/env_kx3q9
-{ "status": "completed", "sealed": true }
+const STATUS_BLOCK = `$ curl https://agentsign.co/v1/envelopes/env_kx3q9 \\
+       -H 'authorization: Bearer sign_live_...'
+{ "status": "completed", "signers": [ … ], "audit": [ … ] }
 
 $ curl -F file=@sealed.pdf \\
        https://agentsign.co/v1/verify
-{ "valid": true, "certificate": "…" }`;
+{ "valid": true, "human_signatures": 1, "agent_attestations": 1 }`;
 
 const STEPS = [
   {
