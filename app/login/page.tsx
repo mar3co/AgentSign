@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { PageShell } from "@/components/page-shell";
 import { safeNext } from "../../src/lib/safeNext.js";
+import { AgentAside } from "./agent-aside";
 import { LoginForm } from "./login-form";
 
 export const runtime = "nodejs";
@@ -27,6 +28,7 @@ export default async function LoginPage({
         </p>
       </section>
       <LoginForm email={sp.email ?? ""} next={safeNext(sp.next)} />
+      <AgentAside />
     </PageShell>
   );
 }
