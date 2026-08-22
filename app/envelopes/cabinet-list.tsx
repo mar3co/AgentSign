@@ -61,7 +61,7 @@ export function CabinetList({
         {envelopes.length === 0 ? (
           <div className="flex flex-col gap-4">
             <p className="text-base text-muted-foreground">No envelopes yet.</p>
-            <LinkButton href="/" className="h-11 w-full text-base sm:w-auto">
+            <LinkButton href="/" className="self-start">
               Send a PDF
             </LinkButton>
           </div>
@@ -99,14 +99,14 @@ export function CabinetList({
                           <LinkButton
                             href={`/v1/envelopes/${env.id}/pdf`}
                             variant="outline"
-                            className="h-8 text-sm"
+                            size="sm"
                           >
                             Download
                           </LinkButton>
                           <LinkButton
                             href={`/v1/envelopes/${env.id}/pdf?kind=certificate`}
                             variant="outline"
-                            className="h-8 text-sm"
+                            size="sm"
                           >
                             Certificate
                           </LinkButton>
@@ -116,7 +116,7 @@ export function CabinetList({
                         <Button
                           type="button"
                           variant="outline"
-                          className="h-8 text-sm"
+                          size="sm"
                           onClick={() => onSavePacket?.(env.id)}
                         >
                           Save as packet
@@ -126,7 +126,7 @@ export function CabinetList({
                         <Button
                           type="button"
                           variant="outline"
-                          className="h-8 text-sm"
+                          size="sm"
                           onClick={() => onVoid?.(env.id)}
                         >
                           Void

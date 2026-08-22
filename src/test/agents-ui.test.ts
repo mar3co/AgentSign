@@ -4,7 +4,11 @@ import { afterEach, describe, it, expect, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { AgentsClient } from "../../app/agents/agents-client.js";
 import { AgentsList } from "../../app/agents/agents-list.js";
-import { SiteHeader } from "../../components/site-header.js";
+import { AppShell } from "../../components/app-shell.js";
+
+vi.mock("next/navigation", () => ({
+  usePathname: () => "",
+}));
 import { AuthorizeForm } from "../../app/oauth/authorize/authorize-form.js";
 import { SigningCeremony } from "../../app/s/[token]/signing-ceremony.js";
 
@@ -88,7 +92,7 @@ describe("cabinet Agents link", () => {
   });
 
   it("links Agents to /agents", () => {
-    render(createElement(SiteHeader, { variant: "app" }));
+    render(createElement(AppShell, null, "content"));
     expect(screen.getAllByRole("link", { name: /^agents$/i })[0]?.getAttribute("href")).toBe(
       "/agents",
     );

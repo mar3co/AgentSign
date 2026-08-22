@@ -53,7 +53,7 @@ export function PacketsList({ entitled, packets = [] }: PacketsListProps) {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <LinkButton href="/upgrade" className="h-11 w-full text-base">
+          <LinkButton href="/upgrade">
             Upgrade
           </LinkButton>
         </CardContent>
@@ -192,7 +192,6 @@ export function PacketsList({ entitled, packets = [] }: PacketsListProps) {
                               id={`${packet.id}-name-${i}`}
                               name={`name-${i}`}
                               required
-                              className="h-11 text-base md:text-base"
                             />
                           </div>
                           <div className="flex flex-col gap-2">
@@ -205,7 +204,6 @@ export function PacketsList({ entitled, packets = [] }: PacketsListProps) {
                               type="email"
                               required
                               autoComplete="email"
-                              className="h-11 text-base md:text-base"
                             />
                           </div>
                         </div>
@@ -216,7 +214,7 @@ export function PacketsList({ entitled, packets = [] }: PacketsListProps) {
                         </Alert>
                       ) : null}
                       <Button
-                        className="h-11 w-full text-base"
+                        className="self-start"
                         type="submit"
                         disabled={busy}
                       >
@@ -236,7 +234,6 @@ export function PacketsList({ entitled, packets = [] }: PacketsListProps) {
               id="title"
               name="title"
               required
-              className="h-11 text-base md:text-base"
             />
           </div>
           {Array.from({ length: roleCount }, (_, i) => (
@@ -246,14 +243,13 @@ export function PacketsList({ entitled, packets = [] }: PacketsListProps) {
                 id={`role_name_${i}`}
                 name="role_name"
                 required
-                className="h-11 text-base md:text-base"
               />
             </div>
           ))}
           <Button
+            className="self-start"
             type="button"
             variant="outline"
-            className="h-11 w-full text-base"
             onClick={() => setRoleCount((n) => n + 1)}
           >
             Add role
@@ -266,7 +262,6 @@ export function PacketsList({ entitled, packets = [] }: PacketsListProps) {
               type="file"
               accept="application/pdf,.pdf"
               required
-              className="h-11 text-base md:text-base"
             />
           </div>
           {saved ? (
@@ -274,7 +269,7 @@ export function PacketsList({ entitled, packets = [] }: PacketsListProps) {
               <AlertDescription>Saved.</AlertDescription>
             </Alert>
           ) : null}
-          <Button className="h-11 w-full text-base" type="submit" disabled={busy}>
+          <Button className="self-start" type="submit" disabled={busy}>
             Save packet
           </Button>
         </form>

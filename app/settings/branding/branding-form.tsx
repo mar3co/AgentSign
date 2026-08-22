@@ -42,7 +42,7 @@ export function BrandingForm({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <LinkButton href="/upgrade" className="h-11 w-full text-base">
+          <LinkButton href="/upgrade">
             Upgrade
           </LinkButton>
         </CardContent>
@@ -155,7 +155,6 @@ export function BrandingForm({
               name="display_name"
               maxLength={80}
               defaultValue={displayName ?? ""}
-              className="h-11 text-base md:text-base"
             />
           </div>
           <div className="flex flex-col gap-2">
@@ -165,7 +164,6 @@ export function BrandingForm({
               name="logo"
               type="file"
               accept="image/png,image/jpeg,.png,.jpg,.jpeg"
-              className="h-11 text-base md:text-base"
             />
             {logoOn ? (
               <p className="text-sm text-muted-foreground">A logo is already saved.</p>
@@ -181,14 +179,14 @@ export function BrandingForm({
               <AlertDescription>Saved.</AlertDescription>
             </Alert>
           ) : null}
-          <Button className="h-11 w-full text-base" type="submit" disabled={busy}>
+          <Button className="self-start" type="submit" disabled={busy}>
             Save
           </Button>
           {logoOn ? (
             <Button
+              className="self-start"
               type="button"
               variant="outline"
-              className="h-11 w-full text-base"
               disabled={busy}
               onClick={onRemoveLogo}
             >

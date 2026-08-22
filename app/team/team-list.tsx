@@ -52,7 +52,7 @@ export function TeamList({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <LinkButton href="/upgrade" className="h-11 w-full text-base">
+          <LinkButton href="/upgrade">
             Upgrade
           </LinkButton>
         </CardContent>
@@ -162,7 +162,7 @@ export function TeamList({
                     <Button
                       type="button"
                       variant="outline"
-                      className="h-8 text-sm"
+                      size="sm"
                       disabled={busy}
                       onClick={() => onRemove(member.id)}
                     >
@@ -184,10 +184,9 @@ export function TeamList({
                 type="email"
                 required
                 autoComplete="email"
-                className="h-11 text-base md:text-base"
               />
             </div>
-            <Button className="h-11 w-full text-base" type="submit" disabled={busy}>
+            <Button className="self-start" type="submit" disabled={busy}>
               Invite
             </Button>
           </form>

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import {
   Big_Shoulders,
+  Geist,
   IBM_Plex_Mono,
   IBM_Plex_Serif,
   Public_Sans,
@@ -12,6 +13,11 @@ import { cn } from "@/lib/utils";
 const sans = Public_Sans({
   subsets: ["latin"],
   variable: "--font-sans-face",
+});
+
+const geist = Geist({
+  subsets: ["latin"],
+  variable: "--font-geist-face",
 });
 
 const display = Big_Shoulders({
@@ -59,6 +65,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       className={cn(
         "font-sans",
         sans.variable,
+        geist.variable,
         display.variable,
         mono.variable,
         serif.variable,

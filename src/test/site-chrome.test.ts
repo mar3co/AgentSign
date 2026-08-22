@@ -1,13 +1,18 @@
 // @vitest-environment happy-dom
 import { createElement } from "react";
-import { afterEach, describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import { AppShell } from "../../components/app-shell.js";
 import { ByteRange } from "../../components/byte-range.js";
 import { SiteFooter } from "../../components/site-footer.js";
 import { SiteHeader } from "../../components/site-header.js";
 import { CabinetList } from "../../app/envelopes/cabinet-list.js";
 import PrivacyPage from "../../app/privacy/page.js";
 import TermsPage from "../../app/terms/page.js";
+
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/envelopes",
+}));
 
 describe("SiteHeader", () => {
   afterEach(() => {
@@ -29,8 +34,15 @@ describe("SiteHeader", () => {
     expect(screen.queryByRole("link", { name: /^branding$/i })).toBeNull();
   });
 
-  it("app header is the only cabinet nav", () => {
-    render(createElement(SiteHeader, { variant: "app" }));
+});
+
+describe("AppShell", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("sidebar is the only cabinet nav and marks the active page", () => {
+    render(createElement(AppShell, null, "content"));
     const href = (name: RegExp) =>
       screen.getAllByRole("link", { name })[0]?.getAttribute("href");
     expect(href(/^send$/i)).toBe("/");
@@ -39,6 +51,19 @@ describe("SiteHeader", () => {
     expect(href(/^branding$/i)).toBe("/settings/branding");
     expect(href(/^team$/i)).toBe("/team");
     expect(href(/^agents$/i)).toBe("/agents");
+    expect(href(/^docs$/i)).toBe("/docs");
+    // The header title reflects the mocked /envelopes pathname.
+    expect(screen.getByRole("heading", { name: /^cabinet$/i })).toBeTruthy();
+    expect(
+      screen
+        .getAllByRole("link", { name: /^cabinet$/i })[0]
+        ?.hasAttribute("data-active"),
+    ).toBe(true);
+    expect(
+      screen
+        .getAllByRole("link", { name: /^packets$/i })[0]
+        ?.hasAttribute("data-active"),
+    ).toBe(false);
   });
 });
 

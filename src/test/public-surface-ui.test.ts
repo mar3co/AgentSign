@@ -23,14 +23,18 @@ describe("PageShell public surface", () => {
     expect(container.querySelector('[data-surface="public"]')).toBeTruthy();
   });
 
-  it("does not mark app or ceremony variants", () => {
-    for (const variant of ["app", "ceremony"] as const) {
-      const { container } = render(
-        createElement(PageShell, { variant, children: "hi" }),
-      );
-      expect(container.querySelector("[data-surface]")).toBeNull();
-      cleanup();
-    }
+  it("marks the app surface and leaves ceremony unmarked", () => {
+    const app = render(
+      createElement(PageShell, { variant: "app", children: "hi" }),
+    );
+    expect(app.container.querySelector('[data-surface="app"]')).toBeTruthy();
+    expect(app.container.querySelector('[data-surface="public"]')).toBeNull();
+    cleanup();
+    const ceremony = render(
+      createElement(PageShell, { variant: "ceremony", children: "hi" }),
+    );
+    expect(ceremony.container.querySelector("[data-surface]")).toBeNull();
+    cleanup();
   });
 });
 
