@@ -40,6 +40,13 @@ describe("UpgradePage", () => {
     expect(document.body.textContent).toContain(
       "No seats. No per-document fees. Cancel any time.",
     );
-    expect(document.body.textContent).toContain("GET /llms.txt");
+    // No address on the pricing panel: /llms.txt does not serve this JSON,
+    // and machine-side addresses must be real. Scoped to the panel because the
+    // shared footer and header legitimately link to /llms.txt.
+    for (const eyebrow of screen.getAllByText("Pricing as data")) {
+      const header = eyebrow.parentElement;
+      expect(header?.children.length).toBe(1);
+      expect(header?.textContent).toBe("Pricing as data");
+    }
   });
 });

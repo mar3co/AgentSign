@@ -103,7 +103,6 @@ export default function UpgradePage() {
         machine={
           <TerminalPanel
             eyebrow="Pricing as data"
-            address="GET /llms.txt"
             footer={
               <p className="text-[#7e97d8]">
                 No seats. No per-document fees. Cancel any time.
