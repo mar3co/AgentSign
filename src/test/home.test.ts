@@ -5,6 +5,8 @@ import { cleanup, render, screen, fireEvent, waitFor } from "@testing-library/re
 import Home from "../../app/page.js";
 
 async function fillSendForm() {
+  // The hero starts compact; the send fields appear once a PDF is being chosen.
+  fireEvent.click(screen.getByText("Choose a PDF"));
   fireEvent.change(screen.getByLabelText(/title/i), {
     target: { value: "Repair authorization" },
   });
@@ -41,20 +43,20 @@ describe("Home", () => {
     render(createElement(Home));
 
     expect(document.querySelector('input[type="file"]')).toBeTruthy();
-    expect(screen.getByText(/or choose a file/i)).toBeTruthy();
+    expect(screen.getByText("Drop a PDF to send it")).toBeTruthy();
     const pre = document.querySelector("pre");
     expect(pre).toBeTruthy();
     expect(pre!.textContent).toMatch(/curl/i);
     expect(pre!.textContent).toContain("/v1/envelopes");
     expect(pre!.textContent).toContain("Repair");
-    expect(pre!.textContent).toContain("shop@example.com");
+    expect(pre!.textContent).toContain("you@example.com");
     expect(pre!.textContent).toContain("file=@form.pdf");
     expect(screen.getByRole("link", { name: /log in/i }).getAttribute("href")).toBe(
       "/login",
     );
     expect(
       screen.getByRole("heading", {
-        name: /send a pdf\. a human signs\. you get a sealed file/i,
+        name: /easy signing for everything, by people and their ai agents/i,
       }),
     ).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/20 envelopes/i);
