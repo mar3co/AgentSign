@@ -21,4 +21,25 @@ describe("UpgradePage", () => {
     expect(form?.getAttribute("action")).toBe("/upgrade/checkout");
     expect(form?.getAttribute("method")?.toLowerCase()).toBe("post");
   });
+
+  it("shows the pricing JSON twin", () => {
+    render(createElement(UpgradePage));
+    // TwoReader mounts the machine node twice (mobile disclosure + desktop column).
+    expect(screen.getAllByText("Pricing as data").length).toBeGreaterThan(0);
+    expect(document.body.textContent).toContain('"price_usd_month": 19');
+  });
+
+  it("carries the locked human copy and one seal-red CTA", () => {
+    render(createElement(UpgradePage));
+    expect(screen.getByText("One flat price")).toBeTruthy();
+    const heading = screen.getByRole("heading", { level: 1 });
+    expect(heading.textContent).toBe("Keep the file a year.");
+    expect(heading.querySelector(".text-seal")?.textContent).toBe(".");
+    const cta = screen.getByRole("button", { name: /keep this a year/i });
+    expect(cta.className).toContain("bg-seal");
+    expect(document.body.textContent).toContain(
+      "No seats. No per-document fees. Cancel any time.",
+    );
+    expect(document.body.textContent).toContain("GET /llms.txt");
+  });
 });
