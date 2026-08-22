@@ -76,4 +76,39 @@ describe("CabinetList", () => {
     );
     expect(document.querySelector('input[type="file"]')).toBeNull();
   });
+
+  it("lists each party with kind and signed vs attested", () => {
+    render(
+      createElement(CabinetList, {
+        envelopes: [
+          {
+            id: "env_mixed",
+            title: "Repair authorization",
+            status: "completed",
+            canDelete: true,
+            signers: [
+              {
+                name: "Grok Legal",
+                kind: "agent",
+                email: "shop@example.com",
+                agent: "grok-legal",
+                signed_at: null,
+                attested_at: "2026-08-21T12:00:00.000Z",
+              },
+              {
+                name: "Jane",
+                kind: "human",
+                email: "jane@example.com",
+                signed_at: "2026-08-21T12:01:00.000Z",
+                attested_at: null,
+              },
+            ],
+          },
+        ],
+      }),
+    );
+
+    expect(screen.getByText("grok-legal · agent · attested")).toBeTruthy();
+    expect(screen.getByText("Jane · human · signed")).toBeTruthy();
+  });
 });

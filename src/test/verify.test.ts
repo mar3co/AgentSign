@@ -326,6 +326,125 @@ describe("POST /v1/verify", () => {
     expect(badJson.code).toBe("not_our_seal");
   });
 
+  it("A→H→A→H completes; certificate has attest + signed; verify valid", {
+    timeout: 60_000,
+  }, async () => {
+    const frozen = new Date("2026-08-21T12:00:00.000Z");
+    const { db, store, sent, userFor } = await boot(() => frozen);
+    const { cookie } = await asPro(db, userFor);
+    const legal = await createNamedAgent(cookie, "grok-legal", "Grok Legal");
+    const ops = await createNamedAgent(cookie, "grok-ops", "Grok Ops");
+    const live = await mintLive(cookie);
+    const created = await postEnvelope(
+      new Request("http://sign.test/v1/envelopes", {
+        method: "POST",
+        headers: { authorization: `Bearer ${live}` },
+        body: await envelopeBody([
+          {
+            name: "Grok Legal",
+            email: "shop@example.com",
+            kind: "agent",
+            agent: "grok-legal",
+          },
+          { name: "Jane", email: "jane@example.com" },
+          {
+            name: "Grok Ops",
+            email: "shop@example.com",
+            kind: "agent",
+            agent: "grok-ops",
+          },
+          { name: "Bob", email: "bob@example.com" },
+        ]),
+      }),
+    );
+    expect(created.status).toBe(201);
+    const { id } = (await created.json()) as { id: string };
+
+    expect(
+      (
+        await postAttest(
+          new Request(`http://sign.test/v1/envelopes/${id}/attest`, {
+            method: "POST",
+            headers: { authorization: `Bearer ${legal.key}` },
+          }),
+          { params: Promise.resolve({ id }) },
+        )
+      ).status,
+    ).toBe(200);
+
+    async function finishHuman(email: string) {
+      const invite = sent.find((m) => m.to === email && /please sign/i.test(m.subject));
+      expect(invite).toBeTruthy();
+      const token = tokenFromUrl(invite!.text.match(/\/s\/([A-Za-z0-9_-]+)/)![1]!);
+      expect(
+        (
+          await postConsent(
+            new Request(`http://sign.test/s/${token}/consent`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ consent: true }),
+            }),
+            { params: Promise.resolve({ token }) },
+          )
+        ).status,
+      ).toBe(200);
+      const body = new FormData();
+      body.set("png", new Blob([png], { type: "image/png" }), "sig.png");
+      const sign = await postSign(
+        new Request(`http://sign.test/s/${token}/sign`, { method: "POST", body }),
+        { params: Promise.resolve({ token }) },
+      );
+      expect(sign.status).toBe(200);
+      return sign;
+    }
+
+    const jane = await finishHuman("jane@example.com");
+    expect(((await jane.json()) as { status: string }).status).toBe("pending");
+
+    expect(
+      (
+        await postAttest(
+          new Request(`http://sign.test/v1/envelopes/${id}/attest`, {
+            method: "POST",
+            headers: { authorization: `Bearer ${ops.key}` },
+          }),
+          { params: Promise.resolve({ id }) },
+        )
+      ).status,
+    ).toBe(200);
+
+    const bob = await finishHuman("bob@example.com");
+    expect(((await bob.json()) as { status: string }).status).toBe("completed");
+
+    const sealed = await store.get(`${id}/sealed.pdf`);
+    const cert = await store.get(`${id}/certificate.pdf`);
+    expect(sealed).not.toBeNull();
+    expect(cert).not.toBeNull();
+    const certText = latin1(cert!);
+    expect(certText).toContain("human_signatures: 2");
+    expect(certText).toContain("agent_attestations: 2");
+    expect(certText).toContain("Agent slug: grok-legal");
+    expect(certText).toContain("Agent slug: grok-ops");
+    expect(certText).toContain("Jane");
+    expect(certText).toContain("Bob");
+    expect(latin1(sealed!)).toContain("Not an electronic signature.");
+
+    const res = await verifyPdf(sealed!);
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      valid: boolean;
+      human_signatures?: number;
+      agent_attestations?: number;
+      envelope_id?: string;
+    };
+    expect(json.valid).toBe(true);
+    expect(json.human_signatures).toBe(2);
+    expect(json.agent_attestations).toBe(2);
+    expect(json.envelope_id).toBe(id);
+    const [env] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    expect(env!.status).toBe("completed");
+  });
+
   it("Free sealed appearance includes Sent with AgentSign; certificate does not", {
     timeout: 60_000,
   }, async () => {

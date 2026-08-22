@@ -7,7 +7,7 @@ import { eq } from "drizzle-orm";
 import { GET as getAuthCallback } from "../../app/auth/callback/route.js";
 import { POST as postLogin } from "../../app/login/session/route.js";
 import { POST as postAgents } from "../../app/v1/agents/route.js";
-import { POST as postEnvelope } from "../../app/v1/envelopes/route.js";
+import { GET as listEnvelopes, POST as postEnvelope } from "../../app/v1/envelopes/route.js";
 import { GET as getEnvelope } from "../../app/v1/envelopes/[id]/route.js";
 import { POST as postOtp } from "../../app/v1/envelopes/[id]/otp/route.js";
 import { POST as postKeys } from "../../app/v1/keys/route.js";
@@ -689,6 +689,79 @@ describe("POST /v1/envelopes agent parties", () => {
       rejected_at: null,
     });
     expect(json.signers[1]!.agent).toBeUndefined();
+  });
+
+  it("GET /v1/envelopes lists party kind and signed vs attested", async () => {
+    const { db, userFor } = await bootAuth();
+    const cookie = await magicCookie("shop@example.com");
+    const userId = userFor("shop@example.com").id;
+    await db.update(accounts).set({ plan: "pro" }).where(eq(accounts.userId, userId));
+
+    const createdAgent = await postAgents(
+      new Request("http://sign.test/v1/agents", {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ slug: "grok-legal", name: "Grok Legal" }),
+      }),
+    );
+    expect(createdAgent.status).toBe(201);
+
+    const key = await mintLive(cookie);
+    const res = await postEnvelope(
+      new Request("http://sign.test/v1/envelopes", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}` },
+        body: await envelopeBody([
+          {
+            name: "Grok Legal",
+            email: "shop@example.com",
+            kind: "agent",
+            agent: "grok-legal",
+          },
+          { name: "Jane", email: "jane@example.com" },
+        ]),
+      }),
+    );
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as { id: string };
+
+    const listed = await listEnvelopes(
+      new Request("http://sign.test/v1/envelopes", {
+        headers: { authorization: `Bearer ${key}` },
+      }),
+    );
+    expect(listed.status).toBe(200);
+    const body = (await listed.json()) as {
+      envelopes: Array<{
+        id: string;
+        signers: Array<{
+          name: string;
+          kind: string;
+          email: string;
+          agent?: string;
+          signed_at: string | null;
+          attested_at: string | null;
+        }>;
+      }>;
+    };
+    const row = body.envelopes.find((e) => e.id === created.id);
+    expect(row?.signers).toEqual([
+      {
+        name: "Grok Legal",
+        kind: "agent",
+        email: "shop@example.com",
+        agent: "grok-legal",
+        signed_at: null,
+        attested_at: null,
+      },
+      {
+        name: "Jane",
+        kind: "human",
+        email: "jane@example.com",
+        signed_at: null,
+        attested_at: null,
+      },
+    ]);
   });
 
   it("Free live key send with kind agent is 403 pro_required", async () => {

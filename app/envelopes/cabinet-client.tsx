@@ -36,6 +36,7 @@ export function CabinetClient() {
             json.envelopes.map((e) => ({
               ...e,
               canDelete: Boolean(e.can_delete),
+              signers: e.signers ?? [],
             })),
           );
         }

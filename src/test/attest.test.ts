@@ -526,6 +526,68 @@ describe("POST /v1/envelopes/:id/attest", () => {
     expect(await store.get(`${id}/sealed.pdf`)).not.toBeNull();
   });
 
+  it("concurrent last-human Finish vs agent attest: CAS, one winner", {
+    timeout: 60_000,
+  }, async () => {
+    const { db, store, sent, userFor } = await boot();
+    const { cookie } = await asPro(db, userFor);
+    const agent = await createNamedAgent(cookie, "grok-legal", "Grok Legal");
+    const live = await mintLive(cookie);
+    const id = await sendEnvelope(live, [
+      {
+        name: "Grok Legal",
+        email: "shop@example.com",
+        kind: "agent",
+        agent: "grok-legal",
+      },
+      { name: "Jane", email: "jane@example.com" },
+    ]);
+
+    expect((await postAttest(attestReq(id, agent.key), envCtx(id))).status).toBe(200);
+    const invite = sent.find((m) => m.to === "jane@example.com");
+    expect(invite).toBeTruthy();
+    const token = tokenFromUrl(invite!.text.match(/\/s\/([A-Za-z0-9_-]+)/)![1]!);
+
+    expect(
+      (
+        await postConsent(
+          new Request(`http://sign.test/s/${token}/consent`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ consent: true }),
+          }),
+          { params: Promise.resolve({ token }) },
+        )
+      ).status,
+    ).toBe(200);
+
+    const body = new FormData();
+    body.set("png", new Blob([png], { type: "image/png" }), "sig.png");
+    const [finish, attest] = await Promise.all([
+      postSign(
+        new Request(`http://sign.test/s/${token}/sign`, { method: "POST", body }),
+        { params: Promise.resolve({ token }) },
+      ),
+      postAttest(attestReq(id, agent.key), envCtx(id)),
+    ]);
+    const statuses = [finish.status, attest.status].sort((x, y) => x - y);
+    expect(statuses).toEqual([200, 409]);
+    expect(finish.status).toBe(200);
+    expect(attest.status).toBe(409);
+
+    const [env] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    expect(env!.status).toBe("completed");
+    expect(await store.get(`${id}/sealed.pdf`)).not.toBeNull();
+
+    const parties = await db
+      .select()
+      .from(signersTable)
+      .where(eq(signersTable.envelopeId, id));
+    parties.sort((a, b) => a.signingOrder - b.signingOrder);
+    expect(parties[0]!.attestedAt).not.toBeNull();
+    expect(parties[1]!.signedAt).not.toBeNull();
+  });
+
   it("agent key reject declines the envelope", { timeout: 60_000 }, async () => {
     const { db, userFor } = await boot();
     const { cookie } = await asPro(db, userFor);

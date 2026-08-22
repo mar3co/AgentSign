@@ -19,12 +19,28 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
+export type CabinetParty = {
+  name: string;
+  kind: "human" | "agent";
+  email: string;
+  agent?: string;
+  signed_at: string | null;
+  attested_at: string | null;
+};
+
 export type CabinetEnvelope = {
   id: string;
   title: string;
   status: string;
   canDelete?: boolean;
+  signers?: CabinetParty[];
 };
+
+function partyLine(p: CabinetParty): string {
+  const who = p.kind === "agent" ? (p.agent ?? p.name) : p.name;
+  const state = p.signed_at ? "signed" : p.attested_at ? "attested" : "waiting";
+  return `${who} · ${p.kind} · ${state}`;
+}
 
 export function CabinetList({
   envelopes,
@@ -62,7 +78,16 @@ export function CabinetList({
               {envelopes.map((env) => (
                 <TableRow key={env.id}>
                   <TableCell className="font-medium whitespace-normal">
-                    {env.title}
+                    <div className="flex min-w-0 flex-col gap-1">
+                      <span>{env.title}</span>
+                      {env.signers && env.signers.length > 0 ? (
+                        <ul className="text-sm font-normal text-muted-foreground">
+                          {env.signers.map((p, i) => (
+                            <li key={`${env.id}-${p.email}-${i}`}>{partyLine(p)}</li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </div>
                   </TableCell>
                   <TableCell>
                     <Badge variant="outline">{env.status}</Badge>

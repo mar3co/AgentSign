@@ -826,22 +826,61 @@ export async function listEnvelopes(req: Request): Promise<Response> {
     (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
   );
   const ownerUserId = cabinet.ownerUserId;
+  const envelopeIds = rows.map((e) => e.id);
+  const signerRows =
+    envelopeIds.length === 0
+      ? []
+      : await db
+          .select()
+          .from(signersTable)
+          .where(inArray(signersTable.envelopeId, envelopeIds));
+  const agentIds = [
+    ...new Set(
+      signerRows
+        .map((s) => s.agentId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const agentRows =
+    agentIds.length === 0
+      ? []
+      : await db.select().from(agents).where(inArray(agents.id, agentIds));
+  const slugById = new Map(agentRows.map((a) => [a.id, a.slug]));
+  const signersByEnvelope = new Map<string, typeof signerRows>();
+  for (const s of signerRows) {
+    const list = signersByEnvelope.get(s.envelopeId) ?? [];
+    list.push(s);
+    signersByEnvelope.set(s.envelopeId, list);
+  }
+
   return Response.json({
-    envelopes: rows.map((e) => ({
-      id: e.id,
-      status: e.status,
-      title: e.title,
-      sender_email: e.senderEmail,
-      created_at: e.createdAt.toISOString(),
-      expires_at: e.expiresAt.toISOString(),
-      shred_at: e.shredAt.toISOString(),
-      can_delete: Boolean(
-        (e.userId && e.userId === userId) ||
-          (userId === ownerUserId &&
-            e.userId &&
-            cabinet.memberUserIds.includes(e.userId)),
-      ),
-    })),
+    envelopes: rows.map((e) => {
+      const parties = (signersByEnvelope.get(e.id) ?? []).slice();
+      parties.sort((a, b) => a.signingOrder - b.signingOrder);
+      return {
+        id: e.id,
+        status: e.status,
+        title: e.title,
+        sender_email: e.senderEmail,
+        created_at: e.createdAt.toISOString(),
+        expires_at: e.expiresAt.toISOString(),
+        shred_at: e.shredAt.toISOString(),
+        can_delete: Boolean(
+          (e.userId && e.userId === userId) ||
+            (userId === ownerUserId &&
+              e.userId &&
+              cabinet.memberUserIds.includes(e.userId)),
+        ),
+        signers: parties.map((s) => ({
+          name: s.name,
+          kind: s.kind,
+          email: s.email,
+          ...agentSlugField(s.kind, s.agentId, slugById),
+          signed_at: iso(s.signedAt),
+          attested_at: iso(s.attestedAt),
+        })),
+      };
+    }),
   });
 }
 
