@@ -37,8 +37,11 @@ describe("PageShell public surface", () => {
 describe("public chrome", () => {
   afterEach(() => cleanup());
 
-  it("public header shows Pricing, llms.txt, and Log in", () => {
+  it("public header shows Docs, Pricing, llms.txt, and Log in", () => {
     render(createElement(SiteHeader, { variant: "public" }));
+    expect(screen.getByRole("link", { name: "Docs" }).getAttribute("href")).toBe(
+      "/docs",
+    );
     expect(screen.getByRole("link", { name: "Pricing" }).getAttribute("href")).toBe(
       "/upgrade",
     );

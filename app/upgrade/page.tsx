@@ -10,6 +10,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { PageShell } from "@/components/page-shell";
+import { PRICING_BLOCK } from "@/components/marketing/pricing-block";
 import { TerminalPanel } from "@/components/marketing/terminal-panel";
 import { TwoReader } from "@/components/marketing/two-reader";
 
@@ -21,23 +22,9 @@ export const metadata: Metadata = {
 
 const EYEBROW = "font-mono text-[11px] uppercase tracking-[0.22em] text-tint";
 
-const PRICING_BLOCK = `{
-  "free": {
-    "price_usd": 0,
-    "keep_days": 7,
-    "sends_per_30d": 20
-  },
-  "pro": {
-    "price_usd_month": 19,
-    "keep_days": 365,
-    "named_agents": 10,
-    "seats": "unlimited, flat"
-  }
-}`;
-
 export default function UpgradePage() {
   return (
-    <PageShell variant="public" width="xl">
+    <PageShell variant="public" width="full">
       <TwoReader
         human={
           <>

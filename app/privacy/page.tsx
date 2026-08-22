@@ -15,7 +15,9 @@ export default function PrivacyPage() {
         <p className="font-mono text-[0.7rem] uppercase tracking-[0.2em] text-muted-foreground">
           what we hold
         </p>
-        <h1 className="font-heading text-4xl tracking-tight">Privacy</h1>
+        <h1 className="font-heading text-4xl tracking-tight">
+          Privacy<span className="text-seal">.</span>
+        </h1>
         <a className="font-mono text-xs text-tint" href="/privacy.txt">
           plain text version
         </a>

@@ -1,4 +1,5 @@
 import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
 
 const LINKS = [
   { href: "/openapi.json", label: "OpenAPI" },
@@ -8,9 +9,9 @@ const LINKS = [
   { href: "/upgrade", label: "Pricing" },
 ] as const;
 
-export function SiteFooter() {
+export function SiteFooter({ className }: { className?: string }) {
   return (
-    <footer className="mt-auto px-4 pb-8 pt-6">
+    <footer className={cn("mt-auto px-4 pb-8 pt-6", className)}>
       <Separator className="mb-4" />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-col gap-1">

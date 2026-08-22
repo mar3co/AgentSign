@@ -61,7 +61,7 @@ describe("Home", () => {
     ).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/20 envelopes/i);
     expect(document.body.textContent).not.toMatch(/AI signing/i);
-    expect(screen.getByRole("img", { name: /byterange/i })).toBeTruthy();
+    expect(screen.queryByRole("img", { name: /byterange/i })).toBeNull();
     expect(screen.getByRole("link", { name: /privacy/i }).getAttribute("href")).toBe(
       "/privacy",
     );

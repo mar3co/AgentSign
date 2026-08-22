@@ -172,3 +172,6 @@
   font-family: var(--font-serif-face), Georgia, serif;
   font-weight: 500;
 }
+[data-surface="public"] .font-heading.font-semibold {
+  font-weight: 600;
+}

@@ -8,7 +8,11 @@ const WIDTH = {
   md: "max-w-lg",
   lg: "max-w-2xl",
   xl: "max-w-4xl",
+  full: "max-w-none",
 } as const;
+
+// Comp: 1440px canvas with 56px gutters; the header hairline spans the page.
+const PUBLIC_GUTTER = "mx-auto w-full max-w-[1440px] px-5 sm:px-8 xl:px-14";
 
 export function PageShell({
   variant,
@@ -23,11 +27,34 @@ export function PageShell({
   showRange?: boolean;
   children: ReactNode;
 }) {
+  if (variant === "public" || variant === "auth") {
+    return (
+      <div
+        data-surface="public"
+        className="flex min-h-dvh w-full flex-col bg-background"
+      >
+        <div className="border-b border-border">
+          <div className={PUBLIC_GUTTER}>
+            <SiteHeader variant={variant} className="px-0 py-[22px]" />
+          </div>
+        </div>
+        {/* The v8 comp has no ByteRange strip on the public surface. */}
+        <div className={cn(PUBLIC_GUTTER, "flex min-w-0 flex-1 flex-col")}>
+          <main
+            className={cn(
+              "mx-auto flex w-full min-w-0 flex-1 flex-col gap-10 py-8",
+              WIDTH[width],
+            )}
+          >
+            {children}
+          </main>
+          <SiteFooter className="px-0" />
+        </div>
+      </div>
+    );
+  }
   return (
-    <div
-      data-surface={variant === "public" || variant === "auth" ? "public" : undefined}
-      className="flex min-h-dvh w-full flex-col bg-background"
-    >
+    <div className="flex min-h-dvh w-full flex-col bg-background">
       <div className={cn("mx-auto flex w-full min-w-0 flex-1 flex-col", WIDTH[width])}>
         <SiteHeader variant={variant} />
         {showRange ? <ByteRange sealed={sealed} /> : null}

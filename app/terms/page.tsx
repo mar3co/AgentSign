@@ -15,7 +15,9 @@ export default function TermsPage() {
         <p className="font-mono text-[0.7rem] uppercase tracking-[0.2em] text-muted-foreground">
           the product
         </p>
-        <h1 className="font-heading text-4xl tracking-tight">Terms</h1>
+        <h1 className="font-heading text-4xl tracking-tight">
+          Terms<span className="text-seal">.</span>
+        </h1>
         <a className="font-mono text-xs text-tint" href="/terms.txt">
           plain text version
         </a>

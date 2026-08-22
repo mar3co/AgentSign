@@ -15,7 +15,7 @@ export function TwoReader({
   return (
     <section
       className={cn(
-        "grid min-w-0 items-stretch gap-8 lg:grid-cols-[minmax(0,1fr)_1px_minmax(0,26rem)]",
+        "grid min-w-0 items-stretch gap-8 lg:grid-cols-[minmax(0,1fr)_1px_minmax(0,26rem)] xl:grid-cols-[minmax(0,37.5rem)_1px_minmax(0,1fr)] xl:gap-14",
         className,
       )}
     >

@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, type FormEvent } from "react";
+import { FileDown } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,6 +14,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageShell } from "@/components/page-shell";
+import { PRICING_BLOCK } from "@/components/marketing/pricing-block";
 import { TerminalPanel } from "@/components/marketing/terminal-panel";
 import { TwoReader } from "@/components/marketing/two-reader";
 import { ValueBand } from "@/components/marketing/value-band";
@@ -166,13 +168,13 @@ export default function Home() {
     <form className="flex flex-col gap-4" onSubmit={onSubmit}>
       <div
         className={cn(
-          "flex flex-wrap items-center justify-between gap-4 rounded-lg border border-dashed px-4 py-4",
-          over ? "border-tint bg-tint/5" : "border-tint/40",
+          "flex flex-wrap items-center justify-between gap-4 rounded-[8px] border-[1.5px] border-dashed px-5 py-5 shadow-[0_1px_0_#e6e3da,0_12px_28px_rgba(28,39,51,0.06)]",
+          over ? "border-tint bg-tint/5" : "border-[#9faec9] bg-card",
         )}
       >
         <label
           htmlFor="file"
-          className="flex min-w-0 flex-1 cursor-pointer flex-col gap-0.5"
+          className="flex min-w-0 flex-1 cursor-pointer items-center gap-4"
           onDragOver={(e) => {
             e.preventDefault();
             setOver(true);
@@ -197,19 +199,28 @@ export default function Home() {
             className="sr-only"
             onChange={(e) => onFile(e.target.files?.[0]?.name ?? null)}
           />
-          <span className="text-[15px] font-medium">Drop a PDF to send it</span>
-          <span className="truncate text-sm text-muted-foreground">
-            Your signer gets an email link in seconds
-          </span>
-          {fileName ? (
-            <span className="truncate font-mono text-xs text-tint">
-              {fileName}
+          <FileDown
+            aria-hidden
+            strokeWidth={1.5}
+            className="size-[30px] shrink-0 text-tint"
+          />
+          <span className="flex min-w-0 flex-col gap-0.5">
+            <span className="font-heading text-xl leading-snug">
+              Drop a PDF to send it
             </span>
-          ) : null}
+            <span className="truncate text-[13px] text-muted-foreground">
+              Your signer gets an email link in seconds
+            </span>
+            {fileName ? (
+              <span className="truncate font-mono text-xs text-tint">
+                {fileName}
+              </span>
+            ) : null}
+          </span>
         </label>
         <Button
           type="button"
-          className="h-11 bg-seal text-bond hover:bg-seal/90"
+          className="h-11 bg-seal px-6 text-[15px] font-semibold text-bond hover:bg-seal/90"
           onClick={() => {
             setExpanded(true);
             fileRef.current?.click();
@@ -357,7 +368,7 @@ export default function Home() {
   ) : null;
 
   return (
-    <PageShell variant="public" width="xl">
+    <PageShell variant="public" width="full">
       <TwoReader
         human={
           <>
@@ -373,13 +384,16 @@ export default function Home() {
               sign. We shred it after 7 days unless you keep it.
             </p>
             {done ? sealed : sent ? otp : sender}
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+            <div className="flex flex-wrap items-center gap-3">
               <a
                 className="text-sm font-medium text-tint underline-offset-4 hover:underline"
                 href="/llms.txt"
               >
                 Connect your AI agent &rarr;
               </a>
+              <span aria-hidden className="text-input">
+                &middot;
+              </span>
               <a
                 className="text-sm font-medium text-tint underline-offset-4 hover:underline"
                 href="/upgrade"
@@ -398,9 +412,10 @@ export default function Home() {
                 <p className="text-[#7e97d8]">
                   Signing inside your own product, not ours.
                 </p>
-                <p className="text-[11.5px] text-[#55688f]">
-                  REST + OpenAPI · MCP: send · status · attest · verify ·
-                  self-host: SELF_HOST=1
+                <p className="flex flex-wrap gap-x-4 gap-y-1 text-[11.5px] text-[#55688f]">
+                  <span>REST + OpenAPI</span>
+                  <span>MCP: send · status · attest · verify</span>
+                  <span>self-host: SELF_HOST=1</span>
                 </p>
               </>
             }
@@ -444,6 +459,35 @@ export default function Home() {
           >
             <pre className="overflow-x-auto whitespace-pre text-ledger">
               {STATUS_BLOCK}
+            </pre>
+          </TerminalPanel>
+        }
+      />
+
+      <TwoReader
+        human={
+          <>
+            <p className={EYEBROW}>One flat price</p>
+            <h2 className="font-heading text-2xl tracking-[-0.01em] md:text-3xl">
+              Free is the fax. Pro is the cabinet
+            </h2>
+            <p className="max-w-prose text-[15px] leading-relaxed text-muted-foreground">
+              Send and sign free forever. Pro keeps completed files a year,
+              puts your name on the signing page, and covers the whole team
+              for one flat $19 a month.
+            </p>
+            <a
+              className="text-sm font-medium text-tint underline-offset-4 hover:underline"
+              href="/upgrade"
+            >
+              See pricing &rarr;
+            </a>
+          </>
+        }
+        machine={
+          <TerminalPanel eyebrow="Pricing as data">
+            <pre className="overflow-x-auto whitespace-pre text-ledger">
+              {PRICING_BLOCK}
             </pre>
           </TerminalPanel>
         }
