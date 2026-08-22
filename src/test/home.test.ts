@@ -6,7 +6,8 @@ import Home from "../../app/page.js";
 
 async function fillSendForm() {
   // The hero starts compact; the send fields appear once a PDF is being chosen.
-  fireEvent.click(screen.getByText("Choose a PDF"));
+  // The sticky send bar repeats the button, so scope to the hero's (first).
+  fireEvent.click(screen.getAllByText("Choose a PDF")[0]!);
   fireEvent.change(screen.getByLabelText(/title/i), {
     target: { value: "Repair authorization" },
   });
@@ -22,7 +23,7 @@ async function fillSendForm() {
   const file = new File(["%PDF-1.4"], "form.pdf", { type: "application/pdf" });
   const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
   fireEvent.change(fileInput, { target: { files: [file] } });
-  fireEvent.submit(screen.getByRole("button", { name: /send/i }).closest("form")!);
+  fireEvent.submit(screen.getByRole("button", { name: /^send$/i }).closest("form")!);
 }
 
 describe("Home", () => {
@@ -43,7 +44,7 @@ describe("Home", () => {
     render(createElement(Home));
 
     expect(document.querySelector('input[type="file"]')).toBeTruthy();
-    expect(screen.getByText("Drop a PDF to send it")).toBeTruthy();
+    expect(screen.getAllByText("Drop a PDF to send it").length).toBeGreaterThan(0);
     const pre = document.querySelector("pre");
     expect(pre).toBeTruthy();
     expect(pre!.textContent).toMatch(/curl/i);

@@ -14,10 +14,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageShell } from "@/components/page-shell";
-import { PRICING_BLOCK } from "@/components/marketing/pricing-block";
+import { ScrollStory } from "@/components/marketing/scroll-story";
 import { TerminalPanel } from "@/components/marketing/terminal-panel";
 import { TwoReader } from "@/components/marketing/two-reader";
-import { ValueBand } from "@/components/marketing/value-band";
 import { cn } from "@/lib/utils";
 
 const EYEBROW = "font-mono text-[11px] uppercase tracking-[0.22em] text-tint";
@@ -29,29 +28,6 @@ $ curl -X POST \\
     https://agentsign.co/v1/envelopes/env_kx3q9/attest \\
     -H 'authorization: Bearer sign_agent_...'
 > receipt 4c19…9e2f · recorded 14:02:59 UTC`;
-
-const STATUS_BLOCK = `$ curl https://agentsign.co/v1/envelopes/env_kx3q9 \\
-       -H 'authorization: Bearer sign_live_...'
-{ "status": "completed", "signers": [ … ], "audit": [ … ] }
-
-$ curl -F file=@sealed.pdf \\
-       https://agentsign.co/v1/verify
-{ "valid": true, "human_signatures": 1, "agent_attestations": 1 }`;
-
-const STEPS = [
-  {
-    key: "SENT",
-    body: "We email your signer a link. No login, no app, no account.",
-  },
-  {
-    key: "SIGNED",
-    body: "They review the PDF, consent, and sign by hand on any device.",
-  },
-  {
-    key: "SEALED",
-    body: "You both get the sealed file, a completion certificate, and the audit trail.",
-  },
-] as const;
 
 function curlFor(v: {
   title: string;
@@ -367,10 +343,16 @@ export default function Home() {
     </Alert>
   ) : null;
 
-  return (
-    <PageShell variant="public" width="full">
-      <TwoReader
-        human={
+  function scrollToHero() {
+    const reduce =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    window.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
+  }
+
+  const hero = (
+    <TwoReader
+      human={
           <>
             <p className={EYEBROW}>For humans</p>
             <h1 className="font-heading text-4xl leading-[1.14] tracking-[-0.02em] text-pretty md:text-5xl">
@@ -414,7 +396,9 @@ export default function Home() {
                 </p>
                 <p className="flex flex-wrap gap-x-4 gap-y-1 text-[11.5px] text-[#55688f]">
                   <span>REST + OpenAPI</span>
-                  <span>MCP: send · status · attest · verify</span>
+                  <span>
+                    MCP: <code>send · status · attest · verify</code>
+                  </span>
                   <span>self-host: SELF_HOST=1</span>
                 </p>
               </>
@@ -433,64 +417,23 @@ export default function Home() {
           </TerminalPanel>
         }
       />
+  );
 
-      <ValueBand />
-
-      <TwoReader
-        human={
-          <>
-            <h2 className="font-heading text-2xl tracking-[-0.01em] md:text-3xl">
-              What happens when you send
-            </h2>
-            {STEPS.map((step) => (
-              <div key={step.key} className="flex flex-col gap-1">
-                <p className={EYEBROW}>{step.key}</p>
-                <p className="max-w-prose text-[15px] leading-relaxed text-muted-foreground">
-                  {step.body}
-                </p>
-              </div>
-            ))}
-          </>
-        }
-        machine={
-          <TerminalPanel
-            eyebrow="Status & verify"
-            address="GET /v1/envelopes/{id}"
-          >
-            <pre className="overflow-x-auto whitespace-pre text-ledger">
-              {STATUS_BLOCK}
-            </pre>
-          </TerminalPanel>
-        }
-      />
-
-      <TwoReader
-        human={
-          <>
-            <p className={EYEBROW}>One flat price</p>
-            <h2 className="font-heading text-2xl tracking-[-0.01em] md:text-3xl">
-              Free is the fax. Pro is the cabinet
-            </h2>
-            <p className="max-w-prose text-[15px] leading-relaxed text-muted-foreground">
-              Send and sign free forever. Pro keeps completed files a year,
-              puts your name on the signing page, and covers the whole team
-              for one flat $19 a month.
-            </p>
-            <a
-              className="text-sm font-medium text-tint underline-offset-4 hover:underline"
-              href="/upgrade"
-            >
-              See pricing &rarr;
-            </a>
-          </>
-        }
-        machine={
-          <TerminalPanel eyebrow="Pricing as data">
-            <pre className="overflow-x-auto whitespace-pre text-ledger">
-              {PRICING_BLOCK}
-            </pre>
-          </TerminalPanel>
-        }
+  return (
+    <PageShell variant="public" width="full" showFooter={false}>
+      <ScrollStory
+        hero={hero}
+        onChooseFile={() => {
+          setExpanded(true);
+          fileRef.current?.click();
+          scrollToHero();
+        }}
+        onDropFiles={(files) => {
+          if (!fileRef.current) return;
+          fileRef.current.files = files;
+          onFile(files[0]?.name ?? null);
+          scrollToHero();
+        }}
       />
     </PageShell>
   );

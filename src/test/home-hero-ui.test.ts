@@ -16,7 +16,7 @@ describe("home hero", () => {
 
   it("mirrors the signer name into the curl pane", () => {
     render(createElement(Home));
-    fireEvent.click(screen.getByText("Choose a PDF"));
+    fireEvent.click(screen.getAllByText("Choose a PDF")[0]!);
     const name = screen.getByLabelText("Signer name");
     fireEvent.change(name, { target: { value: "Ada" } });
     const pane = document.querySelector("pre");

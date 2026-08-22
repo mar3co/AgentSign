@@ -26,7 +26,7 @@ export function TerminalPanel({
           {eyebrow}
         </p>
         {address ? (
-          <p className="text-[11.5px] text-[#55688f]">{address}</p>
+          <code className="text-[11.5px] text-[#55688f]">{address}</code>
         ) : null}
       </div>
       {children}

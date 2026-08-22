@@ -19,12 +19,14 @@ export function PageShell({
   width = "md",
   sealed = false,
   showRange = true,
+  showFooter = true,
   children,
 }: {
   variant: SiteHeaderVariant;
   width?: keyof typeof WIDTH;
   sealed?: boolean;
   showRange?: boolean;
+  showFooter?: boolean;
   children: ReactNode;
 }) {
   if (variant === "public" || variant === "auth") {
@@ -33,7 +35,10 @@ export function PageShell({
         data-surface="public"
         className="flex min-h-dvh w-full flex-col bg-background"
       >
-        <div className="border-b border-border">
+        <div
+          data-public-header
+          className="sticky top-0 z-40 border-b border-border bg-background"
+        >
           <div className={PUBLIC_GUTTER}>
             <SiteHeader variant={variant} className="px-0 py-[22px]" />
           </div>
@@ -48,7 +53,7 @@ export function PageShell({
           >
             {children}
           </main>
-          <SiteFooter className="px-0" />
+          {showFooter ? <SiteFooter className="px-0" /> : null}
         </div>
       </div>
     );
