@@ -255,6 +255,32 @@ describe("email templates", () => {
     }
   });
 
+  it("DEV_OFFLINE mailer logs the body: the console is the only inbox", async () => {
+    const prevOffline = process.env.DEV_OFFLINE;
+    const prevKey = process.env.RESEND_API_KEY;
+    process.env.DEV_OFFLINE = "1";
+    delete process.env.RESEND_API_KEY;
+    resetEnvCache();
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const mailer = createMailer();
+      await mailer.sendMail({
+        to: "shop@example.com",
+        subject: "Your Sign code",
+        text: "Your verification code is 654321. It expires in 10 minutes.",
+      });
+      const dumped = spy.mock.calls.map((c) => c.map(String).join(" ")).join("\n");
+      expect(dumped).toContain("654321");
+    } finally {
+      spy.mockRestore();
+      if (prevOffline === undefined) delete process.env.DEV_OFFLINE;
+      else process.env.DEV_OFFLINE = prevOffline;
+      if (prevKey === undefined) delete process.env.RESEND_API_KEY;
+      else process.env.RESEND_API_KEY = prevKey;
+      resetEnvCache();
+    }
+  });
+
   it("Resend JSON includes html and attachment content_id when present", async () => {
     process.env.RESEND_API_KEY = "re_test";
     process.env.FROM_EMAIL = "sign@localhost";

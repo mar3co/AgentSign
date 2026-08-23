@@ -1,24 +1,18 @@
 "use client";
 
-import { useState } from "react";
-import type { ReactNode } from "react";
+import { useEffect, useState } from "react";
+import type { ReactElement } from "react";
 
+import { ArrowDown, ArrowUp, Files, Search, Undo2 } from "lucide-react";
+import { NAV } from "@/components/app-nav";
 import {
-  Archive,
-  ArrowDown,
-  ArrowUp,
-  Bot,
-  Files,
-  Palette,
-  Search,
-  Send,
-  Undo2,
-  Users,
-} from "lucide-react";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import {
   Combobox,
-  ComboboxEmpty,
   ComboboxGroup,
   ComboboxInput,
   ComboboxItem,
@@ -28,24 +22,43 @@ import {
 import { InputGroupAddon } from "@/components/ui/input-group";
 
 type Props = {
-  trigger: ReactNode;
+  trigger: ReactElement;
   defaultOpen?: boolean;
   className?: string;
+  /** Register the global ⌘K / Ctrl+K shortcut. Enable on ONE instance only. */
+  hotkey?: boolean;
 };
 
 const PAGES = [
-  { href: "/send", label: "Send a PDF", icon: Send },
-  { href: "/documents", label: "Documents", icon: Archive },
-  { href: "/templates", label: "Templates", icon: Files },
-  { href: "/team", label: "Team", icon: Users },
-  { href: "/agents", label: "Agents", icon: Bot },
-  { href: "/settings/branding", label: "Branding", icon: Palette },
+  ...NAV.map(({ href, label, icon }) => ({ href, label, icon })),
   { href: "/docs", label: "Docs", icon: Files },
 ];
 
-export function SearchDialog({ defaultOpen = false, trigger, className }: Props) {
+export function SearchDialog({
+  defaultOpen = false,
+  trigger,
+  className,
+  hotkey = false,
+}: Props) {
   const [open, setOpen] = useState(defaultOpen);
   const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    if (!hotkey) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [hotkey]);
+
+  const close = () => {
+    setOpen(false);
+    setSearch("");
+  };
 
   const pages = PAGES.filter((p) =>
     p.label.toLowerCase().includes(search.toLowerCase()),
@@ -53,11 +66,19 @@ export function SearchDialog({ defaultOpen = false, trigger, className }: Props)
 
   return (
     <div className={className}>
-      <div onClick={() => setOpen(true)}>{trigger}</div>
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={(next) => (next ? setOpen(true) : close())}>
+        <DialogTrigger render={trigger} />
         <DialogContent
           className="gap-0 overflow-hidden border-0 p-0 *:data-[slot=dialog-close]:top-1.5 *:data-[slot=dialog-close]:right-1.5 sm:max-w-lg"
           aria-describedby={undefined}
+          // The always-open combobox swallows Escape before the dialog sees
+          // it; catch it in the capture phase so "esc to close" stays true.
+          onKeyDownCapture={(e) => {
+            if (e.key === "Escape") {
+              e.stopPropagation();
+              close();
+            }
+          }}
         >
           <DialogTitle className="sr-only">Search</DialogTitle>
           <Combobox open={true}>
@@ -73,8 +94,11 @@ export function SearchDialog({ defaultOpen = false, trigger, className }: Props)
               </InputGroupAddon>
             </ComboboxInput>
             <ComboboxList className="border-0">
-              <ComboboxEmpty>No results found.</ComboboxEmpty>
-              {pages.length > 0 && (
+              {pages.length === 0 ? (
+                <div className="text-muted-foreground p-4 text-center text-sm">
+                  No results found.
+                </div>
+              ) : (
                 <ComboboxGroup className="p-4!">
                   <ComboboxLabel>Pages</ComboboxLabel>
                   {pages.map((page) => (
@@ -83,7 +107,7 @@ export function SearchDialog({ defaultOpen = false, trigger, className }: Props)
                       value={page.href}
                       className="cursor-pointer p-1.5! text-base"
                       onClick={() => {
-                        setOpen(false);
+                        close();
                         window.location.href = page.href;
                       }}
                     >

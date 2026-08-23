@@ -29,12 +29,15 @@ export function DocumentsClient() {
           return;
         }
         const json = (await res.json()) as {
-          documents: Array<DocumentListItem & { can_delete?: boolean }>;
+          documents: Array<
+            DocumentListItem & { can_delete?: boolean; created_at?: string }
+          >;
         };
         if (!cancelled) {
           setDocuments(
             json.documents.map((e) => ({
               ...e,
+              createdAt: e.created_at,
               canDelete: Boolean(e.can_delete),
               signers: e.signers ?? [],
             })),

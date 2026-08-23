@@ -2,10 +2,9 @@
 
 import type { ReactElement } from "react";
 
-import { Settings } from "lucide-react";
+import { BellOff } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,138 +14,111 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  activityInitials,
+  activityLine,
+  relativeTime,
+  useActivity,
+  type ActivityItem,
+} from "./use-activity";
 
 type Props = {
-  trigger: ReactElement;
+  /** A function trigger receives the live unread count (for a badge dot). */
+  trigger: ReactElement | ((unread: number) => ReactElement);
   defaultOpen?: boolean;
   align?: "start" | "center" | "end";
 };
 
-type Item = {
-  initials: string;
-  title: string;
-  when: string;
-  kind: string;
-  unread?: boolean;
-};
-
-// Placeholder items until notifications are wired to real document events.
-const DOCUMENT_ITEMS: Item[] = [
-  {
-    initials: "RC",
-    title: "Riley Chen signed Offer Letter.pdf",
-    when: "12 minutes ago",
-    kind: "Document signed",
-    unread: true,
-  },
-  {
-    initials: "MS",
-    title: "Morgan Silva opened your document",
-    when: "2 hours ago",
-    kind: "Document viewed",
-    unread: true,
-  },
-  {
-    initials: "NDA",
-    title: "Mutual NDA.pdf completed by all parties",
-    when: "6 hours ago",
-    kind: "Document completed",
-  },
-];
-
-const TEAM_ITEMS: Item[] = [
-  {
-    initials: "JP",
-    title: "Jordan Park accepted your team invite",
-    when: "1 hour ago",
-    kind: "Team",
-  },
-  {
-    initials: "AK",
-    title: "An API key was created for agent ops-bot",
-    when: "5 hours ago",
-    kind: "Agents",
-  },
-];
-
-function NotificationItem({ item }: { item: Item }) {
+function NotificationItem({
+  item,
+  unread,
+}: {
+  item: ActivityItem;
+  unread: boolean;
+}) {
   return (
-    <DropdownMenuItem className="gap-3 px-2 py-3 text-base not-data-[variant=destructive]:focus:**:text-[revert-rule]">
+    <DropdownMenuItem
+      className="gap-3 px-2 py-3 text-base not-data-[variant=destructive]:focus:**:text-[revert-rule]"
+      render={<a href="/documents" />}
+    >
       <Avatar className="size-9.5">
-        <AvatarFallback>{item.initials}</AvatarFallback>
+        <AvatarFallback>{activityInitials(item)}</AvatarFallback>
       </Avatar>
       <div className="flex w-full flex-col items-start">
-        <span className="text-base font-medium">{item.title}</span>
+        <span className="text-base font-medium">{activityLine(item)}</span>
         <div className="flex items-center gap-2.5">
-          <span className="text-muted-foreground text-sm">{item.when}</span>
-          <div className="bg-primary/30 size-1.5 rounded-full" />
-          <span className="text-muted-foreground text-sm">{item.kind}</span>
+          <span className="text-muted-foreground text-sm">
+            {relativeTime(item.at)}
+          </span>
+          {item.actor_kind === "agent" ? (
+            <>
+              <div className="bg-primary/30 size-1.5 rounded-full" />
+              <span className="text-muted-foreground text-sm">Agent</span>
+            </>
+          ) : null}
         </div>
       </div>
-      {item.unread ? <div className="bg-primary size-1.5 shrink-0 rounded-full" /> : null}
+      {unread ? (
+        <div className="bg-primary size-1.5 shrink-0 rounded-full" />
+      ) : null}
     </DropdownMenuItem>
   );
 }
 
 export function NotificationDropdown({ trigger, defaultOpen, align = "end" }: Props) {
-  const unread = [...DOCUMENT_ITEMS, ...TEAM_ITEMS].filter((i) => i.unread).length;
+  const { items, unread, seenAt, markSeen } = useActivity();
+  const events = items ?? [];
   return (
-    <DropdownMenu defaultOpen={defaultOpen}>
-      <DropdownMenuTrigger render={trigger} />
+    <DropdownMenu
+      defaultOpen={defaultOpen}
+      // Mark on close, not open: the unread markers stay visible while the
+      // menu is up and clear once the reader has walked away.
+      onOpenChange={(open) => {
+        if (!open) markSeen();
+      }}
+    >
+      <DropdownMenuTrigger
+        render={typeof trigger === "function" ? trigger(unread) : trigger}
+      />
       <DropdownMenuContent className="w-full max-w-xs sm:max-w-122" align={align}>
-        <Tabs defaultValue="documents" className="gap-0">
-          <DropdownMenuGroup>
-            <DropdownMenuLabel className="flex flex-col pb-0">
-              <div className="flex items-center justify-between gap-6 pb-2.5">
-                <span className="text-muted-foreground text-sm font-normal uppercase">
-                  Notifications
-                </span>
-                <Badge variant="secondary" className="bg-primary/10 text-primary font-normal">
-                  {unread} New
-                </Badge>
-              </div>
-              <div className="-mb-0.5 flex items-center justify-between gap-4">
-                <TabsList variant="line">
-                  <TabsTrigger
-                    value="documents"
-                    className="group-data-horizontal/tabs:after:-bottom-1"
-                  >
-                    Documents
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="team"
-                    className="group-data-horizontal/tabs:after:-bottom-1"
-                  >
-                    Team
-                  </TabsTrigger>
-                </TabsList>
-                <a href="/settings/branding" aria-label="Notification settings">
-                  <Settings className="text-foreground size-5" />
-                </a>
-              </div>
-            </DropdownMenuLabel>
-          </DropdownMenuGroup>
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="flex items-center justify-between gap-6">
+            <span className="text-muted-foreground text-sm font-normal uppercase">
+              Notifications
+            </span>
+            {unread > 0 ? (
+              <Badge variant="secondary" className="bg-primary/10 text-primary font-normal">
+                {unread} New
+              </Badge>
+            ) : null}
+          </DropdownMenuLabel>
+        </DropdownMenuGroup>
 
-          <DropdownMenuSeparator className="mt-0 h-0.5" />
+        <DropdownMenuSeparator className="h-0.5" />
 
-          <TabsContent value="documents">
-            {DOCUMENT_ITEMS.map((item, i) => (
-              <div key={item.title}>
-                {i > 0 ? <DropdownMenuSeparator /> : null}
-                <NotificationItem item={item} />
-              </div>
-            ))}
-          </TabsContent>
-
-          <TabsContent value="team">
-            {TEAM_ITEMS.map((item, i) => (
-              <div key={item.title}>
-                {i > 0 ? <DropdownMenuSeparator /> : null}
-                <NotificationItem item={item} />
-              </div>
-            ))}
-          </TabsContent>
-        </Tabs>
+        {items === null ? (
+          <p className="text-muted-foreground px-2 py-6 text-center text-sm">
+            Loading…
+          </p>
+        ) : events.length === 0 ? (
+          <div className="m-2 rounded-md border border-dashed p-6 text-center">
+            <BellOff aria-hidden className="text-muted-foreground mx-auto size-8" />
+            <p className="mt-2 text-sm font-medium">Nothing yet</p>
+            <p className="text-muted-foreground mt-1 text-sm">
+              Activity on your documents shows up here.
+            </p>
+          </div>
+        ) : (
+          events.slice(0, 6).map((item, i) => (
+            <div key={item.id}>
+              {i > 0 ? <DropdownMenuSeparator /> : null}
+              <NotificationItem
+                item={item}
+                unread={new Date(item.at).getTime() > seenAt}
+              />
+            </div>
+          ))
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

@@ -178,7 +178,7 @@ describe("DocumentsList table", () => {
       }),
     );
     expect(screen.getByRole("table")).toBeTruthy();
-    expect(screen.getByRole("columnheader", { name: /title/i })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: /document/i })).toBeTruthy();
     expect(screen.getByRole("columnheader", { name: /status/i })).toBeTruthy();
     expect(screen.getByText("Repair authorization")).toBeTruthy();
     expect(screen.queryByRole("link", { name: /^templates$/i })).toBeNull();

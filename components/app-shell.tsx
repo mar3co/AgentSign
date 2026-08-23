@@ -4,19 +4,15 @@ import type { CSSProperties, ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import {
   Activity,
-  Archive,
   Bell,
   BookOpen,
-  Bot,
-  Files,
-  Palette,
   PanelLeftClose,
   PanelRightClose,
   PenLine,
   Search,
   Send,
-  Users,
 } from "lucide-react";
+import { NAV, NAV_GROUPS, type NavItem } from "@/components/app-nav";
 import { LinkButton } from "@/components/link-button";
 import { NavUser } from "@/components/nav-user";
 import { ActivityDialog } from "@/components/shadcn-studio/blocks/dialog-activity";
@@ -39,64 +35,6 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
-
-type NavItem = {
-  href: string;
-  label: string;
-  subtitle: string;
-  icon: typeof Send;
-};
-
-const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
-  {
-    label: "Workspace",
-    items: [
-      {
-        href: "/send",
-        label: "Send",
-        subtitle: "Send a PDF for signature.",
-        icon: Send,
-      },
-      {
-        href: "/documents",
-        label: "Documents",
-        subtitle: "Documents you have sent and where they stand.",
-        icon: Archive,
-      },
-      {
-        href: "/templates",
-        label: "Templates",
-        subtitle: "Reusable setups for documents you send often.",
-        icon: Files,
-      },
-    ],
-  },
-  {
-    label: "Organization",
-    items: [
-      {
-        href: "/team",
-        label: "Team",
-        subtitle: "People who share your documents.",
-        icon: Users,
-      },
-      {
-        href: "/agents",
-        label: "Agents",
-        subtitle: "API keys, OAuth clients, and webhooks.",
-        icon: Bot,
-      },
-      {
-        href: "/settings/branding",
-        label: "Branding",
-        subtitle: "How your documents look to signers.",
-        icon: Palette,
-      },
-    ],
-  },
-];
-
-const NAV = NAV_GROUPS.flatMap((group) => group.items);
 
 const EXTRA_TITLES: Array<[prefix: string, title: string]> = [
   ["/team/accept", "Team"],
@@ -169,7 +107,7 @@ export function AppShell({
                   <SidebarMenuButton
                     size="lg"
                     className="gap-2.5"
-                    render={<a href="/documents" />}
+                    render={<a href="/dashboard" />}
                   >
                     <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
                       <PenLine className="size-4" />
@@ -238,10 +176,14 @@ export function AppShell({
                 </div>
                 <SearchDialog
                   className="hidden w-full max-w-72 xl:block"
+                  hotkey
                   trigger={
                     <Button className="w-full justify-start bg-primary-foreground/15 font-normal text-primary-foreground/80 shadow-none hover:bg-primary-foreground/25">
                       <Search className="size-4" />
                       <span>Type to search...</span>
+                      <kbd className="ml-auto rounded border border-primary-foreground/25 px-1.5 font-sans text-xs text-primary-foreground/60">
+                        ⌘K
+                      </kbd>
                     </Button>
                   }
                 />
@@ -257,20 +199,22 @@ export function AppShell({
                   />
                   <ActivityDialog
                     trigger={
-                      <Button variant="ghost" size="icon-lg" className="hover:bg-primary-foreground/15 hover:text-primary-foreground">
+                      <Button variant="ghost" size="icon-lg" className="hover:bg-primary-foreground/15 hover:text-primary-foreground max-sm:hidden">
                         <Activity />
                         <span className="sr-only">Activity</span>
                       </Button>
                     }
                   />
                   <NotificationDropdown
-                    trigger={
+                    trigger={(unread) => (
                       <Button variant="ghost" size="icon-lg" className="relative hover:bg-primary-foreground/15 hover:text-primary-foreground">
                         <Bell />
-                        <span className="bg-destructive absolute top-[14%] right-[23%] size-2 rounded-full" />
+                        {unread > 0 ? (
+                          <span className="bg-destructive absolute top-[14%] right-[23%] size-2 rounded-full" />
+                        ) : null}
                         <span className="sr-only">Notifications</span>
                       </Button>
-                    }
+                    )}
                   />
                   {pathname === "/send" ? null : (
                     <LinkButton
@@ -279,7 +223,7 @@ export function AppShell({
                       className="ml-1.5 border-primary-foreground bg-primary-foreground text-primary shadow-none hover:bg-primary-foreground/90 hover:text-primary"
                     >
                       <Send className="size-3.5" />
-                      Send a PDF
+                      <span className="max-sm:sr-only">Send a PDF</span>
                     </LinkButton>
                   )}
                 </div>

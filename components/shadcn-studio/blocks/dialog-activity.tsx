@@ -14,51 +14,47 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import {
+  activityInitials,
+  relativeTime,
+  useActivity,
+  type ActivityItem,
+} from "./use-activity";
 
 type Props = {
   trigger: ReactElement;
   defaultOpen?: boolean;
 };
 
-// Placeholder feed until activity is wired to real document events.
-const ITEMS: Array<{
-  initials: string;
-  actor: string;
-  action: string;
-  when: string;
-  file?: string;
-  tags?: string[];
-}> = [
-  {
-    initials: "RC",
-    actor: "Riley Chen",
-    action: "signed your document",
-    when: "18 mins ago",
-    file: "Offer Letter.pdf",
-  },
-  {
-    initials: "MS",
-    actor: "Morgan Silva",
-    action: "opened the signing link",
-    when: "39 mins ago",
-    file: "Mutual NDA.pdf",
-  },
-  {
-    initials: "JP",
-    actor: "Jordan Park",
-    action: "joined your team",
-    when: "1 hour ago",
-  },
-  {
-    initials: "OB",
-    actor: "ops-bot",
-    action: "sent a document via the API",
-    when: "8 hours ago",
-    tags: ["Agent", "Template: Onboarding"],
-  },
-];
+/** The sheet splits actor and action, so the line drops the leading name. */
+function actionLine(item: ActivityItem): string {
+  switch (item.event) {
+    case "sent":
+      return "went out for signing";
+    case "opened":
+      return "opened the document";
+    case "consented":
+      return "agreed to sign";
+    case "signed":
+      return "signed the document";
+    case "attested":
+      return "signed off on the document";
+    case "declined":
+      return "declined to sign";
+    case "rejected":
+      return "rejected the document";
+    case "reminded":
+      return "was sent a reminder";
+    case "expired":
+      return "expired unsigned";
+    default:
+      return "was updated";
+  }
+}
 
 export function ActivityDialog({ defaultOpen = false, trigger }: Props) {
+  const { items } = useActivity();
+  const events = items ?? [];
   return (
     <Sheet defaultOpen={defaultOpen}>
       <SheetTrigger render={trigger} />
@@ -69,43 +65,53 @@ export function ActivityDialog({ defaultOpen = false, trigger }: Props) {
         </SheetHeader>
 
         <div className="overflow-y-auto">
-          {ITEMS.map((item, i) => (
-            <div key={`${item.actor}-${item.when}`}>
-              {i > 0 ? <Separator /> : null}
-              <div className="flex gap-4 px-4 py-3">
-                <Avatar>
-                  <AvatarFallback>{item.initials}</AvatarFallback>
-                </Avatar>
-                <div className="flex w-full flex-col items-start gap-2.5">
-                  <div className="text-muted-foreground flex flex-col items-start text-sm">
-                    <p>
-                      <span className="text-foreground font-semibold">{item.actor}</span>{" "}
-                      {item.action}
-                    </p>
-                    <p>{item.when}</p>
-                  </div>
-                  {item.file ? (
+          {items === null ? (
+            <p className="text-muted-foreground px-4 py-8 text-center text-sm">
+              Loading…
+            </p>
+          ) : events.length === 0 ? (
+            <div className="m-4 rounded-md border border-dashed p-6 text-center">
+              <FileText
+                aria-hidden
+                className="text-muted-foreground mx-auto size-8"
+              />
+              <p className="mt-2 text-sm font-medium">Nothing yet</p>
+              <p className="text-muted-foreground mt-1 text-sm">
+                Send a PDF and its progress shows up here.
+              </p>
+            </div>
+          ) : (
+            events.map((item, i) => (
+              <div key={item.id}>
+                {i > 0 ? <Separator /> : null}
+                <div className="flex gap-4 px-4 py-3">
+                  <Avatar>
+                    <AvatarFallback>{activityInitials(item)}</AvatarFallback>
+                  </Avatar>
+                  <div className="flex w-full flex-col items-start gap-2.5">
+                    <div className="text-muted-foreground flex flex-col items-start text-sm">
+                      <p>
+                        <span className="text-foreground font-semibold">
+                          {item.actor ?? "Document"}
+                        </span>{" "}
+                        {actionLine(item)}
+                      </p>
+                      <p>{relativeTime(item.at)}</p>
+                    </div>
                     <div className="bg-muted flex items-center gap-1.5 rounded-md border px-2.5 py-1.5">
                       <FileText className="text-muted-foreground size-4" />
-                      <span className="text-sm font-medium">{item.file}</span>
+                      <span className="text-sm font-medium">{item.title}</span>
                     </div>
-                  ) : null}
-                  {item.tags ? (
-                    <div className="flex flex-wrap items-center gap-2">
-                      {item.tags.map((tag) => (
-                        <Badge
-                          key={tag}
-                          className="bg-primary/10 text-primary rounded-sm font-normal"
-                        >
-                          {tag}
-                        </Badge>
-                      ))}
-                    </div>
-                  ) : null}
+                    {item.actor_kind === "agent" ? (
+                      <Badge className="bg-primary/10 text-primary rounded-sm font-normal">
+                        Agent
+                      </Badge>
+                    ) : null}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
       </SheetContent>
     </Sheet>

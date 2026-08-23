@@ -1,4 +1,4 @@
-import { absoluteUrl, appOrigin, getEnv } from "../env.js";
+import { absoluteUrl, appOrigin, devOffline, getEnv } from "../env.js";
 
 export type MailAttachment = {
   filename: string;
@@ -81,6 +81,12 @@ export function createMailer(): Mailer {
     return {
       async sendMail(message) {
         console.log("[mail]", message.to, message.subject);
+        // DEV_OFFLINE has no inbox at all, so the console IS the inbox: print
+        // the body or the OTP confirm step is a dead end. Only there — plain
+        // keyless dev must keep codes and signing URLs out of the log.
+        if (devOffline()) {
+          console.log("[mail:body]", message.text);
+        }
       },
     };
   }
