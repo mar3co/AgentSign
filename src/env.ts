@@ -6,7 +6,8 @@ const envSchema = z.object({
   SUPABASE_URL: z.string().default(""),
   SUPABASE_ANON_KEY: z.string().default(""),
   SUPABASE_SERVICE_ROLE_KEY: z.string().default(""),
-  STORAGE_BUCKET: z.string().default("documents"),
+  // Historical bucket name; Supabase buckets cannot be renamed in place.
+  STORAGE_BUCKET: z.string().default("envelopes"),
   STORAGE_DIR: z.string().default(""),
   APP_URL: z.string().default(""),
   APP_ORIGIN: z.string().default(""),

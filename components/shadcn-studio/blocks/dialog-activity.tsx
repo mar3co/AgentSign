@@ -52,7 +52,7 @@ const ITEMS: Array<{
   {
     initials: "OB",
     actor: "ops-bot",
-    action: "sent an document via the API",
+    action: "sent a document via the API",
     when: "8 hours ago",
     tags: ["Agent", "Template: Onboarding"],
   },

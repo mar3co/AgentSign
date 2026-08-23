@@ -788,7 +788,7 @@ describe("POST /v1/documents agent parties", () => {
     expect(json.code).toBe("pro_required");
   });
 
-  it("send without WEBHOOK_KEK is 503 and does not insert an document", async () => {
+  it("send without WEBHOOK_KEK is 503 and does not insert a document", async () => {
     const prevKek = process.env.WEBHOOK_KEK;
     const prevCron = process.env.CRON_SECRET;
     delete process.env.WEBHOOK_KEK;

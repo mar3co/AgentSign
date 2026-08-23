@@ -30,13 +30,13 @@ const ROW_LABEL = "font-mono text-[11px] tracking-[0.22em]";
 // public header (22px padding, hairline) when measurement is unavailable.
 const HEADER_H = "var(--public-header-h,81px)";
 
-const STATUS_CALL = `$ curl https://agentsign.co/v1/documents/env_kx3q9 \\
+const STATUS_CALL = `$ curl https://agentsign.co/v1/documents/doc_kx3q9 \\
        -H 'authorization: Bearer sign_live_...'
 { "status": "completed", "signers": [ … ], "audit": [ … ] }`;
 
 const AGENT_CALL = `# its own named key. its own receipt.
 $ curl -X POST \\
-    https://agentsign.co/v1/documents/env_kx3q9/attest \\
+    https://agentsign.co/v1/documents/doc_kx3q9/attest \\
     -H 'authorization: Bearer sign_agent_...'`;
 
 const VERIFY_CALL = `$ curl -F file=@sealed.pdf \\

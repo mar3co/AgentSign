@@ -69,7 +69,7 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
     void server;
     const init = await client.getServerVersion();
     expect(init?.name).toBe("agentsign");
-    expect(init?.version).toBe("1.2.0");
+    expect(init?.version).toBe("2.0.0");
   });
 
   it("GET /openapi.json lists the five HTTP paths", async () => {
@@ -95,7 +95,7 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
   });
 
   it("documents v1.2 rest and MCP tools without a sign tool", async () => {
-    expect(openapi.info.version).toBe("1.2.0");
+    expect(openapi.info.version).toBe("2.0.0");
     expect(openapi.openapi).toBe("3.1.0");
     expect(openapi.paths["/v1/branding"]).toBeTruthy();
     expect(openapi.paths["/v1/templates"]).toBeTruthy();

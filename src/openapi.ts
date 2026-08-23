@@ -99,7 +99,7 @@ const teamMemberSchema = {
   },
 } as const;
 
-const documentsJson = {
+const teamJson = {
   type: "object",
   properties: {
     owner_email: { type: "string", format: "email" },
@@ -134,7 +134,7 @@ export const openapi = {
   openapi: "3.1.0",
   info: {
     title: "AgentSign",
-    version: "1.2.0",
+    version: "2.0.0",
     description:
       "AgentSign is a signing primitive. Human always signs. Bearer keys authenticate the caller and never skip the signer. No sign tool. Humans Finish. Agents Attest. Branding, templates, and team are REST for logged-in Pro or SELF_HOST. Errors are JSON { error, code }.",
   },
@@ -158,7 +158,7 @@ export const openapi = {
   paths: {
     "/v1/documents": {
       post: {
-        summary: "Create and send an document",
+        summary: "Create and send a document",
         description:
           "Multipart PDF bytes + signers. Optional Bearer. Omit Authorization to start a sender OTP one-off (pending_sender). Live key skips OTP. Human always signs.",
         security: optionalBearer,
@@ -254,7 +254,7 @@ export const openapi = {
         },
       },
       delete: {
-        summary: "Void and purge an document",
+        summary: "Void and purge a document",
         security: bearer,
         parameters: [idParam],
         responses: {
@@ -697,7 +697,7 @@ export const openapi = {
                   document_id: {
                     type: "string",
                     format: "uuid",
-                    description: "Copy original PDF and default role names from an document",
+                    description: "Copy original PDF and default role names from a document",
                   },
                 },
               },
@@ -846,7 +846,7 @@ export const openapi = {
             description: "Team",
             content: {
               "application/json": {
-                schema: documentsJson,
+                schema: teamJson,
               },
             },
           },

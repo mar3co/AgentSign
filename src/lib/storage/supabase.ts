@@ -20,7 +20,7 @@ export type SupabaseStorageClient = {
 /** Private bucket blob store. Service role only; no public object URLs. */
 export function createSupabaseStore(
   client: SupabaseStorageClient,
-  bucket = "documents",
+  bucket = "envelopes",
 ): BlobStore {
   const objects = () => client.storage.from(bucket);
 

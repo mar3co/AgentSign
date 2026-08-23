@@ -17,9 +17,9 @@ const SEND_BLOCK = `$ curl -F title='Repair authorization' \\
          "email":"jane@example.com"}]' \\
        -F file=@form.pdf \\
        https://agentsign.co/v1/documents
-{ "id": "env_kx3q9", "status": "sent" }`;
+{ "id": "doc_kx3q9", "status": "sent" }`;
 
-const STATUS_BLOCK = `$ curl https://agentsign.co/v1/documents/env_kx3q9 \\
+const STATUS_BLOCK = `$ curl https://agentsign.co/v1/documents/doc_kx3q9 \\
        -H 'authorization: Bearer sign_live_...'
 { "status": "completed", "signers": [ … ], "audit": [ … ] }`;
 

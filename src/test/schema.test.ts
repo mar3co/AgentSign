@@ -16,7 +16,7 @@ import {
 import { newAgentKey } from "../lib/tokens.js";
 
 describe("schema", () => {
-  it("inserts an document", async () => {
+  it("inserts a document", async () => {
     const db = await createTestDb();
     const [row] = await db
       .insert(documents)

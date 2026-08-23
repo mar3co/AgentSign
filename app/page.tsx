@@ -25,7 +25,7 @@ const AGENT_BLOCK = `# your agent can sign off too, with its own
 # named key. it gets a cryptographic
 # receipt, not a pretend signature
 $ curl -X POST \\
-    https://agentsign.co/v1/documents/env_kx3q9/attest \\
+    https://agentsign.co/v1/documents/doc_kx3q9/attest \\
     -H 'authorization: Bearer sign_agent_...'
 > receipt 4c19…9e2f · recorded 14:02:59 UTC`;
 
