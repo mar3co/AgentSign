@@ -9,7 +9,6 @@ import {
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -46,7 +45,6 @@ export function TeamList({
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Team</CardTitle>
           <CardDescription>
             Pro lets you invite people to this cabinet.
           </CardDescription>
@@ -131,7 +129,6 @@ export function TeamList({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Team</CardTitle>
         <CardDescription>
           {ownerEmail
             ? `Cabinet owner ${ownerEmail}.`

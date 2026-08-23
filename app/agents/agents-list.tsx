@@ -9,7 +9,6 @@ import {
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -48,7 +47,6 @@ export function AgentsList({
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Agents</CardTitle>
           <CardDescription>
             Pro named agents can attest on envelopes. Free accounts send and
             download only.
@@ -258,7 +256,6 @@ export function AgentsList({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Agents</CardTitle>
         <CardDescription>
           Named agents that may attest for people on this cabinet.
         </CardDescription>

@@ -3,13 +3,7 @@
 import { LinkButton } from "@/components/link-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -53,10 +47,6 @@ export function CabinetList({
 }) {
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Cabinet</CardTitle>
-        <CardDescription>Envelopes you sent or signed.</CardDescription>
-      </CardHeader>
       <CardContent>
         {envelopes.length === 0 ? (
           <div className="flex flex-col gap-4">

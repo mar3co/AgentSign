@@ -9,7 +9,6 @@ import {
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -47,7 +46,6 @@ export function PacketsList({ entitled, packets = [] }: PacketsListProps) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Packets</CardTitle>
           <CardDescription>
             Pro saves a PDF and signer roles so you can send it again.
           </CardDescription>
@@ -152,7 +150,6 @@ export function PacketsList({ entitled, packets = [] }: PacketsListProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Packets</CardTitle>
         <CardDescription>
           Save a PDF and role names, then send it again with new people.
         </CardDescription>

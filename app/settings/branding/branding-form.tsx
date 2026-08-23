@@ -9,7 +9,6 @@ import {
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -36,7 +35,6 @@ export function BrandingForm({
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Branding</CardTitle>
           <CardDescription>
             Pro adds your shop name and logo to invite mail and the signing page.
           </CardDescription>
@@ -54,7 +52,6 @@ export function BrandingForm({
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Branding</CardTitle>
           <CardDescription>This cabinet&apos;s name and logo.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
@@ -141,7 +138,6 @@ export function BrandingForm({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Branding</CardTitle>
         <CardDescription>
           Shown on invite mail and the signing page. Not on the sealed PDF.
         </CardDescription>

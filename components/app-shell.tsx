@@ -12,6 +12,7 @@ import {
   Send,
   Users,
 } from "lucide-react";
+import { LinkButton } from "@/components/link-button";
 import { NavUser } from "@/components/nav-user";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -20,6 +21,7 @@ import {
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarHeader,
   SidebarInset,
   SidebarMenu,
@@ -31,14 +33,63 @@ import {
 } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
 
-const NAV = [
-  { href: "/", label: "Send", icon: Send },
-  { href: "/envelopes", label: "Cabinet", icon: Archive },
-  { href: "/packets", label: "Packets", icon: Files },
-  { href: "/team", label: "Team", icon: Users },
-  { href: "/agents", label: "Agents", icon: Bot },
-  { href: "/settings/branding", label: "Branding", icon: Palette },
-] as const;
+type NavItem = {
+  href: string;
+  label: string;
+  subtitle: string;
+  icon: typeof Send;
+};
+
+const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
+  {
+    label: "Workspace",
+    items: [
+      {
+        href: "/",
+        label: "Send",
+        subtitle: "Send a PDF for signature.",
+        icon: Send,
+      },
+      {
+        href: "/envelopes",
+        label: "Cabinet",
+        subtitle: "Envelopes you have sent and where they stand.",
+        icon: Archive,
+      },
+      {
+        href: "/packets",
+        label: "Packets",
+        subtitle: "Reusable setups for envelopes you send often.",
+        icon: Files,
+      },
+    ],
+  },
+  {
+    label: "Organization",
+    items: [
+      {
+        href: "/team",
+        label: "Team",
+        subtitle: "People who share this cabinet.",
+        icon: Users,
+      },
+      {
+        href: "/agents",
+        label: "Agents",
+        subtitle: "API keys, OAuth clients, and webhooks.",
+        icon: Bot,
+      },
+      {
+        href: "/settings/branding",
+        label: "Branding",
+        subtitle: "How your envelopes look to signers.",
+        icon: Palette,
+      },
+    ],
+  },
+];
+
+const NAV = NAV_GROUPS.flatMap((group) => group.items);
 
 const EXTRA_TITLES: Array<[prefix: string, title: string]> = [
   ["/team/accept", "Team"],
@@ -50,12 +101,15 @@ function isActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
+function currentNav(pathname: string): NavItem | undefined {
+  return NAV.find((n) => isActive(pathname, n.href));
+}
+
 function pageTitle(pathname: string): string {
   for (const [prefix, title] of EXTRA_TITLES) {
     if (pathname.startsWith(prefix)) return title;
   }
-  const item = NAV.find((n) => isActive(pathname, n.href));
-  return item?.label ?? "Cabinet";
+  return currentNav(pathname)?.label ?? "Cabinet";
 }
 
 export function AppShell({
@@ -66,10 +120,11 @@ export function AppShell({
   children: ReactNode;
 }) {
   const pathname = usePathname() ?? "";
+  const subtitle = currentNav(pathname)?.subtitle;
   return (
     <div data-surface="app" className="contents">
       <SidebarProvider>
-        <Sidebar collapsible="icon">
+        <Sidebar collapsible="icon" variant="floating">
           <SidebarHeader>
             <SidebarMenu>
               <SidebarMenuItem>
@@ -86,24 +141,27 @@ export function AppShell({
             </SidebarMenu>
           </SidebarHeader>
           <SidebarContent>
-            <SidebarGroup>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {NAV.map((item) => (
-                    <SidebarMenuItem key={item.href}>
-                      <SidebarMenuButton
-                        isActive={isActive(pathname, item.href)}
-                        tooltip={item.label}
-                        render={<a href={item.href} />}
-                      >
-                        <item.icon />
-                        <span>{item.label}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  ))}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
+            {NAV_GROUPS.map((group) => (
+              <SidebarGroup key={group.label}>
+                <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    {group.items.map((item) => (
+                      <SidebarMenuItem key={item.href}>
+                        <SidebarMenuButton
+                          isActive={isActive(pathname, item.href)}
+                          tooltip={item.label}
+                          render={<a href={item.href} />}
+                        >
+                          <item.icon />
+                          <span>{item.label}</span>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    ))}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+            ))}
           </SidebarContent>
           <SidebarFooter>
             <SidebarMenu>
@@ -119,13 +177,28 @@ export function AppShell({
           <SidebarRail />
         </Sidebar>
         <SidebarInset>
-          <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-4">
+          <header className="flex h-16 shrink-0 items-center gap-2 border-b border-border px-4">
             <SidebarTrigger className="-ml-1" />
             <Separator
               orientation="vertical"
               className="mr-2 h-4 data-vertical:self-center"
             />
-            <h1 className="text-sm font-medium">{pageTitle(pathname)}</h1>
+            <div className="min-w-0">
+              <h1 className="truncate text-sm font-semibold">
+                {pageTitle(pathname)}
+              </h1>
+              {subtitle ? (
+                <p className="hidden truncate text-xs text-muted-foreground sm:block">
+                  {subtitle}
+                </p>
+              ) : null}
+            </div>
+            {pathname !== "/" ? (
+              <LinkButton href="/" size="sm" className="ml-auto">
+                <Send className="size-3.5" />
+                Send a PDF
+              </LinkButton>
+            ) : null}
           </header>
           <main
             className={cn(
