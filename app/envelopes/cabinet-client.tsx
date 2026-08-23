@@ -29,12 +29,15 @@ export function CabinetClient() {
           return;
         }
         const json = (await res.json()) as {
-          envelopes: Array<CabinetEnvelope & { can_delete?: boolean }>;
+          envelopes: Array<
+            CabinetEnvelope & { can_delete?: boolean; created_at?: string }
+          >;
         };
         if (!cancelled) {
           setEnvelopes(
             json.envelopes.map((e) => ({
               ...e,
+              createdAt: e.created_at,
               canDelete: Boolean(e.can_delete),
               signers: e.signers ?? [],
             })),

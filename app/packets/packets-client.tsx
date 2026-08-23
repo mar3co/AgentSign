@@ -13,11 +13,19 @@ type Loaded = {
   packets: PacketItem[];
 };
 
-export function PacketsClient() {
-  const [state, setState] = useState<Loaded | null>(null);
+export function PacketsClient({
+  initialEntitled = null,
+}: {
+  /** Server-resolved entitlement; false skips the probe that would 403. */
+  initialEntitled?: boolean | null;
+}) {
+  const [state, setState] = useState<Loaded | null>(
+    initialEntitled === false ? { entitled: false, packets: [] } : null,
+  );
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (initialEntitled === false) return;
     let cancelled = false;
     (async () => {
       try {
@@ -59,7 +67,7 @@ export function PacketsClient() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [initialEntitled]);
 
   if (error) {
     return (
