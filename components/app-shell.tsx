@@ -238,10 +238,14 @@ export function AppShell({
                 </div>
                 <SearchDialog
                   className="hidden w-full max-w-72 xl:block"
+                  hotkey
                   trigger={
                     <Button className="w-full justify-start bg-primary-foreground/15 font-normal text-primary-foreground/80 shadow-none hover:bg-primary-foreground/25">
                       <Search className="size-4" />
                       <span>Type to search...</span>
+                      <kbd className="ml-auto rounded border border-primary-foreground/25 px-1.5 font-sans text-xs text-primary-foreground/60">
+                        ⌘K
+                      </kbd>
                     </Button>
                   }
                 />
@@ -257,20 +261,22 @@ export function AppShell({
                   />
                   <ActivityDialog
                     trigger={
-                      <Button variant="ghost" size="icon-lg" className="hover:bg-primary-foreground/15 hover:text-primary-foreground">
+                      <Button variant="ghost" size="icon-lg" className="hover:bg-primary-foreground/15 hover:text-primary-foreground max-sm:hidden">
                         <Activity />
                         <span className="sr-only">Activity</span>
                       </Button>
                     }
                   />
                   <NotificationDropdown
-                    trigger={
+                    trigger={(unread) => (
                       <Button variant="ghost" size="icon-lg" className="relative hover:bg-primary-foreground/15 hover:text-primary-foreground">
                         <Bell />
-                        <span className="bg-destructive absolute top-[14%] right-[23%] size-2 rounded-full" />
+                        {unread > 0 ? (
+                          <span className="bg-destructive absolute top-[14%] right-[23%] size-2 rounded-full" />
+                        ) : null}
                         <span className="sr-only">Notifications</span>
                       </Button>
-                    }
+                    )}
                   />
                   {pathname === "/send" ? null : (
                     <LinkButton
@@ -279,7 +285,7 @@ export function AppShell({
                       className="ml-1.5 border-primary-foreground bg-primary-foreground text-primary shadow-none hover:bg-primary-foreground/90 hover:text-primary"
                     >
                       <Send className="size-3.5" />
-                      Send a PDF
+                      <span className="max-sm:sr-only">Send a PDF</span>
                     </LinkButton>
                   )}
                 </div>

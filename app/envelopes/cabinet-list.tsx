@@ -3,6 +3,16 @@
 import { Send } from "lucide-react";
 import { EmptyState } from "@/components/empty-state";
 import { LinkButton } from "@/components/link-button";
+import {
+  AlertDialog,
+  AlertDialogClose,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -136,14 +146,39 @@ export function CabinetList({
                         </Button>
                       ) : null}
                       {env.canDelete ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => onVoid?.(env.id)}
-                        >
-                          Void
-                        </Button>
+                        <AlertDialog>
+                          <AlertDialogTrigger
+                            render={
+                              <Button type="button" variant="outline" size="sm" />
+                            }
+                          >
+                            Void
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>
+                                Void “{env.title}”?
+                              </AlertDialogTitle>
+                              <AlertDialogDescription>
+                                Signing links stop working and the envelope
+                                cannot be reopened.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogClose
+                                render={<Button type="button" variant="outline" />}
+                              >
+                                Keep envelope
+                              </AlertDialogClose>
+                              <AlertDialogClose
+                                render={<Button type="button" variant="destructive" />}
+                                onClick={() => onVoid?.(env.id)}
+                              >
+                                Void envelope
+                              </AlertDialogClose>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
                       ) : null}
                     </span>
                   </TableCell>

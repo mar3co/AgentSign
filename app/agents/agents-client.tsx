@@ -11,11 +11,21 @@ type Loaded = {
   agents: AgentItem[];
 };
 
-export function AgentsClient() {
-  const [state, setState] = useState<Loaded | null>(null);
+export function AgentsClient({
+  initialEntitled = null,
+}: {
+  /** Server-resolved entitlement; false skips the probe that would 403. */
+  initialEntitled?: boolean | null;
+}) {
+  const [state, setState] = useState<Loaded | null>(
+    initialEntitled === false
+      ? { entitled: false, canEdit: false, agents: [] }
+      : null,
+  );
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (initialEntitled === false) return;
     let cancelled = false;
     (async () => {
       try {
@@ -61,7 +71,7 @@ export function AgentsClient() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [initialEntitled]);
 
   if (error) {
     return (

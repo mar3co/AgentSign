@@ -12,11 +12,19 @@ type Loaded = {
   canEdit?: boolean;
 };
 
-export function BrandingClient() {
-  const [state, setState] = useState<Loaded | null>(null);
+export function BrandingClient({
+  initialEntitled = null,
+}: {
+  /** Server-resolved entitlement; false skips the probe that would 403. */
+  initialEntitled?: boolean | null;
+}) {
+  const [state, setState] = useState<Loaded | null>(
+    initialEntitled === false ? { entitled: false } : null,
+  );
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (initialEntitled === false) return;
     let cancelled = false;
     (async () => {
       try {
@@ -64,7 +72,7 @@ export function BrandingClient() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [initialEntitled]);
 
   if (error) {
     return (
