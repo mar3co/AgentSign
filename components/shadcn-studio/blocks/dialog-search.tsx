@@ -35,8 +35,8 @@ type Props = {
 
 const PAGES = [
   { href: "/send", label: "Send a PDF", icon: Send },
-  { href: "/envelopes", label: "Cabinet", icon: Archive },
-  { href: "/packets", label: "Packets", icon: Files },
+  { href: "/documents", label: "Documents", icon: Archive },
+  { href: "/templates", label: "Templates", icon: Files },
   { href: "/team", label: "Team", icon: Users },
   { href: "/agents", label: "Agents", icon: Bot },
   { href: "/settings/branding", label: "Branding", icon: Palette },

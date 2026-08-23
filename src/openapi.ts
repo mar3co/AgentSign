@@ -45,7 +45,7 @@ const brandingSchema = {
   },
 } as const;
 
-const packetRoleSchema = {
+const templateRoleSchema = {
   type: "object",
   properties: {
     signing_order: { type: "integer" },
@@ -53,12 +53,12 @@ const packetRoleSchema = {
   },
 } as const;
 
-const packetSchema = {
+const templateSchema = {
   type: "object",
   properties: {
     id: { type: "string", format: "uuid" },
     title: { type: "string" },
-    roles: { type: "array", items: packetRoleSchema },
+    roles: { type: "array", items: templateRoleSchema },
     created_at: { type: "string", format: "date-time" },
   },
 } as const;
@@ -82,7 +82,7 @@ const verifySchema = {
     valid: { type: "boolean" },
     code: { type: "string" },
     sha256: { type: "string" },
-    envelope_id: { type: "string", format: "uuid" },
+    document_id: { type: "string", format: "uuid" },
     human_signatures: { type: "integer" },
     agent_attestations: { type: "integer" },
     parties: { type: "array", items: { type: "object" } },
@@ -99,7 +99,7 @@ const teamMemberSchema = {
   },
 } as const;
 
-const cabinetJson = {
+const documentsJson = {
   type: "object",
   properties: {
     owner_email: { type: "string", format: "email" },
@@ -113,7 +113,7 @@ const liveKeyNote =
   "Session cookie or sign_live_ Bearer. Never sign_tmp_. Never ?apiKey=. Cloud Free gets 403 pro_required; SELF_HOST=1 is entitled.";
 
 const brandingJson = {
-  description: "Cabinet branding",
+  description: "Team branding",
   content: {
     "application/json": {
       schema: { $ref: "#/components/schemas/Branding" },
@@ -121,11 +121,11 @@ const brandingJson = {
   },
 };
 
-const packetJson = {
-  description: "Packet",
+const templateJson = {
+  description: "Template",
   content: {
     "application/json": {
-      schema: { $ref: "#/components/schemas/Packet" },
+      schema: { $ref: "#/components/schemas/Template" },
     },
   },
 };
@@ -136,7 +136,7 @@ export const openapi = {
     title: "AgentSign",
     version: "1.2.0",
     description:
-      "AgentSign is a signing primitive. Human always signs. Bearer keys authenticate the caller and never skip the signer. No sign tool. Humans Finish. Agents Attest. Branding, packets, and team are REST for logged-in Pro or SELF_HOST. Errors are JSON { error, code }.",
+      "AgentSign is a signing primitive. Human always signs. Bearer keys authenticate the caller and never skip the signer. No sign tool. Humans Finish. Agents Attest. Branding, templates, and team are REST for logged-in Pro or SELF_HOST. Errors are JSON { error, code }.",
   },
   components: {
     securitySchemes: {
@@ -144,21 +144,21 @@ export const openapi = {
         type: "http",
         scheme: "bearer",
         description:
-          "sign_live_ (user-minted), sign_tmp_ (envelope-scoped), or sign_agent_ (named-agent paste key). POST /v1/envelopes: omit Authorization for a sender OTP one-off, or send sign_live_ to skip OTP. sign_tmp_ cannot create or list envelopes; it can GET/DELETE/PDF that envelope. List, branding, packets, team, and agents need a session cookie or sign_live_ (never sign_tmp_). Attest/reject accept sign_agent_ or live/session naming { agent }. Verify is unauthenticated.",
+          "sign_live_ (user-minted), sign_tmp_ (document-scoped), or sign_agent_ (named-agent paste key). POST /v1/documents: omit Authorization for a sender OTP one-off, or send sign_live_ to skip OTP. sign_tmp_ cannot create or list documents; it can GET/DELETE/PDF that document. List, branding, templates, team, and agents need a session cookie or sign_live_ (never sign_tmp_). Attest/reject accept sign_agent_ or live/session naming { agent }. Verify is unauthenticated.",
       },
     },
     schemas: {
       Error: errorSchema,
       Branding: brandingSchema,
-      Packet: packetSchema,
+      Template: templateSchema,
       Agent: agentSchema,
       Verify: verifySchema,
     },
   },
   paths: {
-    "/v1/envelopes": {
+    "/v1/documents": {
       post: {
-        summary: "Create and send an envelope",
+        summary: "Create and send an document",
         description:
           "Multipart PDF bytes + signers. Optional Bearer. Omit Authorization to start a sender OTP one-off (pending_sender). Live key skips OTP. Human always signs.",
         security: optionalBearer,
@@ -175,7 +175,7 @@ export const openapi = {
                   signers: {
                     type: "string",
                     description:
-                      "JSON array of { name, email, kind?, agent? }. kind is human (default) or agent; agent is the cabinet slug when kind is agent.",
+                      "JSON array of { name, email, kind?, agent? }. kind is human (default) or agent; agent is the team agent slug when kind is agent.",
                   },
                   file: { type: "string", format: "binary", description: "PDF bytes" },
                 },
@@ -204,7 +204,7 @@ export const openapi = {
         },
       },
       get: {
-        summary: "List envelopes sent or signed",
+        summary: "List documents sent or signed",
         security: bearer,
         responses: {
           "200": {
@@ -214,7 +214,7 @@ export const openapi = {
                 schema: {
                   type: "object",
                   properties: {
-                    envelopes: { type: "array", items: { type: "object" } },
+                    documents: { type: "array", items: { type: "object" } },
                   },
                 },
               },
@@ -224,9 +224,9 @@ export const openapi = {
         },
       },
     },
-    "/v1/envelopes/{id}": {
+    "/v1/documents/{id}": {
       get: {
-        summary: "Envelope status and audit",
+        summary: "Document status and audit",
         security: bearer,
         parameters: [idParam],
         responses: {
@@ -254,7 +254,7 @@ export const openapi = {
         },
       },
       delete: {
-        summary: "Void and purge an envelope",
+        summary: "Void and purge an document",
         security: bearer,
         parameters: [idParam],
         responses: {
@@ -280,7 +280,7 @@ export const openapi = {
         },
       },
     },
-    "/v1/envelopes/{id}.pdf": {
+    "/v1/documents/{id}.pdf": {
       get: {
         summary: "Download the sealed PDF",
         security: bearer,
@@ -299,7 +299,7 @@ export const openapi = {
         },
       },
     },
-    "/v1/envelopes/{id}/attest": {
+    "/v1/documents/{id}/attest": {
       post: {
         summary: "Attest as the current agent party",
         description:
@@ -346,11 +346,11 @@ export const openapi = {
         },
       },
     },
-    "/v1/envelopes/{id}/reject": {
+    "/v1/documents/{id}/reject": {
       post: {
         summary: "Reject as the current agent party",
         description:
-          "Same auth as attest. Sets rejected_at and declines the envelope. No sign tool. Humans Finish. Agents Attest.",
+          "Same auth as attest. Sets rejected_at and declines the document. No sign tool. Humans Finish. Agents Attest.",
         security: bearer,
         parameters: [idParam],
         requestBody: {
@@ -589,7 +589,7 @@ export const openapi = {
     },
     "/v1/branding": {
       get: {
-        summary: "Get cabinet branding",
+        summary: "Get team branding",
         description: `${liveKeyNote} Owner or member. JSON includes can_edit.`,
         security: liveOrSession,
         responses: {
@@ -641,7 +641,7 @@ export const openapi = {
     },
     "/v1/branding/logo": {
       delete: {
-        summary: "Remove the cabinet logo",
+        summary: "Remove the team logo",
         description: `${liveKeyNote} Owner only.`,
         security: liveOrSession,
         responses: {
@@ -651,10 +651,10 @@ export const openapi = {
         },
       },
     },
-    "/v1/packets": {
+    "/v1/templates": {
       get: {
-        summary: "List saved packets",
-        description: `${liveKeyNote} Owner or member. Quiet cap 50 per cabinet.`,
+        summary: "List saved templates",
+        description: `${liveKeyNote} Owner or member. Quiet cap 50 per team.`,
         security: liveOrSession,
         responses: {
           "200": {
@@ -664,9 +664,9 @@ export const openapi = {
                 schema: {
                   type: "object",
                   properties: {
-                    packets: {
+                    templates: {
                       type: "array",
-                      items: { $ref: "#/components/schemas/Packet" },
+                      items: { $ref: "#/components/schemas/Template" },
                     },
                   },
                 },
@@ -678,8 +678,8 @@ export const openapi = {
         },
       },
       post: {
-        summary: "Save a packet (PDF + ordered roles)",
-        description: `${liveKeyNote} Multipart title + roles JSON + file, or envelope_id to copy the original PDF. Roles are labels, not people. MCP: list_packets / send_packet.`,
+        summary: "Save a template (PDF + ordered roles)",
+        description: `${liveKeyNote} Multipart title + roles JSON + file, or document_id to copy the original PDF. Roles are labels, not people. MCP: list_templates / send_template.`,
         security: liveOrSession,
         requestBody: {
           required: true,
@@ -694,10 +694,10 @@ export const openapi = {
                     description: 'JSON array of { role_name }',
                   },
                   file: { type: "string", format: "binary", description: "PDF bytes" },
-                  envelope_id: {
+                  document_id: {
                     type: "string",
                     format: "uuid",
-                    description: "Copy original PDF and default role names from an envelope",
+                    description: "Copy original PDF and default role names from an document",
                   },
                 },
               },
@@ -711,14 +711,14 @@ export const openapi = {
                     type: "array",
                     items: { type: "object", properties: { role_name: { type: "string" } } },
                   },
-                  envelope_id: { type: "string", format: "uuid" },
+                  document_id: { type: "string", format: "uuid" },
                 },
               },
             },
           },
         },
         responses: {
-          "201": packetJson,
+          "201": templateJson,
           "400": errorResponse,
           "401": errorResponse,
           "403": errorResponse,
@@ -726,21 +726,21 @@ export const openapi = {
         },
       },
     },
-    "/v1/packets/{id}": {
+    "/v1/templates/{id}": {
       get: {
-        summary: "Get a packet",
+        summary: "Get a template",
         description: liveKeyNote,
         security: liveOrSession,
         parameters: [idParam],
         responses: {
-          "200": packetJson,
+          "200": templateJson,
           "401": errorResponse,
           "403": errorResponse,
           "404": errorResponse,
         },
       },
       patch: {
-        summary: "Update packet title and/or roles",
+        summary: "Update template title and/or roles",
         description: `${liveKeyNote} Does not replace the PDF.`,
         security: liveOrSession,
         parameters: [idParam],
@@ -762,7 +762,7 @@ export const openapi = {
           },
         },
         responses: {
-          "200": packetJson,
+          "200": templateJson,
           "400": errorResponse,
           "401": errorResponse,
           "403": errorResponse,
@@ -770,7 +770,7 @@ export const openapi = {
         },
       },
       delete: {
-        summary: "Delete a packet and its PDF",
+        summary: "Delete a template and its PDF",
         description: liveKeyNote,
         security: liveOrSession,
         parameters: [idParam],
@@ -782,10 +782,10 @@ export const openapi = {
         },
       },
     },
-    "/v1/packets/{id}/send": {
+    "/v1/templates/{id}/send": {
       post: {
-        summary: "Send a packet as a new envelope",
-        description: `${liveKeyNote} signers.length must equal role count; order is signing_order. Creates a normal envelope (same clocks, invite, cap). Human always signs.`,
+        summary: "Send a template as a new document",
+        description: `${liveKeyNote} signers.length must equal role count; order is signing_order. Creates a normal document (same clocks, invite, cap). Human always signs.`,
         security: liveOrSession,
         parameters: [idParam],
         requestBody: {
@@ -814,7 +814,7 @@ export const openapi = {
         },
         responses: {
           "201": {
-            description: "Envelope created",
+            description: "Document created",
             content: {
               "application/json": {
                 schema: {
@@ -837,7 +837,7 @@ export const openapi = {
     },
     "/v1/team": {
       get: {
-        summary: "List the cabinet team",
+        summary: "List team members",
         description:
           "Session cookie or sign_live_ Bearer. Never sign_tmp_. Returns owner plus members. entitled is false for cloud Free (not 403).",
         security: liveOrSession,
@@ -846,7 +846,7 @@ export const openapi = {
             description: "Team",
             content: {
               "application/json": {
-                schema: cabinetJson,
+                schema: documentsJson,
               },
             },
           },
@@ -964,7 +964,7 @@ export const openapi = {
       get: {
         summary: "Ceremony logo bytes",
         description:
-          "Signing token only. 200 image bytes if that envelope's cabinet has a logo; 404 otherwise. Not a public account URL.",
+          "Signing token only. 200 image bytes if that document's team has a logo; 404 otherwise. Not a public account URL.",
         parameters: [tokenParam],
         responses: {
           "200": {

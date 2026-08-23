@@ -13,10 +13,10 @@ export const PRIVACY_SECTIONS: { heading: string; body: string }[] = [
   },
   {
     heading: "What we shred",
-    body: "Free completed envelopes are shredded 7 days after they finish. If nobody signs, we shred when the link dies. Pro keeps them a year. Hard delete means the bytes go; the audit row stays as a tombstone.",
+    body: "Free completed documents are shredded 7 days after they finish. If nobody signs, we shred when the link dies. Pro keeps them a year. Hard delete means the bytes go; the audit row stays as a tombstone.",
   },
   {
     heading: "What we don't do",
-    body: "Signers do not need an account. Login is optional, after finish, if you want a cabinet. We do not sell your documents. We do not draft your legal language.",
+    body: "Signers do not need an account. Login is optional, after finish, if you want to keep your documents. We do not sell your documents. We do not draft your legal language.",
   },
 ];

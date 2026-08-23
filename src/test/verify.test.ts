@@ -7,18 +7,18 @@ import { eq } from "drizzle-orm";
 import { GET as getAuthCallback } from "../../app/auth/callback/route.js";
 import { POST as postLogin } from "../../app/login/session/route.js";
 import { POST as postAgents } from "../../app/v1/agents/route.js";
-import { POST as postAttest } from "../../app/v1/envelopes/[id]/attest/route.js";
-import { POST as postEnvelope } from "../../app/v1/envelopes/route.js";
+import { POST as postAttest } from "../../app/v1/documents/[id]/attest/route.js";
+import { POST as postDocument } from "../../app/v1/documents/route.js";
 import { POST as postKeys } from "../../app/v1/keys/route.js";
-import { POST as postOtp } from "../../app/v1/envelopes/[id]/otp/route.js";
+import { POST as postOtp } from "../../app/v1/documents/[id]/otp/route.js";
 import { POST as postConsent } from "../../app/s/[token]/consent/route.js";
 import { POST as postSign } from "../../app/s/[token]/sign/route.js";
 import { POST as postVerify } from "../../app/v1/verify/route.js";
-import { accounts, envelopes } from "../db/schema.js";
+import { accounts, documents } from "../db/schema.js";
 import { resetEnvCache } from "../env.js";
 import { resetDeps, setDeps } from "../lib/deps.js";
 import { makeDevP12 } from "../lib/pdf/devP12.js";
-import { completeEnvelopePdf } from "../lib/pdf/complete.js";
+import { completeDocumentPdf } from "../lib/pdf/complete.js";
 import { createFsStore } from "../lib/storage.js";
 import { verifySealedPdf } from "../lib/verify.js";
 import { createTestDb } from "./db.js";
@@ -193,7 +193,7 @@ async function createNamedAgent(cookie: string, slug: string, name: string) {
   return (await res.json()) as { id: string; slug: string; key: string };
 }
 
-async function envelopeBody(signers: unknown, sender = "shop@example.com") {
+async function documentBody(signers: unknown, sender = "shop@example.com") {
   const pdf = await minimalPdf();
   const body = new FormData();
   body.set("title", "Repair authorization");
@@ -235,11 +235,11 @@ describe("POST /v1/verify", () => {
     const { cookie } = await asPro(db, userFor);
     const agent = await createNamedAgent(cookie, "grok-legal", "Grok Legal");
     const live = await mintLive(cookie);
-    const created = await postEnvelope(
-      new Request("http://sign.test/v1/envelopes", {
+    const created = await postDocument(
+      new Request("http://sign.test/v1/documents", {
         method: "POST",
         headers: { authorization: `Bearer ${live}` },
-        body: await envelopeBody([
+        body: await documentBody([
           {
             name: "Grok Legal",
             email: "shop@example.com",
@@ -256,7 +256,7 @@ describe("POST /v1/verify", () => {
     expect(
       (
         await postAttest(
-          new Request(`http://sign.test/v1/envelopes/${id}/attest`, {
+          new Request(`http://sign.test/v1/documents/${id}/attest`, {
             method: "POST",
             headers: { authorization: `Bearer ${agent.key}` },
           }),
@@ -305,7 +305,7 @@ describe("POST /v1/verify", () => {
       valid: boolean;
       code?: string;
       sha256?: string;
-      envelope_id?: string;
+      document_id?: string;
       human_signatures?: number;
       agent_attestations?: number;
     };
@@ -313,8 +313,8 @@ describe("POST /v1/verify", () => {
     expect(json.code).toBeUndefined();
     expect(json.human_signatures).toBeGreaterThanOrEqual(1);
     expect(json.agent_attestations).toBeGreaterThanOrEqual(1);
-    expect(json.envelope_id).toBe(id);
-    const [env] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    expect(json.document_id).toBe(id);
+    const [env] = await db.select().from(documents).where(eq(documents.id, id));
     expect(json.sha256).toBe(env!.sha256);
 
     const tampered = Uint8Array.from(sealed!);
@@ -335,11 +335,11 @@ describe("POST /v1/verify", () => {
     const legal = await createNamedAgent(cookie, "grok-legal", "Grok Legal");
     const ops = await createNamedAgent(cookie, "grok-ops", "Grok Ops");
     const live = await mintLive(cookie);
-    const created = await postEnvelope(
-      new Request("http://sign.test/v1/envelopes", {
+    const created = await postDocument(
+      new Request("http://sign.test/v1/documents", {
         method: "POST",
         headers: { authorization: `Bearer ${live}` },
-        body: await envelopeBody([
+        body: await documentBody([
           {
             name: "Grok Legal",
             email: "shop@example.com",
@@ -363,7 +363,7 @@ describe("POST /v1/verify", () => {
     expect(
       (
         await postAttest(
-          new Request(`http://sign.test/v1/envelopes/${id}/attest`, {
+          new Request(`http://sign.test/v1/documents/${id}/attest`, {
             method: "POST",
             headers: { authorization: `Bearer ${legal.key}` },
           }),
@@ -404,7 +404,7 @@ describe("POST /v1/verify", () => {
     expect(
       (
         await postAttest(
-          new Request(`http://sign.test/v1/envelopes/${id}/attest`, {
+          new Request(`http://sign.test/v1/documents/${id}/attest`, {
             method: "POST",
             headers: { authorization: `Bearer ${ops.key}` },
           }),
@@ -435,13 +435,13 @@ describe("POST /v1/verify", () => {
       valid: boolean;
       human_signatures?: number;
       agent_attestations?: number;
-      envelope_id?: string;
+      document_id?: string;
     };
     expect(json.valid).toBe(true);
     expect(json.human_signatures).toBe(2);
     expect(json.agent_attestations).toBe(2);
-    expect(json.envelope_id).toBe(id);
-    const [env] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    expect(json.document_id).toBe(id);
+    const [env] = await db.select().from(documents).where(eq(documents.id, id));
     expect(env!.status).toBe("completed");
   });
 
@@ -449,17 +449,17 @@ describe("POST /v1/verify", () => {
     timeout: 60_000,
   }, async () => {
     const { store, sent } = await boot();
-    const created = await postEnvelope(
-      new Request("http://sign.test/v1/envelopes", {
+    const created = await postDocument(
+      new Request("http://sign.test/v1/documents", {
         method: "POST",
-        body: await envelopeBody([{ name: "Jane", email: "jane@example.com" }]),
+        body: await documentBody([{ name: "Jane", email: "jane@example.com" }]),
       }),
     );
     expect(created.status).toBe(201);
     const { id } = (await created.json()) as { id: string };
     const code = sent[0]!.text.match(/\b(\d{6})\b/)![1]!;
     const otp = await postOtp(
-      new Request(`http://sign.test/v1/envelopes/${id}/otp`, {
+      new Request(`http://sign.test/v1/documents/${id}/otp`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ code }),
@@ -510,11 +510,11 @@ describe("POST /v1/verify", () => {
     const { db, store, sent, userFor } = await boot();
     const { cookie } = await asPro(db, userFor);
     const live = await mintLive(cookie);
-    const created = await postEnvelope(
-      new Request("http://sign.test/v1/envelopes", {
+    const created = await postDocument(
+      new Request("http://sign.test/v1/documents", {
         method: "POST",
         headers: { authorization: `Bearer ${live}` },
-        body: await envelopeBody([{ name: "Jane", email: "jane@example.com" }]),
+        body: await documentBody([{ name: "Jane", email: "jane@example.com" }]),
       }),
     );
     expect(created.status).toBe(201);
@@ -559,9 +559,9 @@ describe("POST /v1/verify", () => {
       "2020-01-01T00:00:00.000Z",
       "Attested by Eve for cfo@victim-corp.com at 2019-05-05T00:00:00.000Z. Not an electronic signature.",
     ]);
-    const envelopeId = "00000000-0000-0000-0000-000000000099";
+    const documentId = "00000000-0000-0000-0000-000000000099";
     const signedAt = new Date("2026-08-21T12:00:00.000Z");
-    const result = await completeEnvelopePdf({
+    const result = await completeDocumentPdf({
       original,
       appearance: {
         png,
@@ -572,7 +572,7 @@ describe("POST /v1/verify", () => {
       p12,
       passphrase: "test",
       meta: {
-        envelopeId,
+        documentId,
         title: "Repair authorization",
         senderEmail: "shop@example.com",
         consentText: "I agree to sign this document electronically.",
@@ -593,7 +593,7 @@ describe("POST /v1/verify", () => {
     });
     const json = await verifySealedPdf(result.sealed);
     expect(json.valid).toBe(true);
-    expect(json.envelope_id).toBe(envelopeId);
+    expect(json.document_id).toBe(documentId);
     expect(json.parties?.some((p) => p.email === "ceo@victim-corp.com")).toBe(false);
     expect(json.parties?.some((p) => p.email === "cfo@victim-corp.com")).toBe(false);
     expect(json.parties?.some((p) => p.email === "jane@example.com")).toBe(true);
@@ -603,7 +603,7 @@ describe("POST /v1/verify", () => {
     const p12 = makeDevP12("test");
     setDeps({ p12, p12Passphrase: "test" });
     const signedAt = new Date("2026-08-21T12:00:00.000Z");
-    const result = await completeEnvelopePdf({
+    const result = await completeDocumentPdf({
       original: await minimalPdf(),
       appearance: {
         png,
@@ -614,7 +614,7 @@ describe("POST /v1/verify", () => {
       p12,
       passphrase: "test",
       meta: {
-        envelopeId: "00000000-0000-0000-0000-000000000098",
+        documentId: "00000000-0000-0000-0000-000000000098",
         title: "Repair authorization",
         senderEmail: "shop@example.com",
         consentText: "I agree to sign this document electronically.",

@@ -30,27 +30,27 @@ type Item = {
   unread?: boolean;
 };
 
-// Placeholder items until notifications are wired to real envelope events.
-const ENVELOPE_ITEMS: Item[] = [
+// Placeholder items until notifications are wired to real document events.
+const DOCUMENT_ITEMS: Item[] = [
   {
     initials: "RC",
     title: "Riley Chen signed Offer Letter.pdf",
     when: "12 minutes ago",
-    kind: "Envelope signed",
+    kind: "Document signed",
     unread: true,
   },
   {
     initials: "MS",
-    title: "Morgan Silva opened your envelope",
+    title: "Morgan Silva opened your document",
     when: "2 hours ago",
-    kind: "Envelope viewed",
+    kind: "Document viewed",
     unread: true,
   },
   {
     initials: "NDA",
     title: "Mutual NDA.pdf completed by all parties",
     when: "6 hours ago",
-    kind: "Envelope completed",
+    kind: "Document completed",
   },
 ];
 
@@ -89,12 +89,12 @@ function NotificationItem({ item }: { item: Item }) {
 }
 
 export function NotificationDropdown({ trigger, defaultOpen, align = "end" }: Props) {
-  const unread = [...ENVELOPE_ITEMS, ...TEAM_ITEMS].filter((i) => i.unread).length;
+  const unread = [...DOCUMENT_ITEMS, ...TEAM_ITEMS].filter((i) => i.unread).length;
   return (
     <DropdownMenu defaultOpen={defaultOpen}>
       <DropdownMenuTrigger render={trigger} />
       <DropdownMenuContent className="w-full max-w-xs sm:max-w-122" align={align}>
-        <Tabs defaultValue="envelopes" className="gap-0">
+        <Tabs defaultValue="documents" className="gap-0">
           <DropdownMenuGroup>
             <DropdownMenuLabel className="flex flex-col pb-0">
               <div className="flex items-center justify-between gap-6 pb-2.5">
@@ -108,10 +108,10 @@ export function NotificationDropdown({ trigger, defaultOpen, align = "end" }: Pr
               <div className="-mb-0.5 flex items-center justify-between gap-4">
                 <TabsList variant="line">
                   <TabsTrigger
-                    value="envelopes"
+                    value="documents"
                     className="group-data-horizontal/tabs:after:-bottom-1"
                   >
-                    Envelopes
+                    Documents
                   </TabsTrigger>
                   <TabsTrigger
                     value="team"
@@ -129,8 +129,8 @@ export function NotificationDropdown({ trigger, defaultOpen, align = "end" }: Pr
 
           <DropdownMenuSeparator className="mt-0 h-0.5" />
 
-          <TabsContent value="envelopes">
-            {ENVELOPE_ITEMS.map((item, i) => (
+          <TabsContent value="documents">
+            {DOCUMENT_ITEMS.map((item, i) => (
               <div key={item.title}>
                 {i > 0 ? <DropdownMenuSeparator /> : null}
                 <NotificationItem item={item} />

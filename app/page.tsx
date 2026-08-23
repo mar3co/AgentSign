@@ -25,7 +25,7 @@ const AGENT_BLOCK = `# your agent can sign off too, with its own
 # named key. it gets a cryptographic
 # receipt, not a pretend signature
 $ curl -X POST \\
-    https://agentsign.co/v1/envelopes/env_kx3q9/attest \\
+    https://agentsign.co/v1/documents/env_kx3q9/attest \\
     -H 'authorization: Bearer sign_agent_...'
 > receipt 4c19…9e2f · recorded 14:02:59 UTC`;
 
@@ -43,7 +43,7 @@ function curlFor(v: {
     `       -F signers='[{"name":"${esc(v.signerName || "Jane")}",`,
     `         "email":"${v.signerEmail || "jane@example.com"}"}]' \\`,
     `       -F file=@${v.fileName || "form.pdf"} \\`,
-    `       https://agentsign.co/v1/envelopes`,
+    `       https://agentsign.co/v1/documents`,
   ].join("\n");
 }
 
@@ -59,7 +59,7 @@ export default function Home() {
   const [signerEmail, setSignerEmail] = useState("");
   const [fileName, setFileName] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
-  const [envelopeId, setEnvelopeId] = useState<string | null>(null);
+  const [documentId, setDocumentId] = useState<string | null>(null);
   const [done, setDone] = useState<Done | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -81,7 +81,7 @@ export default function Home() {
     data.delete("signer_email");
     data.set("signers", JSON.stringify([{ name, email }]));
     try {
-      const res = await fetch("/v1/envelopes", { method: "POST", body: data });
+      const res = await fetch("/v1/documents", { method: "POST", body: data });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as {
           error?: string;
@@ -94,7 +94,7 @@ export default function Home() {
         setError("Could not send.");
         return;
       }
-      setEnvelopeId(json.id);
+      setDocumentId(json.id);
       setSent(true);
     } catch {
       setError("Could not send.");
@@ -105,14 +105,14 @@ export default function Home() {
 
   async function onOtp(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!envelopeId) return;
+    if (!documentId) return;
     setError(null);
     setBusy(true);
     const form = e.currentTarget;
     const data = new FormData(form);
     const code = String(data.get("code") ?? "").trim();
     try {
-      const res = await fetch(`/v1/envelopes/${envelopeId}/otp`, {
+      const res = await fetch(`/v1/documents/${documentId}/otp`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ code }),
@@ -388,7 +388,7 @@ export default function Home() {
         machine={
           <TerminalPanel
             eyebrow="For agents & developers"
-            address="POST /v1/envelopes"
+            address="POST /v1/documents"
             footer={
               <>
                 <p className="text-[#7e97d8]">
@@ -407,8 +407,8 @@ export default function Home() {
             <pre className="overflow-x-auto whitespace-pre text-ledger">
               {curlFor({ title, senderEmail, signerName, signerEmail, fileName })}
             </pre>
-            {envelopeId ? (
-              <p className="text-[#7e97d8]">&gt; sent · id {envelopeId}</p>
+            {documentId ? (
+              <p className="text-[#7e97d8]">&gt; sent · id {documentId}</p>
             ) : null}
             <div className="h-px bg-[#22304a]" />
             <pre className="overflow-x-auto whitespace-pre text-ledger">

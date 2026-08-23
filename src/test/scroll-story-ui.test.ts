@@ -49,7 +49,7 @@ describe("home scroll story", () => {
   it("keeps the send bar a pointer for developers, not a terminal", () => {
     render(createElement(Home));
     const bar = screen.getByText("send from code:").closest("p");
-    expect(bar?.textContent).toContain("POST /v1/envelopes");
+    expect(bar?.textContent).toContain("POST /v1/documents");
     // The bar itself never contains a curl invocation.
     expect(bar?.textContent).not.toMatch(/curl/i);
     const openapi = screen
@@ -77,8 +77,8 @@ describe("home scroll story", () => {
   it("shows a real call per chapter, twice (pinned panel and stacked fallback)", () => {
     render(createElement(Home));
     for (const address of [
-      "GET /v1/envelopes/{id}",
-      "POST /v1/envelopes/{id}/attest",
+      "GET /v1/documents/{id}",
+      "POST /v1/documents/{id}/attest",
       "POST /v1/verify",
     ]) {
       // One copy in the pinned terminal stack, one in the disclosure fallback.

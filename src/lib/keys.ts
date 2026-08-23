@@ -1,8 +1,8 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { getEnv } from "../env.js";
-import { accounts, apiKeys, envelopes, signers as signersTable } from "../db/schema.js";
+import { accounts, apiKeys, documents, signers as signersTable } from "../db/schema.js";
 import type { AuditDb } from "./audit.js";
-import { cabinetForUser } from "./cabinet.js";
+import { teamForUser } from "./team.js";
 import { getDeps } from "./deps.js";
 import { equalHex, sha256Hex } from "./hash.js";
 import { newLiveKey } from "./tokens.js";
@@ -60,16 +60,16 @@ export async function claimSends(
   email: string,
 ): Promise<void> {
   const claimed = await db
-    .update(envelopes)
+    .update(documents)
     .set({ userId })
-    .where(and(eq(envelopes.senderEmail, normEmail(email)), isNull(envelopes.userId)))
+    .where(and(eq(documents.senderEmail, normEmail(email)), isNull(documents.userId)))
     .returning();
   if (claimed.length === 0) return;
-  const cabinet = await cabinetForUser(db, userId);
-  if (cabinet.entitled) await extendKeep(db, userId);
+  const team = await teamForUser(db, userId);
+  if (team.entitled) await extendKeep(db, userId);
 }
 
-/** Pro keep: completed envelopes this user sent or signed. Stripe webhook (Task 15). */
+/** Pro keep: completed documents this user sent or signed. Stripe webhook (Task 15). */
 export async function extendKeep(db: AuditDb, userId: string): Promise<void> {
   const proDays = Number(getEnv().PRO_KEEP_DAYS);
   const at = getDeps().now?.() ?? new Date();
@@ -81,34 +81,34 @@ export async function extendKeep(db: AuditDb, userId: string): Promise<void> {
     .where(eq(accounts.userId, userId));
   const email = account?.email ?? null;
 
-  const cabinet = await cabinetForUser(db, userId);
+  const team = await teamForUser(db, userId);
   const senderIds =
-    cabinet.ownerUserId === userId ? cabinet.memberUserIds : [userId];
+    team.ownerUserId === userId ? team.memberUserIds : [userId];
 
   const sent = await db
     .select()
-    .from(envelopes)
+    .from(documents)
     .where(
-      and(inArray(envelopes.userId, senderIds), eq(envelopes.status, "completed")),
+      and(inArray(documents.userId, senderIds), eq(documents.status, "completed")),
     );
 
   const byId = new Map(sent.map((e) => [e.id, e]));
   if (email) {
     const signed = await db
-      .select({ envelope: envelopes })
+      .select({ document: documents })
       .from(signersTable)
-      .innerJoin(envelopes, eq(signersTable.envelopeId, envelopes.id))
+      .innerJoin(documents, eq(signersTable.documentId, documents.id))
       .where(
-        and(eq(signersTable.email, email), eq(envelopes.status, "completed")),
+        and(eq(signersTable.email, email), eq(documents.status, "completed")),
       );
-    for (const row of signed) byId.set(row.envelope.id, row.envelope);
+    for (const row of signed) byId.set(row.document.id, row.document);
   }
 
-  for (const envelope of byId.values()) {
+  for (const document of byId.values()) {
     const signerRows = await db
       .select()
       .from(signersTable)
-      .where(eq(signersTable.envelopeId, envelope.id));
+      .where(eq(signersTable.documentId, document.id));
     let completedMs = 0;
     for (const s of signerRows) {
       const t = s.signedAt?.getTime() ?? 0;
@@ -117,19 +117,19 @@ export async function extendKeep(db: AuditDb, userId: string): Promise<void> {
     const completedAt = completedMs > 0 ? new Date(completedMs) : at;
     const keep = new Date(completedAt.getTime() + proDays * 86_400_000);
     const shredAt = keep.getTime() > minKeep.getTime() ? keep : minKeep;
-    await db.update(envelopes).set({ shredAt }).where(eq(envelopes.id, envelope.id));
-    await syncTmpKeyExpiry(db, envelope.id, shredAt);
+    await db.update(documents).set({ shredAt }).where(eq(documents.id, document.id));
+    await syncTmpKeyExpiry(db, document.id, shredAt);
   }
 }
 
 /** Tmp keys die with shred_at, not the original signing window. */
 export async function syncTmpKeyExpiry(
   db: AuditDb,
-  envelopeId: string,
+  documentId: string,
   shredAt: Date,
 ): Promise<void> {
   await db
     .update(apiKeys)
     .set({ expiresAt: shredAt })
-    .where(and(eq(apiKeys.envelopeId, envelopeId), eq(apiKeys.kind, "tmp")));
+    .where(and(eq(apiKeys.documentId, documentId), eq(apiKeys.kind, "tmp")));
 }

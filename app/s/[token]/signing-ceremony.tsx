@@ -121,11 +121,11 @@ export function SigningCeremony({
               Certificate
             </LinkButton>
             <LinkButton
-              href={`/login?email=${email}&next=/envelopes`}
+              href={`/login?email=${email}&next=/documents`}
               variant="outline"
               className="h-11 w-full text-base"
             >
-              Keep it in a cabinet
+              Keep it in your documents
             </LinkButton>
           </CardContent>
         </Card>

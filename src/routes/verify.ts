@@ -28,7 +28,7 @@ async function readPdfBytes(req: Request): Promise<Uint8Array | null> {
   }
 }
 
-export async function verifyEnvelope(req: Request): Promise<Response> {
+export async function verifyDocument(req: Request): Promise<Response> {
   const bytes = await readPdfBytes(req);
   if (!bytes) {
     return jsonError(400, "A PDF is required", "invalid_request");

@@ -13,15 +13,15 @@ import { GET as getGoogle } from "../../app/login/google/route.js";
 import { POST as postLogin } from "../../app/login/session/route.js";
 import { POST as postSignup } from "../../app/signup/route.js";
 import { POST as postKeys } from "../../app/v1/keys/route.js";
-import { GET as listEnvelopes, POST as postEnvelope } from "../../app/v1/envelopes/route.js";
-import { DELETE as deleteEnvelope } from "../../app/v1/envelopes/[id]/route.js";
-import { POST as postOtp } from "../../app/v1/envelopes/[id]/otp/route.js";
+import { GET as listDocuments, POST as postDocument } from "../../app/v1/documents/route.js";
+import { DELETE as deleteDocument } from "../../app/v1/documents/[id]/route.js";
+import { POST as postOtp } from "../../app/v1/documents/[id]/otp/route.js";
 import { POST as postConsent } from "../../app/s/[token]/consent/route.js";
 import { POST as postSign } from "../../app/s/[token]/sign/route.js";
 import { GET as getAuthCallback } from "../../app/auth/callback/route.js";
 import { GET as getWhoami } from "../../app/auth/whoami/route.js";
 import { POST as postLogout } from "../../app/auth/logout/route.js";
-import { envelopes } from "../db/schema.js";
+import { documents } from "../db/schema.js";
 import { setDeps } from "../lib/deps.js";
 import { makeDevP12 } from "../lib/pdf/devP12.js";
 import { createFsStore } from "../lib/storage.js";
@@ -199,7 +199,7 @@ describe("login", () => {
     const ui = await LoginPage({
       searchParams: Promise.resolve({
         email: "jane@example.com",
-        next: "/envelopes",
+        next: "/documents",
       }),
     });
     const html = renderToStaticMarkup(ui);
@@ -299,14 +299,14 @@ describe("login", () => {
     const fake = createFakeAuth();
     setDeps({ db, auth: fake.adapter });
     const start = await getGoogle(
-      new Request("http://sign.test/login/google?next=/envelopes"),
+      new Request("http://sign.test/login/google?next=/documents"),
     );
     expect(start.status).toBe(302);
     const loc = start.headers.get("location");
     expect(loc).toBeTruthy();
     const cb = await getAuthCallback(new Request(loc!));
     expect(cb.status).toBe(302);
-    expect(cb.headers.get("location")).toBe("/envelopes");
+    expect(cb.headers.get("location")).toBe("/documents");
     const cookie = cookieFrom(cb);
     expect(cookie).toMatch(/sign_session=/);
     await mintWithCookie(cookie);
@@ -332,14 +332,14 @@ describe("login", () => {
     body.set("sender_email", "shop@example.com");
     body.set("signers", JSON.stringify([{ name: "Jane", email: "jane@example.com" }]));
     body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
-    const created = await postEnvelope(
-      new Request("http://sign.test/v1/envelopes", { method: "POST", body }),
+    const created = await postDocument(
+      new Request("http://sign.test/v1/documents", { method: "POST", body }),
     );
     expect(created.status).toBe(201);
     const { id } = (await created.json()) as { id: string };
     const code = sent[0]!.text.match(/\b(\d{6})\b/)![1]!;
     const verify = await postOtp(
-      new Request(`http://sign.test/v1/envelopes/${id}/otp`, {
+      new Request(`http://sign.test/v1/documents/${id}/otp`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ code }),
@@ -355,7 +355,7 @@ describe("login", () => {
     const ui = await SigningPage({ params: Promise.resolve({ token }) });
     const html = renderToStaticMarkup(ui);
     expect(html).toMatch(/Finish/i);
-    expect(html).not.toMatch(/Keep it in a cabinet/i);
+    expect(html).not.toMatch(/Keep it in your documents/i);
     expect(html).not.toMatch(/id="email"/);
     expect(html).not.toMatch(/href="\/login"/);
 
@@ -384,23 +384,23 @@ describe("login", () => {
       }),
     );
     expect(magic.status).toBe(200);
-    const before = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    const before = await db.select().from(documents).where(eq(documents.id, id));
     expect(before[0]!.userId).toBeNull();
     const cb = await getAuthCallback(
       new Request("http://sign.test/auth/callback?code=magic:jane@example.com"),
     );
     const cookie = cookieFrom(cb);
-    const list = await listEnvelopes(
-      new Request("http://sign.test/v1/envelopes", { headers: { cookie } }),
+    const list = await listDocuments(
+      new Request("http://sign.test/v1/documents", { headers: { cookie } }),
     );
     expect(list.status).toBe(200);
-    const listed = (await list.json()) as { envelopes: { id: string }[] };
-    expect(listed.envelopes.some((e) => e.id === id)).toBe(true);
-    const after = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    const listed = (await list.json()) as { documents: { id: string }[] };
+    expect(listed.documents.some((e) => e.id === id)).toBe(true);
+    const after = await db.select().from(documents).where(eq(documents.id, id));
     expect(after[0]!.userId).toBeNull();
 
-    const del = await deleteEnvelope(
-      new Request(`http://sign.test/v1/envelopes/${id}`, {
+    const del = await deleteDocument(
+      new Request(`http://sign.test/v1/documents/${id}`, {
         method: "DELETE",
         headers: { cookie },
       }),

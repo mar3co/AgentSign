@@ -22,7 +22,7 @@ export type SignatureAppearance = {
   signedAt: Date;
   kind?: "human" | "agent";
   footer?: string;
-  envelopeId?: string;
+  documentId?: string;
   banner?: string;
   humanSignatures?: number;
   agentAttestations?: number;
@@ -80,12 +80,12 @@ export async function appendSignaturePage(
     y -= 24;
   }
 
-  if (appearance.envelopeId) {
+  if (appearance.documentId) {
     drawLiteralText(
       doc,
       page,
       fontKey,
-      `Envelope id: ${appearance.envelopeId}`,
+      `Document id: ${appearance.documentId}`,
       margin,
       y,
       size,

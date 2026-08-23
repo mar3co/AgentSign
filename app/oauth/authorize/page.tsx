@@ -4,7 +4,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { agents } from "../../../src/db/schema.js";
 import { getDb } from "../../../src/db/client.js";
 import { getAuth } from "../../../src/lib/auth/supabase.js";
-import { cabinetForUser } from "../../../src/lib/cabinet.js";
+import { teamForUser } from "../../../src/lib/team.js";
 import { getDeps } from "../../../src/lib/deps.js";
 import { flagOn } from "../../../src/lib/flags.js";
 import { mcpResource, resolveOauthClient } from "../../../src/lib/oauth.js";
@@ -67,13 +67,13 @@ export default async function AuthorizePage({
   }
 
   if (!error && (await flagOn("agent_parties"))) {
-    const cabinet = await cabinetForUser(db, user.id);
-    if (cabinet.entitled) {
+    const team = await teamForUser(db, user.id);
+    if (team.entitled) {
       const rows = await db
         .select()
         .from(agents)
         .where(
-          and(eq(agents.ownerUserId, cabinet.ownerUserId), isNull(agents.revokedAt)),
+          and(eq(agents.ownerUserId, team.ownerUserId), isNull(agents.revokedAt)),
         );
       rows.sort((a, b) => a.slug.localeCompare(b.slug));
       agentOptions = rows.map((row) => ({

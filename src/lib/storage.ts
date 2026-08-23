@@ -6,12 +6,12 @@ export type BlobStore = {
 
 export type ObjectKind = "original" | "sealed" | "certificate";
 
-export function objectKey(envelopeId: string, kind: ObjectKind): string {
-  return `${envelopeId}/${kind}.pdf`;
+export function objectKey(documentId: string, kind: ObjectKind): string {
+  return `${documentId}/${kind}.pdf`;
 }
 
-export function appearanceKey(envelopeId: string, signerId: string): string {
-  return `${envelopeId}/appearance/${signerId}.png`;
+export function appearanceKey(documentId: string, signerId: string): string {
+  return `${documentId}/appearance/${signerId}.png`;
 }
 
 export { createFsStore } from "./storage/fs.js";

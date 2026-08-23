@@ -6,12 +6,12 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { createTestDb } from "./db.js";
 import { createFsStore, objectKey } from "../lib/storage.js";
 import { setDeps } from "../lib/deps.js";
-import { POST as postEnvelope } from "../../app/v1/envelopes/route.js";
-import { POST as postOtp } from "../../app/v1/envelopes/[id]/otp/route.js";
+import { POST as postDocument } from "../../app/v1/documents/route.js";
+import { POST as postOtp } from "../../app/v1/documents/[id]/otp/route.js";
 import { POST as postConsent } from "../../app/s/[token]/consent/route.js";
 import { POST as postSign } from "../../app/s/[token]/sign/route.js";
 import { POST as postDecline } from "../../app/s/[token]/decline/route.js";
-import { GET as getPdf } from "../../app/v1/envelopes/[id]/pdf/route.js";
+import { GET as getPdf } from "../../app/v1/documents/[id]/pdf/route.js";
 import { GET as getCeremonyPdf } from "../../app/s/[token]/pdf/route.js";
 import { getSigningState } from "../routes/signing.js";
 import { SigningCeremony } from "../../app/s/[token]/signing-ceremony.js";
@@ -25,7 +25,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { accounts, documents, envelopes, signers as signersTable } from "../db/schema.js";
+import { accounts, files, documents, signers as signersTable } from "../db/schema.js";
 
 const png = Uint8Array.from(
   Buffer.from(
@@ -63,14 +63,14 @@ async function startVerified(opts?: {
     ),
   );
   body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
-  const res = await postEnvelope(
-    new Request("http://sign.test/v1/envelopes", { method: "POST", body }),
+  const res = await postDocument(
+    new Request("http://sign.test/v1/documents", { method: "POST", body }),
   );
   expect(res.status).toBe(201);
   const created = (await res.json()) as { id: string };
   const code = sent[0]!.text.match(/\b(\d{6})\b/)![1]!;
   const verify = await postOtp(
-    new Request(`http://sign.test/v1/envelopes/${created.id}/otp`, {
+    new Request(`http://sign.test/v1/documents/${created.id}/otp`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ code }),
@@ -158,7 +158,7 @@ describe("signing ceremony", () => {
       params: Promise.resolve({ token }),
     });
     expect(sign.status).toBe(200);
-    const [env] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    const [env] = await db.select().from(documents).where(eq(documents.id, id));
     expect(env!.status).toBe("completed");
     expect(env!.sha256).toBeTruthy();
     expect(env!.shredAt.getTime()).toBe(frozen.getTime() + 7 * 86_400_000);
@@ -167,7 +167,7 @@ describe("signing ceremony", () => {
     expect(sealed!.byteLength).toBeGreaterThan(0);
     const cert = await store.get(objectKey(id, "certificate"));
     expect(cert).not.toBeNull();
-    const docs = await db.select().from(documents).where(eq(documents.envelopeId, id));
+    const docs = await db.select().from(files).where(eq(files.documentId, id));
     expect(docs.some((d) => d.kind === "sealed")).toBe(true);
     expect(docs.some((d) => d.kind === "certificate")).toBe(true);
   });
@@ -180,23 +180,23 @@ describe("signing ceremony", () => {
     expect(sign.status).toBe(400);
   });
 
-  it("rejects a signer token on GET envelope PDF with 401", { timeout: 30_000 }, async () => {
+  it("rejects a signer token on GET document PDF with 401", { timeout: 30_000 }, async () => {
     const { id, token } = await startVerified();
     const res = await getPdf(
-      new Request(`http://sign.test/v1/envelopes/${id}.pdf`, {
+      new Request(`http://sign.test/v1/documents/${id}.pdf`, {
         headers: { authorization: `Bearer ${token}` },
       }),
       { params: Promise.resolve({ id }) },
     );
     expect(res.status).toBe(401);
     const noAuth = await getPdf(
-      new Request(`http://sign.test/v1/envelopes/${id}.pdf`),
+      new Request(`http://sign.test/v1/documents/${id}.pdf`),
       { params: Promise.resolve({ id }) },
     );
     expect(noAuth.status).toBe(401);
   });
 
-  it("decline sets envelope declined and finish returns 409", { timeout: 30_000 }, async () => {
+  it("decline sets document declined and finish returns 409", { timeout: 30_000 }, async () => {
     const { db, id, token, sent } = await startVerified();
     const before = sent.length;
     const decline = await postDecline(
@@ -208,7 +208,7 @@ describe("signing ceremony", () => {
       { params: Promise.resolve({ token }) },
     );
     expect(decline.status).toBe(200);
-    const [env] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    const [env] = await db.select().from(documents).where(eq(documents.id, id));
     expect(env!.status).toBe("declined");
     const [row] = await db.select().from(signersTable);
     expect(row!.declinedAt).not.toBeNull();
@@ -262,7 +262,7 @@ describe("signing ceremony", () => {
     const bobRows = await seq.db
       .select()
       .from(signersTable)
-      .where(eq(signersTable.envelopeId, seq.id));
+      .where(eq(signersTable.documentId, seq.id));
     bobRows.sort((a, b) => a.signingOrder - b.signingOrder);
     await seq.db
       .update(signersTable)
@@ -282,7 +282,7 @@ describe("signing ceremony", () => {
     expect(document.querySelector("canvas")).toBeTruthy();
     expect(screen.getByRole("button", { name: /finish/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /decline/i })).toBeTruthy();
-    expect(screen.queryByText(/Keep it in a cabinet/i)).toBeNull();
+    expect(screen.queryByText(/Keep it in your documents/i)).toBeNull();
   });
 
   it("unknown token page uses a Not found heading", { timeout: 30_000 }, async () => {
@@ -296,7 +296,7 @@ describe("signing ceremony", () => {
     expect(screen.getByRole("heading", { name: /not found/i })).toBeTruthy();
   });
 
-  it("leaves envelope pending and returns 500 if complete throws", { timeout: 30_000 }, async () => {
+  it("leaves document pending and returns 500 if complete throws", { timeout: 30_000 }, async () => {
     const { db, store, id, token } = await startVerified();
     setDeps({ p12: Buffer.from("not-a-pkcs12"), p12Passphrase: "nope" });
     const consent = await postConsent(consentRequest(token), {
@@ -307,19 +307,19 @@ describe("signing ceremony", () => {
       params: Promise.resolve({ token }),
     });
     expect(sign.status).toBe(500);
-    const [env] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    const [env] = await db.select().from(documents).where(eq(documents.id, id));
     expect(env!.status).toBe("pending");
     expect(await store.get(objectKey(id, "sealed"))).toBeNull();
-    const [row] = await db.select().from(signersTable).where(eq(signersTable.envelopeId, id));
+    const [row] = await db.select().from(signersTable).where(eq(signersTable.documentId, id));
     expect(row!.signedAt).toBeNull();
   });
 
-  it("sets shred_at from PRO_KEEP_DAYS when the envelope user is pro", { timeout: 60_000 }, async () => {
+  it("sets shred_at from PRO_KEEP_DAYS when the document user is pro", { timeout: 60_000 }, async () => {
     const frozen = new Date("2026-08-20T12:00:00Z");
     const { db, store, id, token } = await startVerified({ now: () => frozen });
     const userId = randomUUID();
     await db.insert(accounts).values({ userId, plan: "pro" });
-    await db.update(envelopes).set({ userId }).where(eq(envelopes.id, id));
+    await db.update(documents).set({ userId }).where(eq(documents.id, id));
     setDeps({ p12: makeDevP12("test"), p12Passphrase: "test" });
     const consent = await postConsent(consentRequest(token), {
       params: Promise.resolve({ token }),
@@ -329,7 +329,7 @@ describe("signing ceremony", () => {
       params: Promise.resolve({ token }),
     });
     expect(sign.status).toBe(200);
-    const [env] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    const [env] = await db.select().from(documents).where(eq(documents.id, id));
     expect(env!.status).toBe("completed");
     expect(env!.shredAt.getTime()).toBe(frozen.getTime() + 365 * 86_400_000);
     expect(env!.shredAt.getTime()).not.toBe(frozen.getTime() + 7 * 86_400_000);
@@ -352,7 +352,7 @@ describe("signing ceremony", () => {
     expect(
       (await postSign(signRequest(token), { params: Promise.resolve({ token }) })).status,
     ).toBe(200);
-    const [env] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    const [env] = await db.select().from(documents).where(eq(documents.id, id));
     expect(env!.shredAt.getTime()).toBe(frozen.getTime() + 365 * 86_400_000);
   });
 
@@ -371,7 +371,7 @@ describe("signing ceremony", () => {
     expect(sign.status).toBe(200);
     at = new Date(at.getTime() + 2 * 86_400_000);
     const pdf = await getPdf(
-      new Request(`http://sign.test/v1/envelopes/${id}/pdf`, {
+      new Request(`http://sign.test/v1/documents/${id}/pdf`, {
         headers: { authorization: `Bearer ${key}` },
       }),
       { params: Promise.resolve({ id }) },
@@ -379,7 +379,7 @@ describe("signing ceremony", () => {
     expect(pdf.status).toBe(200);
     at = new Date(at.getTime() + 6 * 86_400_000);
     const gone = await getPdf(
-      new Request(`http://sign.test/v1/envelopes/${id}/pdf`, {
+      new Request(`http://sign.test/v1/documents/${id}/pdf`, {
         headers: { authorization: `Bearer ${key}` },
       }),
       { params: Promise.resolve({ id }) },
@@ -410,13 +410,13 @@ describe("signing ceremony", () => {
     body.set("sender_email", "shop@example.com");
     body.set("signers", JSON.stringify([{ name: "Jane", email: "jane@example.com" }]));
     body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
-    const created = await postEnvelope(
-      new Request("http://sign.test/v1/envelopes", { method: "POST", body }),
+    const created = await postDocument(
+      new Request("http://sign.test/v1/documents", { method: "POST", body }),
     );
     const { id } = (await created.json()) as { id: string };
     const code = sent[0]!.text.match(/\b(\d{6})\b/)![1]!;
     const verify = await postOtp(
-      new Request(`http://sign.test/v1/envelopes/${id}/otp`, {
+      new Request(`http://sign.test/v1/documents/${id}/otp`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ code }),
@@ -435,7 +435,7 @@ describe("signing ceremony", () => {
     expect(sign.status).toBe(200);
     const json = (await sign.json()) as { status: string };
     expect(json.status).toBe("completed");
-    const [env] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    const [env] = await db.select().from(documents).where(eq(documents.id, id));
     expect(env!.status).toBe("completed");
   });
 
@@ -453,8 +453,8 @@ describe("signing ceremony", () => {
     body.set("sender_email", "shop@example.com");
     body.set("signers", JSON.stringify([{ name: "Jane", email: "jane@example.com" }]));
     body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
-    const created = await postEnvelope(
-      new Request("http://sign.test/v1/envelopes", { method: "POST", body }),
+    const created = await postDocument(
+      new Request("http://sign.test/v1/documents", { method: "POST", body }),
     );
     const { id } = (await created.json()) as { id: string };
     const guess = await getSigningState(`pending:${id}:0`);
@@ -511,7 +511,7 @@ describe("signing ceremony", () => {
     expect(pdf.status).toBe(200);
     expect(pdf.headers.get("content-type")).toMatch(/pdf/);
     const v1 = await getPdf(
-      new Request(`http://sign.test/v1/envelopes/${id}/pdf`, {
+      new Request(`http://sign.test/v1/documents/${id}/pdf`, {
         headers: { authorization: `Bearer ${token}` },
       }),
       { params: Promise.resolve({ id }) },
@@ -580,7 +580,7 @@ describe("signing ceremony", () => {
     );
     expect(res.status).toBe(200);
     expect((await res.json()) as { status: string }).toMatchObject({ status: "declined" });
-    const [env] = await db.select().from(envelopes);
+    const [env] = await db.select().from(documents);
     expect(env!.status).toBe("declined");
   });
 
@@ -620,7 +620,7 @@ describe("signing ceremony", () => {
     await postConsent(consentRequest(token), { params: Promise.resolve({ token }) });
     const sign = await postSign(signRequest(token), { params: Promise.resolve({ token }) });
     expect(sign.status).toBe(503);
-    const rows = await db.select().from(signersTable).where(eq(signersTable.envelopeId, id));
+    const rows = await db.select().from(signersTable).where(eq(signersTable.documentId, id));
     rows.sort((a, b) => a.signingOrder - b.signingOrder);
     expect(rows[0]!.signedAt).toBeNull();
     expect(rows[1]!.sentAt).toBeNull();
@@ -639,7 +639,7 @@ describe("signing ceremony", () => {
     expect(cert.status).toBe(200);
     expect(cert.headers.get("content-type")).toMatch(/pdf/);
     const rest = await getPdf(
-      new Request(`http://sign.test/v1/envelopes/${id}/pdf?kind=certificate`, {
+      new Request(`http://sign.test/v1/documents/${id}/pdf?kind=certificate`, {
         headers: { authorization: `Bearer ${key}` },
       }),
       { params: Promise.resolve({ id }) },
@@ -682,14 +682,14 @@ describe("signing ceremony", () => {
     expect(nestedRes).toBeDefined();
     const statuses = [first.status, nestedRes!.status].sort((a, b) => a - b);
     expect(statuses).toEqual([200, 409]);
-    const [env] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    const [env] = await db.select().from(documents).where(eq(documents.id, id));
     expect(env!.status).toBe("completed");
     const sealed = await innerGet(objectKey(id, "sealed"));
     expect(sealed).not.toBeNull();
     expect(sha256Hex(sealed!)).toBe(env!.sha256);
   });
 
-  it("decline after a concurrent complete leaves the envelope completed", { timeout: 60_000 }, async () => {
+  it("decline after a concurrent complete leaves the document completed", { timeout: 60_000 }, async () => {
     const { db, store, id, token } = await startVerified();
     setDeps({ p12: makeDevP12("test"), p12Passphrase: "test" });
     expect(
@@ -724,7 +724,7 @@ describe("signing ceremony", () => {
     release();
     const decline = await declineP;
     expect(decline.status).toBe(409);
-    const [env] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    const [env] = await db.select().from(documents).where(eq(documents.id, id));
     expect(env!.status).toBe("completed");
     const sealed = await store.get(objectKey(id, "sealed"));
     expect(sealed).not.toBeNull();
@@ -771,7 +771,7 @@ describe("signing ceremony", () => {
     expect(statuses).toEqual([200, 409]);
     const bobInvites = sent.filter((m) => m.to === "bob@example.com");
     expect(bobInvites).toHaveLength(1);
-    const rows = await db.select().from(signersTable).where(eq(signersTable.envelopeId, id));
+    const rows = await db.select().from(signersTable).where(eq(signersTable.documentId, id));
     rows.sort((a, b) => a.signingOrder - b.signingOrder);
     expect(rows[0]!.signedAt).not.toBeNull();
     expect(rows[1]!.sentAt).not.toBeNull();

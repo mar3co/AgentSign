@@ -4,8 +4,8 @@ import { eq } from "drizzle-orm";
 import { createTestDb } from "./db.js";
 import { createFsStore, objectKey } from "../lib/storage.js";
 import { setDeps } from "../lib/deps.js";
-import { POST as postEnvelope } from "../../app/v1/envelopes/route.js";
-import { POST as postOtp } from "../../app/v1/envelopes/[id]/otp/route.js";
+import { POST as postDocument } from "../../app/v1/documents/route.js";
+import { POST as postOtp } from "../../app/v1/documents/[id]/otp/route.js";
 import { POST as postConsent } from "../../app/s/[token]/consent/route.js";
 import { POST as postSign } from "../../app/s/[token]/sign/route.js";
 import { remindDue, shredDue } from "../jobs/shred.js";
@@ -21,7 +21,7 @@ import {
   agents,
   apiKeys,
   auditEvents,
-  envelopes,
+  documents,
   signers as signersTable,
 } from "../db/schema.js";
 import type { MailMessage } from "../lib/email.js";
@@ -54,7 +54,7 @@ function mailsTo(sent: MailMessage[], email: string) {
   return sent.filter((m) => m.to === email);
 }
 
-async function startEnvelope(opts: {
+async function startDocument(opts: {
   now: () => Date;
   signers?: { name: string; email: string }[];
   title?: string;
@@ -81,14 +81,14 @@ async function startEnvelope(opts: {
     JSON.stringify(opts.signers ?? [{ name: "Jane", email: "jane@example.com" }]),
   );
   body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
-  const res = await postEnvelope(
-    new Request("http://sign.test/v1/envelopes", { method: "POST", body }),
+  const res = await postDocument(
+    new Request("http://sign.test/v1/documents", { method: "POST", body }),
   );
   expect(res.status).toBe(201);
   const created = (await res.json()) as { id: string };
   const code = sent[0]!.text.match(/\b(\d{6})\b/)![1]!;
   const verify = await postOtp(
-    new Request(`http://sign.test/v1/envelopes/${created.id}/otp`, {
+    new Request(`http://sign.test/v1/documents/${created.id}/otp`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ code }),
@@ -130,14 +130,14 @@ async function addVerified(
     JSON.stringify(opts?.signers ?? [{ name: "Jane", email: "jane@example.com" }]),
   );
   body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
-  const res = await postEnvelope(
-    new Request("http://sign.test/v1/envelopes", { method: "POST", body }),
+  const res = await postDocument(
+    new Request("http://sign.test/v1/documents", { method: "POST", body }),
   );
   expect(res.status).toBe(201);
   const created = (await res.json()) as { id: string };
   const code = sent[before]!.text.match(/\b(\d{6})\b/)![1]!;
   const verify = await postOtp(
-    new Request(`http://sign.test/v1/envelopes/${created.id}/otp`, {
+    new Request(`http://sign.test/v1/documents/${created.id}/otp`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ code }),
@@ -174,20 +174,20 @@ async function complete(token: string) {
   expect(sign.status).toBe(200);
 }
 
-async function signerHash(db: Awaited<ReturnType<typeof createTestDb>>, envelopeId: string) {
+async function signerHash(db: Awaited<ReturnType<typeof createTestDb>>, documentId: string) {
   const [row] = await db
     .select()
     .from(signersTable)
-    .where(eq(signersTable.envelopeId, envelopeId));
+    .where(eq(signersTable.documentId, documentId));
   return row!;
 }
 
 describe("remindDue and shredDue", () => {
   it("reminds a pending signer after 3 days, not again before +3d, skips completed", { timeout: 60_000 }, async () => {
     let at = new Date("2026-08-20T12:00:00Z");
-    const pending = await startEnvelope({ now: () => at });
+    const pending = await startDocument({ now: () => at });
     const hashBefore = (await signerHash(pending.db, pending.id)).tokenHash;
-    const completed = await startEnvelope({
+    const completed = await startDocument({
       now: () => at,
       sender: "other@example.com",
       signers: [{ name: "Bob", email: "bob@example.com" }],
@@ -233,12 +233,12 @@ describe("remindDue and shredDue", () => {
 
   it("hash-only legacy reminder keeps unique-link sentence", { timeout: 60_000 }, async () => {
     let at = new Date("2026-08-20T12:00:00Z");
-    const pending = await startEnvelope({ now: () => at });
+    const pending = await startDocument({ now: () => at });
     const hashBefore = (await signerHash(pending.db, pending.id)).tokenHash;
     await pending.db
       .update(signersTable)
       .set({ tokenEnc: null })
-      .where(eq(signersTable.envelopeId, pending.id));
+      .where(eq(signersTable.documentId, pending.id));
 
     at = new Date(at.getTime() + 3 * DAY);
     await remindDue(pending.db, pending.mailer, at);
@@ -252,9 +252,9 @@ describe("remindDue and shredDue", () => {
 
   it("remindDue skips agent parties even if sentAt is old", { timeout: 60_000 }, async () => {
     let at = new Date("2026-08-20T12:00:00Z");
-    const pending = await startEnvelope({ now: () => at });
+    const pending = await startDocument({ now: () => at });
     await pending.db.insert(signersTable).values({
-      envelopeId: pending.id,
+      documentId: pending.id,
       name: "Grok Legal",
       email: "bot@example.com",
       signingOrder: 2,
@@ -271,11 +271,11 @@ describe("remindDue and shredDue", () => {
 
   it("sends at most two reminders", { timeout: 60_000 }, async () => {
     let at = new Date("2026-08-20T12:00:00Z");
-    const pending = await startEnvelope({ now: () => at });
+    const pending = await startDocument({ now: () => at });
     await pending.db
-      .update(envelopes)
+      .update(documents)
       .set({ expiresAt: new Date(at.getTime() + 30 * DAY) })
-      .where(eq(envelopes.id, pending.id));
+      .where(eq(documents.id, pending.id));
     const hashBefore = (await signerHash(pending.db, pending.id)).tokenHash;
     const janeBefore = mailsTo(pending.sent, "jane@example.com").length;
 
@@ -299,7 +299,7 @@ describe("remindDue and shredDue", () => {
     const audits = await pending.db
       .select()
       .from(auditEvents)
-      .where(eq(auditEvents.envelopeId, pending.id));
+      .where(eq(auditEvents.documentId, pending.id));
     expect(audits.filter((a) => a.event === "reminded")).toHaveLength(2);
 
     setDeps({
@@ -313,7 +313,7 @@ describe("remindDue and shredDue", () => {
 
   it("remindDue mail throw still writes reminded and continues the sweep", { timeout: 60_000 }, async () => {
     let at = new Date("2026-08-20T12:00:00Z");
-    const pending = await startEnvelope({ now: () => at });
+    const pending = await startDocument({ now: () => at });
     at = new Date(at.getTime() + 3 * DAY);
     let throws = 0;
     const mailer = {
@@ -327,28 +327,28 @@ describe("remindDue and shredDue", () => {
     const audits = await pending.db
       .select()
       .from(auditEvents)
-      .where(eq(auditEvents.envelopeId, pending.id));
+      .where(eq(auditEvents.documentId, pending.id));
     expect(audits.filter((a) => a.event === "reminded")).toHaveLength(1);
     expect(audits.filter((a) => a.event === "emailed_failed")).toHaveLength(1);
   });
 
-  it("purgeEnvelope no-ops when shred_at moved forward", { timeout: 60_000 }, async () => {
-    const ctx = await startEnvelope({ now: () => new Date("2026-08-20T12:00:00Z") });
+  it("purgeDocument no-ops when shred_at moved forward", { timeout: 60_000 }, async () => {
+    const ctx = await startDocument({ now: () => new Date("2026-08-20T12:00:00Z") });
     const later = new Date("2026-09-20T12:00:00Z");
     await ctx.db
-      .update(envelopes)
+      .update(documents)
       .set({ shredAt: later, status: "completed" })
-      .where(eq(envelopes.id, ctx.id));
-    const { purgeEnvelope } = await import("../jobs/shred.js");
-    await purgeEnvelope(ctx.db, ctx.store, ctx.id, new Date("2026-08-21T12:00:00Z"));
-    const [row] = await ctx.db.select().from(envelopes).where(eq(envelopes.id, ctx.id));
+      .where(eq(documents.id, ctx.id));
+    const { purgeDocument } = await import("../jobs/shred.js");
+    await purgeDocument(ctx.db, ctx.store, ctx.id, new Date("2026-08-21T12:00:00Z"));
+    const [row] = await ctx.db.select().from(documents).where(eq(documents.id, ctx.id));
     expect(row!.status).toBe("completed");
     expect(await ctx.store.get(objectKey(ctx.id, "original"))).toBeTruthy();
   });
 
   it("GET /internal/shred requires CRON_SECRET and runs shredDue + remindDue", { timeout: 60_000 }, async () => {
     let at = new Date("2026-08-20T12:00:00Z");
-    const ctx = await startEnvelope({ now: () => at });
+    const ctx = await startDocument({ now: () => at });
     const second = await addVerified(ctx.sent, {
       sender: "other@example.com",
       signers: [{ name: "Bob", email: "bob@example.com" }],
@@ -356,9 +356,9 @@ describe("remindDue and shredDue", () => {
     });
     await complete(second.token);
     await ctx.db
-      .update(envelopes)
+      .update(documents)
       .set({ shredAt: new Date(at.getTime() + 3 * DAY) })
-      .where(eq(envelopes.id, second.id));
+      .where(eq(documents.id, second.id));
 
     const prev = process.env.CRON_SECRET;
     try {
@@ -398,7 +398,7 @@ describe("remindDue and shredDue", () => {
       expect(reminded.remindedAt).not.toBeNull();
       expect(reminderMails(ctx.sent).length).toBe(remindedBefore + 1);
 
-      const [env] = await ctx.db.select().from(envelopes).where(eq(envelopes.id, second.id));
+      const [env] = await ctx.db.select().from(documents).where(eq(documents.id, second.id));
       expect(env!.status).toBe("deleted");
       expect(await ctx.store.get(objectKey(second.id, "sealed"))).toBeNull();
     } finally {
@@ -411,14 +411,14 @@ describe("remindDue and shredDue", () => {
   it("shredDue after shred_at purges blobs and tombstones", { timeout: 60_000 }, async () => {
     const frozen = new Date("2026-08-20T12:00:00Z");
     let at = frozen;
-    const { db, store, id, token } = await startEnvelope({ now: () => at });
+    const { db, store, id, token } = await startDocument({ now: () => at });
     await complete(token);
 
     expect(await store.get(objectKey(id, "original"))).not.toBeNull();
     expect(await store.get(objectKey(id, "sealed"))).not.toBeNull();
     expect(await store.get(objectKey(id, "certificate"))).not.toBeNull();
 
-    const [before] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    const [before] = await db.select().from(documents).where(eq(documents.id, id));
     expect(before!.status).toBe("completed");
     expect(before!.shredAt.getTime()).toBe(frozen.getTime() + 7 * DAY);
 
@@ -429,23 +429,23 @@ describe("remindDue and shredDue", () => {
     expect(await store.get(objectKey(id, "sealed"))).toBeNull();
     expect(await store.get(objectKey(id, "certificate"))).toBeNull();
 
-    const [env] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    const [env] = await db.select().from(documents).where(eq(documents.id, id));
     expect(env!.status).toBe("deleted");
     expect(env!.senderEmail).toBe("redacted");
     const [signer] = await db
       .select()
       .from(signersTable)
-      .where(eq(signersTable.envelopeId, id));
+      .where(eq(signersTable.documentId, id));
     expect(signer!.email).toBe("redacted");
 
     const audits = await db
       .select()
       .from(auditEvents)
-      .where(eq(auditEvents.envelopeId, id));
+      .where(eq(auditEvents.documentId, id));
     expect(audits.some((a) => a.event === "deleted")).toBe(true);
     expect(audits.some((a) => a.event === "signed")).toBe(true);
 
-    const keys = await db.select().from(apiKeys).where(eq(apiKeys.envelopeId, id));
+    const keys = await db.select().from(apiKeys).where(eq(apiKeys.documentId, id));
     expect(keys).toHaveLength(1);
     expect(keys[0]!.kind).toBe("tmp");
     expect(keys[0]!.expiresAt.getTime()).toBeLessThanOrEqual(at.getTime());
@@ -453,23 +453,23 @@ describe("remindDue and shredDue", () => {
 
   it("remindDue does not mark overdue pending as expired", { timeout: 60_000 }, async () => {
     let at = new Date("2026-08-20T12:00:00Z");
-    const pending = await startEnvelope({ now: () => at });
+    const pending = await startDocument({ now: () => at });
     at = new Date(at.getTime() + 7 * DAY);
     await remindDue(pending.db, pending.mailer, at);
     const [row] = await pending.db
       .select()
-      .from(envelopes)
-      .where(eq(envelopes.id, pending.id));
+      .from(documents)
+      .where(eq(documents.id, pending.id));
     expect(row!.status).toBe("pending");
     expect(reminderMails(pending.sent)).toHaveLength(0);
   });
 
-  it("shredDue pending envelope fires agent envelope.expired then purges", {
+  it("shredDue pending document fires agent document.expired then purges", {
     timeout: 60_000,
   }, async () => {
     const frozen = new Date("2026-08-20T12:00:00Z");
     let at = frozen;
-    const pending = await startEnvelope({ now: () => at });
+    const pending = await startDocument({ now: () => at });
     const completed = await addVerified(pending.sent, {
       sender: "other@example.com",
       signers: [{ name: "Bob", email: "bob@example.com" }],
@@ -490,7 +490,7 @@ describe("remindDue and shredDue", () => {
       .returning();
     await pending.db.insert(signersTable).values([
       {
-        envelopeId: pending.id,
+        documentId: pending.id,
         name: "Grok Legal",
         email: "bot@example.com",
         signingOrder: 2,
@@ -498,7 +498,7 @@ describe("remindDue and shredDue", () => {
         agentId: agent.id,
       },
       {
-        envelopeId: completed.id,
+        documentId: completed.id,
         name: "Grok Legal",
         email: "bot@example.com",
         signingOrder: 2,
@@ -527,7 +527,7 @@ describe("remindDue and shredDue", () => {
     const rawBody = String(posts[0]!.init.body);
     const payload = JSON.parse(rawBody) as Record<string, unknown>;
     expect(payload).toEqual({
-      event: "envelope.expired",
+      event: "document.expired",
       id: pending.id,
       agent: "grok-legal",
       status: "expired",
@@ -542,13 +542,13 @@ describe("remindDue and shredDue", () => {
 
     const [pendingRow] = await pending.db
       .select()
-      .from(envelopes)
-      .where(eq(envelopes.id, pending.id));
+      .from(documents)
+      .where(eq(documents.id, pending.id));
     expect(pendingRow!.status).toBe("deleted");
     const [completedRow] = await pending.db
       .select()
-      .from(envelopes)
-      .where(eq(envelopes.id, completed.id));
+      .from(documents)
+      .where(eq(documents.id, completed.id));
     expect(completedRow!.status).toBe("deleted");
     expect(posts.every((p) => !String(p.init.body).includes(completed.id))).toBe(true);
   });

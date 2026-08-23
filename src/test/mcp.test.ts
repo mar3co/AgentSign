@@ -8,7 +8,7 @@ import { GET as getLlms } from "../../app/llms.txt/route.js";
 import { GET as getOpenApi } from "../../app/openapi.json/route.js";
 import { openapi } from "../openapi.js";
 import { POST as postMcp } from "../../app/mcp/route.js";
-import { POST as postOtp } from "../../app/v1/envelopes/[id]/otp/route.js";
+import { POST as postOtp } from "../../app/v1/documents/[id]/otp/route.js";
 import { POST as postConsent } from "../../app/s/[token]/consent/route.js";
 import { POST as postSign } from "../../app/s/[token]/sign/route.js";
 import { setDeps } from "../lib/deps.js";
@@ -56,8 +56,8 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
     expect(body).toMatch(/status/);
     expect(body).toMatch(/download/);
     expect(body).toMatch(/verify/);
-    expect(body).toMatch(/list_packets/);
-    expect(body).toMatch(/send_packet/);
+    expect(body).toMatch(/list_templates/);
+    expect(body).toMatch(/send_template/);
     expect(body.toLowerCase()).toMatch(/human always signs/);
     expect(body).toMatch(/No sign tool/);
     expect(body).not.toMatch(/^- sign —/m);
@@ -78,13 +78,13 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
     const spec = (await res.json()) as {
       paths: Record<string, Record<string, unknown>>;
     };
-    expect(spec.paths["/v1/envelopes"]?.post).toBeTruthy();
-    expect(spec.paths["/v1/envelopes"]?.get).toBeTruthy();
-    expect(spec.paths["/v1/envelopes/{id}"]?.get).toBeTruthy();
-    expect(spec.paths["/v1/envelopes/{id}"]?.delete).toBeTruthy();
-    expect(spec.paths["/v1/envelopes/{id}.pdf"]?.get).toBeTruthy();
-    expect(spec.paths["/v1/envelopes/{id}/attest"]?.post).toBeTruthy();
-    expect(spec.paths["/v1/envelopes/{id}/reject"]?.post).toBeTruthy();
+    expect(spec.paths["/v1/documents"]?.post).toBeTruthy();
+    expect(spec.paths["/v1/documents"]?.get).toBeTruthy();
+    expect(spec.paths["/v1/documents/{id}"]?.get).toBeTruthy();
+    expect(spec.paths["/v1/documents/{id}"]?.delete).toBeTruthy();
+    expect(spec.paths["/v1/documents/{id}.pdf"]?.get).toBeTruthy();
+    expect(spec.paths["/v1/documents/{id}/attest"]?.post).toBeTruthy();
+    expect(spec.paths["/v1/documents/{id}/reject"]?.post).toBeTruthy();
     expect(spec.paths["/v1/verify"]?.post).toBeTruthy();
     expect(spec.paths["/v1/agents"]?.get).toBeTruthy();
     expect(spec.paths["/v1/agents"]?.post).toBeTruthy();
@@ -98,43 +98,43 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
     expect(openapi.info.version).toBe("1.2.0");
     expect(openapi.openapi).toBe("3.1.0");
     expect(openapi.paths["/v1/branding"]).toBeTruthy();
-    expect(openapi.paths["/v1/packets"]).toBeTruthy();
+    expect(openapi.paths["/v1/templates"]).toBeTruthy();
     expect(openapi.paths["/v1/team"]).toBeTruthy();
     expect(openapi.paths["/v1/agents"]).toBeTruthy();
-    expect(openapi.paths["/v1/envelopes/{id}/attest"]).toBeTruthy();
-    expect(openapi.paths["/v1/envelopes/{id}/reject"]).toBeTruthy();
+    expect(openapi.paths["/v1/documents/{id}/attest"]).toBeTruthy();
+    expect(openapi.paths["/v1/documents/{id}/reject"]).toBeTruthy();
     expect(openapi.paths["/v1/verify"]).toBeTruthy();
     const text = await (await getLlms()).text();
     expect(text).toMatch(/send/);
     expect(text).toMatch(/There is no sign/);
-    expect(text).toMatch(/\/v1\/packets/);
+    expect(text).toMatch(/\/v1\/templates/);
     expect(text).toMatch(/\/v1\/agents/);
     expect(text).not.toMatch(/Optional Bearer tmp or live key/);
     expect(text).toMatch(/sign_tmp_/);
     const bearer = openapi.components.securitySchemes.bearerAuth.description;
-    expect(bearer).not.toMatch(/Optional on POST \/v1\/envelopes/);
+    expect(bearer).not.toMatch(/Optional on POST \/v1\/documents/);
     expect(bearer).toMatch(/sign_tmp_/);
     expect(bearer.toLowerCase()).toMatch(/list/);
   });
 
-  it("tools/list includes attest and verify and list_packets, not sign", async () => {
+  it("tools/list includes attest and verify and list_templates, not sign", async () => {
     const { client } = await connectMcp();
     const listed = await client.listTools();
     const names = listed.tools.map((t) => t.name);
     expect(names).toContain("attest");
     expect(names).toContain("verify");
-    expect(names).toContain("list_packets");
+    expect(names).toContain("list_templates");
     expect(names).not.toContain("sign");
   });
 
-  it("send_packet signers are name and email only; send may include kind/agent", async () => {
+  it("send_template signers are name and email only; send may include kind/agent", async () => {
     const { client } = await connectMcp();
     const listed = await client.listTools();
     const send = listed.tools.find((t) => t.name === "send");
-    const packet = listed.tools.find((t) => t.name === "send_packet");
-    const packetSchema = JSON.stringify(packet?.inputSchema);
-    expect(packetSchema).not.toMatch(/"kind"/);
-    expect(packetSchema).not.toMatch(/"agent"/);
+    const template = listed.tools.find((t) => t.name === "send_template");
+    const templateSchema = JSON.stringify(template?.inputSchema);
+    expect(templateSchema).not.toMatch(/"kind"/);
+    expect(templateSchema).not.toMatch(/"agent"/);
     const sendSchema = JSON.stringify(send?.inputSchema);
     expect(sendSchema).toMatch(/"kind"/);
     expect(sendSchema).toMatch(/"agent"/);
@@ -187,10 +187,10 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
     expect(toolsBody.result?.tools?.map((t) => t.name).sort()).toEqual([
       "attest",
       "download",
-      "list_packets",
+      "list_templates",
       "reject",
       "send",
-      "send_packet",
+      "send_template",
       "status",
       "verify",
     ]);
@@ -217,10 +217,10 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
       expect(listed.tools.map((t) => t.name).sort()).toEqual([
         "attest",
         "download",
-        "list_packets",
+        "list_templates",
         "reject",
         "send",
-        "send_packet",
+        "send_template",
         "status",
         "verify",
       ]);
@@ -247,7 +247,7 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
 
       const code = sent[0]!.text.match(/\b(\d{6})\b/)![1]!;
       const verify = await postOtp(
-        new Request(`http://sign.test/v1/envelopes/${sendJson.id}/otp`, {
+        new Request(`http://sign.test/v1/documents/${sendJson.id}/otp`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ code }),

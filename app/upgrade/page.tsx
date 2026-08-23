@@ -34,7 +34,7 @@ export default function UpgradePage() {
               <span className="text-seal">.</span>
             </h1>
             <p className="max-w-prose text-base leading-relaxed text-muted-foreground">
-              Free is the fax: send, sign, shred. Pro is the cabinet.
+              Free is the fax: send, sign, shred. Pro keeps your documents.
             </p>
             <div className="grid min-w-0 gap-4 sm:grid-cols-2">
               <Card>
@@ -64,9 +64,9 @@ export default function UpgradePage() {
                 </CardHeader>
                 <CardContent>
                   <ul className="flex flex-col gap-2 text-sm text-muted-foreground">
-                    <li>Keep completed envelopes a year.</li>
+                    <li>Keep completed documents a year.</li>
                     <li>Shop name and logo on mail and the signing page.</li>
-                    <li>Saved packets, cabinet invites, named agents.</li>
+                    <li>Saved templates, team invites, named agents.</li>
                   </ul>
                 </CardContent>
                 <CardFooter>

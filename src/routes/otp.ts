@@ -4,7 +4,7 @@ import { getDb } from "../db/client.js";
 import {
   accounts,
   apiKeys,
-  envelopes,
+  documents,
   otpChallenges,
   signers as signersTable,
 } from "../db/schema.js";
@@ -45,12 +45,12 @@ function now(): Date {
   return getDeps().now?.() ?? new Date();
 }
 
-export async function verifyEnvelopeOtp(
+export async function verifyDocumentOtp(
   req: Request,
-  envelopeId: string,
+  documentId: string,
 ): Promise<Response> {
-  if (!envelopeId) {
-    return jsonError(400, "Envelope id is required", "invalid_request");
+  if (!documentId) {
+    return jsonError(400, "Document id is required", "invalid_request");
   }
 
   let parsed: z.infer<typeof bodySchema>;
@@ -63,15 +63,15 @@ export async function verifyEnvelopeOtp(
   const db = requireDb();
   const at = now();
 
-  const [envelope] = await db
+  const [document] = await db
     .select()
-    .from(envelopes)
-    .where(eq(envelopes.id, envelopeId));
-  if (!envelope) return jsonError(404, "Envelope not found", "not_found");
-  if (envelope.status !== "pending_sender") {
+    .from(documents)
+    .where(eq(documents.id, documentId));
+  if (!document) return jsonError(404, "Document not found", "not_found");
+  if (document.status !== "pending_sender") {
     return jsonError(
       409,
-      "Envelope is not awaiting sender verification",
+      "Document is not awaiting sender verification",
       "invalid_state",
     );
   }
@@ -79,7 +79,7 @@ export async function verifyEnvelopeOtp(
   const [challenge] = await db
     .select()
     .from(otpChallenges)
-    .where(eq(otpChallenges.envelopeId, envelopeId));
+    .where(eq(otpChallenges.documentId, documentId));
   if (!challenge) return jsonError(404, "OTP challenge not found", "not_found");
   if (challenge.consumedAt) {
     return jsonError(410, "OTP is no longer valid", "otp_expired");
@@ -110,12 +110,12 @@ export async function verifyEnvelopeOtp(
   const windowStart = new Date(at.getTime() - windowDays * 86_400_000);
   const [cap] = await db
     .select({ n: count() })
-    .from(envelopes)
+    .from(documents)
     .where(
       and(
-        eq(envelopes.senderEmail, envelope.senderEmail),
-        gte(envelopes.createdAt, windowStart),
-        ne(envelopes.status, "pending_sender"),
+        eq(documents.senderEmail, document.senderEmail),
+        gte(documents.createdAt, windowStart),
+        ne(documents.status, "pending_sender"),
       ),
     );
   if (Number(cap?.n ?? 0) >= limit) {
@@ -133,24 +133,24 @@ export async function verifyEnvelopeOtp(
   const [owner] = await db
     .select()
     .from(accounts)
-    .where(eq(accounts.email, envelope.senderEmail));
+    .where(eq(accounts.email, document.senderEmail));
 
   await db
     .update(otpChallenges)
     .set({ consumedAt: at })
     .where(eq(otpChallenges.id, challenge.id));
   await db
-    .update(envelopes)
+    .update(documents)
     .set({
       status: "pending",
       ...(owner ? { userId: owner.userId } : {}),
     })
-    .where(eq(envelopes.id, envelope.id));
+    .where(eq(documents.id, document.id));
 
   const signerRows = await db
     .select()
     .from(signersTable)
-    .where(eq(signersTable.envelopeId, envelope.id));
+    .where(eq(signersTable.documentId, document.id));
   signerRows.sort((a, b) => a.signingOrder - b.signingOrder);
 
   // Mint a real signing token only for signer 1; later signers keep pending placeholders.
@@ -176,15 +176,15 @@ export async function verifyEnvelopeOtp(
     kind: "tmp",
     prefix: tmp.prefix,
     tokenHash: tmp.hash,
-    envelopeId: envelope.id,
-    expiresAt: envelope.shredAt,
+    documentId: document.id,
+    expiresAt: document.shredAt,
   });
-  await logEvent(db, { envelopeId: envelope.id, event: "email_verified" });
+  await logEvent(db, { documentId: document.id, event: "email_verified" });
 
   const mailer = requireMailer();
   const brand = await loadBrand(
     db,
-    owner?.userId ?? envelope.userId,
+    owner?.userId ?? document.userId,
     getDeps().store,
   );
   const mailBrand = {
@@ -195,9 +195,9 @@ export async function verifyEnvelopeOtp(
   if (first && firstSignUrl) {
     const invite = inviteEmail({
       signUrl: firstSignUrl,
-      senderEmail: envelope.senderEmail,
-      title: envelope.title,
-      expiresAt: envelope.expiresAt,
+      senderEmail: document.senderEmail,
+      title: document.title,
+      expiresAt: document.expiresAt,
       brand: mailBrand,
     });
     try {
@@ -211,18 +211,18 @@ export async function verifyEnvelopeOtp(
         .set({ sentAt: at })
         .where(eq(signersTable.id, first.id));
       await logEvent(db, {
-        envelopeId: envelope.id,
+        documentId: document.id,
         signerId: first.id,
         event: "sent",
       });
       await logEvent(db, {
-        envelopeId: envelope.id,
+        documentId: document.id,
         signerId: first.id,
         event: "emailed",
       });
     } catch (err) {
       await logEvent(db, {
-        envelopeId: envelope.id,
+        documentId: document.id,
         signerId: first.id,
         event: "emailed_failed",
         payload: { error: err instanceof Error ? err.message : "mail_failed" },
@@ -232,26 +232,26 @@ export async function verifyEnvelopeOtp(
 
   try {
     const live = sendLiveEmail({
-      title: envelope.title,
+      title: document.title,
       tmpKeyShownInResponse: true,
-      senderEmail: envelope.senderEmail,
+      senderEmail: document.senderEmail,
       brand: mailBrand,
     });
     await mailer.sendMail({
-      to: envelope.senderEmail,
+      to: document.senderEmail,
       ...live,
       attachments: brandMailAttachments(brand.logoBytes),
     });
   } catch (err) {
     await logEvent(db, {
-      envelopeId: envelope.id,
+      documentId: document.id,
       event: "emailed_failed",
       payload: { error: err instanceof Error ? err.message : "mail_failed" },
     });
   }
 
   return Response.json({
-    id: envelope.id,
+    id: document.id,
     status: "pending",
     key: tmp.raw,
     signers: outSigners,

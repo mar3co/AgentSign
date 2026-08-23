@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { PDFDocument } from "pdf-lib";
-import { completeEnvelopePdf } from "../lib/pdf/complete.js";
+import { completeDocumentPdf } from "../lib/pdf/complete.js";
 import { makeDevP12 } from "../lib/pdf/devP12.js";
 import { minimalPdf } from "./pdf.js";
 import { sha256Hex } from "../lib/hash.js";
@@ -10,17 +10,17 @@ const png = Uint8Array.from(Buffer.from(
   "base64",
 ));
 
-describe("completeEnvelopePdf", () => {
+describe("completeDocumentPdf", () => {
   it("seals then hashes sealed bytes; cert is a separate file", async () => {
     const p12 = makeDevP12("test");
     const original = await minimalPdf();
-    const result = await completeEnvelopePdf({
+    const result = await completeDocumentPdf({
       original,
       appearance: { png, name: "Jane", email: "jane@example.com", signedAt: new Date() },
       p12,
       passphrase: "test",
       meta: {
-        envelopeId: "00000000-0000-0000-0000-000000000001",
+        documentId: "00000000-0000-0000-0000-000000000001",
         title: "Repair authorization",
         senderEmail: "shop@example.com",
         consentText: "I agree to sign this document electronically.",
@@ -48,7 +48,7 @@ describe("completeEnvelopePdf", () => {
   it("appends one signature page per appearance then seals", async () => {
     const p12 = makeDevP12("test");
     const original = await minimalPdf();
-    const result = await completeEnvelopePdf({
+    const result = await completeDocumentPdf({
       original,
       appearances: [
         { png, name: "Jane", email: "jane@example.com", signedAt: new Date() },
@@ -57,7 +57,7 @@ describe("completeEnvelopePdf", () => {
       p12,
       passphrase: "test",
       meta: {
-        envelopeId: "00000000-0000-0000-0000-000000000002",
+        documentId: "00000000-0000-0000-0000-000000000002",
         title: "Repair authorization",
         senderEmail: "shop@example.com",
         consentText: "I agree to sign this document electronically.",
@@ -100,7 +100,7 @@ describe("completeEnvelopePdf", () => {
     const p12 = makeDevP12("test");
     const original = await minimalPdf();
     const at = new Date("2026-08-21T12:00:00.000Z");
-    const result = await completeEnvelopePdf({
+    const result = await completeDocumentPdf({
       original,
       appearances: [
         {
@@ -113,7 +113,7 @@ describe("completeEnvelopePdf", () => {
       p12,
       passphrase: "test",
       meta: {
-        envelopeId: "00000000-0000-0000-0000-000000000003",
+        documentId: "00000000-0000-0000-0000-000000000003",
         title: "Repair authorization",
         senderEmail: "shop@example.com",
         consentText: "I agree to sign this document electronically.",
@@ -166,7 +166,7 @@ describe("buildCertificate", () => {
       ua: "test",
     }));
     const bytes = await buildCertificate({
-      envelopeId: "00000000-0000-0000-0000-000000000005",
+      documentId: "00000000-0000-0000-0000-000000000005",
       title: "Repair authorization",
       senderEmail: "shop@example.com",
       sha256: "a".repeat(64),

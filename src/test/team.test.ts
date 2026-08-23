@@ -9,16 +9,16 @@ import { POST as postLogin } from "../../app/login/session/route.js";
 import { POST as postConsent } from "../../app/s/[token]/consent/route.js";
 import { POST as postSign } from "../../app/s/[token]/sign/route.js";
 import { POST as postAccept } from "../../app/internal/team/accept/route.js";
-import { GET as listEnvelopes, POST as postEnvelope } from "../../app/v1/envelopes/route.js";
+import { GET as listDocuments, POST as postDocument } from "../../app/v1/documents/route.js";
 import {
-  DELETE as deleteEnvelope,
-  GET as getEnvelope,
-} from "../../app/v1/envelopes/[id]/route.js";
+  DELETE as deleteDocument,
+  GET as getDocument,
+} from "../../app/v1/documents/[id]/route.js";
 import { POST as postKeys } from "../../app/v1/keys/route.js";
 import { GET as getTeam } from "../../app/v1/team/route.js";
 import { POST as postInvite } from "../../app/v1/team/invites/route.js";
 import { DELETE as deleteMember } from "../../app/v1/team/members/[id]/route.js";
-import { accounts, cabinetMembers, envelopes, signers } from "../db/schema.js";
+import { accounts, teamMembers, documents, signers } from "../db/schema.js";
 import { setDeps } from "../lib/deps.js";
 import { extendKeep } from "../lib/keys.js";
 import { makeDevP12 } from "../lib/pdf/devP12.js";
@@ -231,8 +231,8 @@ async function sendLive(key: string, title: string) {
     JSON.stringify([{ name: "Jane", email: "jane@example.com" }]),
   );
   body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
-  const res = await postEnvelope(
-    new Request("http://sign.test/v1/envelopes", {
+  const res = await postDocument(
+    new Request("http://sign.test/v1/documents", {
       method: "POST",
       headers: { authorization: `Bearer ${key}` },
       body,
@@ -243,12 +243,12 @@ async function sendLive(key: string, title: string) {
 }
 
 async function listFor(headers: HeadersInit) {
-  const res = await listEnvelopes(
-    new Request("http://sign.test/v1/envelopes", { headers }),
+  const res = await listDocuments(
+    new Request("http://sign.test/v1/documents", { headers }),
   );
   expect(res.status).toBe(200);
   return (await res.json()) as {
-    envelopes: { id: string; can_delete: boolean; status: string }[];
+    documents: { id: string; can_delete: boolean; status: string }[];
   };
 }
 
@@ -284,8 +284,8 @@ async function proTeam(
 
 async function twoSends(now?: () => Date) {
   const team = await proTeam("shop@example.com", "tech@example.com", now);
-  const a = await sendLive(team.ownerKey, "Envelope A");
-  const b = await sendLive(team.memberKey, "Envelope B");
+  const a = await sendLive(team.ownerKey, "Document A");
+  const b = await sendLive(team.memberKey, "Document B");
   return { team, a, b };
 }
 
@@ -297,7 +297,7 @@ async function seedSends(
   at: Date,
 ) {
   for (let i = 0; i < n; i++) {
-    await db.insert(envelopes).values({
+    await db.insert(documents).values({
       title: `Seed ${i}`,
       senderEmail: email,
       userId,
@@ -335,7 +335,7 @@ describe("team API", () => {
     expect(invited.status).toBe("invited");
     expect(sent).toHaveLength(1);
     expect(sent[0]!.to).toBe("tech@example.com");
-    expect(sent[0]!.subject).toBe("Join the AgentSign cabinet");
+    expect(sent[0]!.subject).toBe("Join your team on AgentSign");
     expect(sent[0]!.text).toContain("/team/accept?token=");
     tokenFromMail(sent[0]!.text);
 
@@ -440,7 +440,7 @@ describe("team API", () => {
     const newToken = tokenFromMail(sent[1]!.text);
     expect(newToken).not.toBe(oldToken);
 
-    const rows = await db.select().from(cabinetMembers);
+    const rows = await db.select().from(teamMembers);
     expect(rows).toHaveLength(1);
 
     const memberCookie = await magicCookie("tech@example.com");
@@ -489,7 +489,7 @@ describe("team API", () => {
     const { db, userFor } = await boot();
     const { cookie, userId } = await asPro(db, userFor);
     for (let i = 0; i < 9; i++) {
-      await db.insert(cabinetMembers).values({
+      await db.insert(teamMembers).values({
         ownerUserId: userId,
         email: `m${i}@example.com`,
         status: "invited",
@@ -503,7 +503,7 @@ describe("team API", () => {
     expect(json.code).toBe("team_full");
   });
 
-  it("accept when already active on another cabinet is 409 already_on_a_team", async () => {
+  it("accept when already active on another team is 409 already_on_a_team", async () => {
     const { db, userFor, sent } = await boot();
     const { cookie: aCookie } = await asPro(db, userFor, "a@example.com");
     expect((await postInvite(inviteReq(aCookie, "tech@example.com"))).status).toBe(
@@ -545,7 +545,7 @@ describe("team API", () => {
     expect(json.code).toBe("already_pro");
   });
 
-  it("accept when caller already owns a cabinet_members row is 409 already_owns_a_team", async () => {
+  it("accept when caller already owns a team_members row is 409 already_owns_a_team", async () => {
     const { db, userFor, sent } = await boot();
     const { cookie } = await asPro(db, userFor);
     expect((await postInvite(inviteReq(cookie, "tech@example.com"))).status).toBe(
@@ -554,7 +554,7 @@ describe("team API", () => {
     const token = tokenFromMail(sent[0]!.text);
     const memberCookie = await magicCookie("tech@example.com");
     const memberId = userFor("tech@example.com").id;
-    await db.insert(cabinetMembers).values({
+    await db.insert(teamMembers).values({
       ownerUserId: memberId,
       email: "hire@example.com",
       status: "invited",
@@ -582,15 +582,15 @@ describe("teamSeatCount", () => {
   });
 });
 
-describe("cabinet envelopes", () => {
-  it("owner and member lists include both cabinet sends", { timeout: 60_000 }, async () => {
+describe("team documents", () => {
+  it("owner and member lists include both team sends", { timeout: 60_000 }, async () => {
     const { team, a, b } = await twoSends();
     const memberList = await listFor({ cookie: team.memberCookie });
     const ownerList = await listFor({ cookie: team.ownerCookie });
-    expect(memberList.envelopes.map((e) => e.id).sort()).toEqual(
+    expect(memberList.documents.map((e) => e.id).sort()).toEqual(
       [a.id, b.id].sort(),
     );
-    expect(ownerList.envelopes.map((e) => e.id).sort()).toEqual(
+    expect(ownerList.documents.map((e) => e.id).sort()).toEqual(
       [a.id, b.id].sort(),
     );
   });
@@ -599,21 +599,21 @@ describe("cabinet envelopes", () => {
     const { team, a, b } = await twoSends();
     const memberList = await listFor({ cookie: team.memberCookie });
     const ownerList = await listFor({ cookie: team.ownerCookie });
-    expect(memberList.envelopes.find((e) => e.id === a.id)?.can_delete).toBe(
+    expect(memberList.documents.find((e) => e.id === a.id)?.can_delete).toBe(
       false,
     );
-    expect(memberList.envelopes.find((e) => e.id === b.id)?.can_delete).toBe(
+    expect(memberList.documents.find((e) => e.id === b.id)?.can_delete).toBe(
       true,
     );
-    expect(ownerList.envelopes.find((e) => e.id === a.id)?.can_delete).toBe(
+    expect(ownerList.documents.find((e) => e.id === a.id)?.can_delete).toBe(
       true,
     );
-    expect(ownerList.envelopes.find((e) => e.id === b.id)?.can_delete).toBe(
+    expect(ownerList.documents.find((e) => e.id === b.id)?.can_delete).toBe(
       true,
     );
 
-    const memberVoid = await deleteEnvelope(
-      new Request(`http://sign.test/v1/envelopes/${a.id}`, {
+    const memberVoid = await deleteDocument(
+      new Request(`http://sign.test/v1/documents/${a.id}`, {
         method: "DELETE",
         headers: { cookie: team.memberCookie },
       }),
@@ -621,8 +621,8 @@ describe("cabinet envelopes", () => {
     );
     expect(memberVoid.status).toBe(403);
 
-    const ownerVoid = await deleteEnvelope(
-      new Request(`http://sign.test/v1/envelopes/${a.id}`, {
+    const ownerVoid = await deleteDocument(
+      new Request(`http://sign.test/v1/documents/${a.id}`, {
         method: "DELETE",
         headers: { cookie: team.ownerCookie },
       }),
@@ -630,8 +630,8 @@ describe("cabinet envelopes", () => {
     );
     expect(ownerVoid.status).toBe(200);
 
-    const ownerVoidMember = await deleteEnvelope(
-      new Request(`http://sign.test/v1/envelopes/${b.id}`, {
+    const ownerVoidMember = await deleteDocument(
+      new Request(`http://sign.test/v1/documents/${b.id}`, {
         method: "DELETE",
         headers: { cookie: team.ownerCookie },
       }),
@@ -640,10 +640,10 @@ describe("cabinet envelopes", () => {
     expect(ownerVoidMember.status).toBe(200);
   });
 
-  it("member live key GET status of owner envelope is 200", { timeout: 60_000 }, async () => {
+  it("member live key GET status of owner document is 200", { timeout: 60_000 }, async () => {
     const { team, a } = await twoSends();
-    const res = await getEnvelope(
-      new Request(`http://sign.test/v1/envelopes/${a.id}`, {
+    const res = await getDocument(
+      new Request(`http://sign.test/v1/documents/${a.id}`, {
         headers: { authorization: `Bearer ${team.memberKey}` },
       }),
       { params: Promise.resolve({ id: a.id }) },
@@ -654,7 +654,7 @@ describe("cabinet envelopes", () => {
     expect(json.status).toBe("pending");
   });
 
-  it("free personal user is 429 at 20; Pro cabinet member can send the 21st", { timeout: 60_000 }, async () => {
+  it("free personal user is 429 at 20; Pro team member can send the 21st", { timeout: 60_000 }, async () => {
     const frozen = new Date("2026-08-20T12:00:00Z");
     const team = await proTeam(
       "shop@example.com",
@@ -674,8 +674,8 @@ describe("cabinet envelopes", () => {
       JSON.stringify([{ name: "Jane", email: "jane@example.com" }]),
     );
     overBody.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
-    const over = await postEnvelope(
-      new Request("http://sign.test/v1/envelopes", {
+    const over = await postDocument(
+      new Request("http://sign.test/v1/documents", {
         method: "POST",
         headers: { authorization: `Bearer ${freeKey}` },
         body: overBody,
@@ -731,19 +731,19 @@ describe("cabinet envelopes", () => {
     ).toBe(200);
     const [env] = await team.db
       .select()
-      .from(envelopes)
-      .where(eq(envelopes.id, created.id));
+      .from(documents)
+      .where(eq(documents.id, created.id));
     expect(env!.shredAt.getTime()).toBe(frozen.getTime() + 365 * 86_400_000);
     expect(env!.shredAt.getTime()).not.toBe(frozen.getTime() + 7 * 86_400_000);
   });
 
-  it("extendKeep on owner lengthens member sends and does not steal another cabinet", async () => {
+  it("extendKeep on owner lengthens member sends and does not steal another team", async () => {
     const { db, ownerUserId, memberUserId } = await proTeam();
     const signedAt = new Date("2026-01-01T00:00:00Z");
     const now = new Date("2026-01-02T00:00:00Z");
     setDeps({ db, now: () => now });
     const [memberEnv] = await db
-      .insert(envelopes)
+      .insert(documents)
       .values({
         title: "Member sent",
         senderEmail: "tech@example.com",
@@ -755,9 +755,9 @@ describe("cabinet envelopes", () => {
       .returning();
     const otherOwner = randomUUID();
     const [otherEnv] = await db
-      .insert(envelopes)
+      .insert(documents)
       .values({
-        title: "Other cabinet",
+        title: "Other team",
         senderEmail: "other@example.com",
         status: "completed",
         userId: otherOwner,
@@ -766,7 +766,7 @@ describe("cabinet envelopes", () => {
       })
       .returning();
     await db.insert(signers).values({
-      envelopeId: memberEnv!.id,
+      documentId: memberEnv!.id,
       name: "Jane",
       email: "jane@example.com",
       signingOrder: 1,
@@ -774,7 +774,7 @@ describe("cabinet envelopes", () => {
       signedAt,
     });
     await db.insert(signers).values({
-      envelopeId: otherEnv!.id,
+      documentId: otherEnv!.id,
       name: "Pat",
       email: "pat@example.com",
       signingOrder: 1,
@@ -786,12 +786,12 @@ describe("cabinet envelopes", () => {
 
     const [memberAfter] = await db
       .select()
-      .from(envelopes)
-      .where(eq(envelopes.id, memberEnv!.id));
+      .from(documents)
+      .where(eq(documents.id, memberEnv!.id));
     const [otherAfter] = await db
       .select()
-      .from(envelopes)
-      .where(eq(envelopes.id, otherEnv!.id));
+      .from(documents)
+      .where(eq(documents.id, otherEnv!.id));
     expect(memberAfter!.shredAt.getTime()).toBe(
       signedAt.getTime() + 365 * 86_400_000,
     );

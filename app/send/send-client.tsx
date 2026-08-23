@@ -31,7 +31,7 @@ export function SendClient() {
   const [signers, setSigners] = useState<SignerRow[]>([
     { name: "", email: "" },
   ]);
-  const [envelopeId, setEnvelopeId] = useState<string | null>(null);
+  const [documentId, setDocumentId] = useState<string | null>(null);
   const [done, setDone] = useState<Done | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -78,7 +78,7 @@ export function SendClient() {
       ),
     );
     try {
-      const res = await fetch("/v1/envelopes", {
+      const res = await fetch("/v1/documents", {
         method: "POST",
         credentials: "include",
         body: data,
@@ -99,7 +99,7 @@ export function SendClient() {
         setError("Could not send.");
         return;
       }
-      setEnvelopeId(json.id);
+      setDocumentId(json.id);
     } catch {
       setError("Could not send.");
     } finally {
@@ -109,12 +109,12 @@ export function SendClient() {
 
   async function onConfirm(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!envelopeId) return;
+    if (!documentId) return;
     setError(null);
     setBusy(true);
     const code = String(new FormData(e.currentTarget).get("code") ?? "").trim();
     try {
-      const res = await fetch(`/v1/envelopes/${envelopeId}/otp`, {
+      const res = await fetch(`/v1/documents/${documentId}/otp`, {
         method: "POST",
         credentials: "include",
         headers: { "content-type": "application/json" },
@@ -174,7 +174,7 @@ export function SendClient() {
           </AlertDescription>
         </Alert>
         <div className="flex flex-wrap items-center gap-3">
-          <LinkButton href="/envelopes">Open Cabinet</LinkButton>
+          <LinkButton href="/documents">Open Documents</LinkButton>
           <LinkButton href="/send" variant="outline">
             Send another
           </LinkButton>
@@ -183,7 +183,7 @@ export function SendClient() {
     );
   }
 
-  if (envelopeId) {
+  if (documentId) {
     return (
       <Card>
         <CardHeader>

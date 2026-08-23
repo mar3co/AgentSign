@@ -86,7 +86,7 @@ describe("AgentsList", () => {
   });
 });
 
-describe("cabinet Agents link", () => {
+describe("sidebar Agents link", () => {
   afterEach(() => {
     cleanup();
   });

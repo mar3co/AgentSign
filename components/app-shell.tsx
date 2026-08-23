@@ -58,15 +58,15 @@ const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
         icon: Send,
       },
       {
-        href: "/envelopes",
-        label: "Cabinet",
-        subtitle: "Envelopes you have sent and where they stand.",
+        href: "/documents",
+        label: "Documents",
+        subtitle: "Documents you have sent and where they stand.",
         icon: Archive,
       },
       {
-        href: "/packets",
-        label: "Packets",
-        subtitle: "Reusable setups for envelopes you send often.",
+        href: "/templates",
+        label: "Templates",
+        subtitle: "Reusable setups for documents you send often.",
         icon: Files,
       },
     ],
@@ -77,7 +77,7 @@ const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
       {
         href: "/team",
         label: "Team",
-        subtitle: "People who share this cabinet.",
+        subtitle: "People who share your documents.",
         icon: Users,
       },
       {
@@ -89,7 +89,7 @@ const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
       {
         href: "/settings/branding",
         label: "Branding",
-        subtitle: "How your envelopes look to signers.",
+        subtitle: "How your documents look to signers.",
         icon: Palette,
       },
     ],
@@ -116,7 +116,7 @@ function pageTitle(pathname: string): string {
   for (const [prefix, title] of EXTRA_TITLES) {
     if (pathname.startsWith(prefix)) return title;
   }
-  return currentNav(pathname)?.label ?? "Cabinet";
+  return currentNav(pathname)?.label ?? "Documents";
 }
 
 /* The header sits on the primary band, so the trigger inverts: primary-
@@ -169,7 +169,7 @@ export function AppShell({
                   <SidebarMenuButton
                     size="lg"
                     className="gap-2.5"
-                    render={<a href="/envelopes" />}
+                    render={<a href="/documents" />}
                   >
                     <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
                       <PenLine className="size-4" />

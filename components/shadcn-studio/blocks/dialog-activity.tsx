@@ -20,7 +20,7 @@ type Props = {
   defaultOpen?: boolean;
 };
 
-// Placeholder feed until activity is wired to real envelope events.
+// Placeholder feed until activity is wired to real document events.
 const ITEMS: Array<{
   initials: string;
   actor: string;
@@ -32,7 +32,7 @@ const ITEMS: Array<{
   {
     initials: "RC",
     actor: "Riley Chen",
-    action: "signed your envelope",
+    action: "signed your document",
     when: "18 mins ago",
     file: "Offer Letter.pdf",
   },
@@ -52,9 +52,9 @@ const ITEMS: Array<{
   {
     initials: "OB",
     actor: "ops-bot",
-    action: "sent an envelope via the API",
+    action: "sent an document via the API",
     when: "8 hours ago",
-    tags: ["Agent", "Packet: Onboarding"],
+    tags: ["Agent", "Template: Onboarding"],
   },
 ];
 

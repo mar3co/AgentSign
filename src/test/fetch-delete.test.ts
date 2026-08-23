@@ -3,10 +3,10 @@ import { eq } from "drizzle-orm";
 import { createTestDb } from "./db.js";
 import { createFsStore, objectKey } from "../lib/storage.js";
 import { setDeps } from "../lib/deps.js";
-import { POST as postEnvelope } from "../../app/v1/envelopes/route.js";
-import { POST as postOtp } from "../../app/v1/envelopes/[id]/otp/route.js";
-import { GET as getEnvelope, DELETE as deleteEnvelope } from "../../app/v1/envelopes/[id]/route.js";
-import { GET as getPdf } from "../../app/v1/envelopes/[id]/pdf/route.js";
+import { POST as postDocument } from "../../app/v1/documents/route.js";
+import { POST as postOtp } from "../../app/v1/documents/[id]/otp/route.js";
+import { GET as getDocument, DELETE as deleteDocument } from "../../app/v1/documents/[id]/route.js";
+import { GET as getPdf } from "../../app/v1/documents/[id]/pdf/route.js";
 import { POST as postConsent } from "../../app/s/[token]/consent/route.js";
 import { POST as postSign } from "../../app/s/[token]/sign/route.js";
 import { makeDevP12 } from "../lib/pdf/devP12.js";
@@ -16,8 +16,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   auditEvents,
+  files,
   documents,
-  envelopes,
   signers as signersTable,
 } from "../db/schema.js";
 
@@ -51,14 +51,14 @@ async function startVerified(opts?: { now?: () => Date }) {
   body.set("sender_email", "shop@example.com");
   body.set("signers", JSON.stringify([{ name: "Jane", email: "jane@example.com" }]));
   body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
-  const res = await postEnvelope(
-    new Request("http://sign.test/v1/envelopes", { method: "POST", body }),
+  const res = await postDocument(
+    new Request("http://sign.test/v1/documents", { method: "POST", body }),
   );
   expect(res.status).toBe(201);
   const created = (await res.json()) as { id: string };
   const code = sent[0]!.text.match(/\b(\d{6})\b/)![1]!;
   const verify = await postOtp(
-    new Request(`http://sign.test/v1/envelopes/${created.id}/otp`, {
+    new Request(`http://sign.test/v1/documents/${created.id}/otp`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ code }),
@@ -107,11 +107,11 @@ async function complete(token: string) {
   expect(sign.status).toBe(200);
 }
 
-describe("GET/DELETE envelope", () => {
+describe("GET/DELETE document", () => {
   it("GET status with tmp key works; GET pdf is 409 before complete", { timeout: 30_000 }, async () => {
     const { id, key } = await startVerified();
-    const status = await getEnvelope(
-      bearer(key, `http://sign.test/v1/envelopes/${id}`),
+    const status = await getDocument(
+      bearer(key, `http://sign.test/v1/documents/${id}`),
       { params: Promise.resolve({ id }) },
     );
     expect(status.status).toBe(200);
@@ -135,7 +135,7 @@ describe("GET/DELETE envelope", () => {
     expect(JSON.stringify(json)).not.toMatch(/\/s\//);
 
     const pdf = await getPdf(
-      bearer(key, `http://sign.test/v1/envelopes/${id}.pdf`),
+      bearer(key, `http://sign.test/v1/documents/${id}.pdf`),
       { params: Promise.resolve({ id }) },
     );
     expect(pdf.status).toBe(409);
@@ -148,7 +148,7 @@ describe("GET/DELETE envelope", () => {
     const { store, id, key, token } = await startVerified();
     await complete(token);
     const pdf = await getPdf(
-      bearer(key, `http://sign.test/v1/envelopes/${id}.pdf`),
+      bearer(key, `http://sign.test/v1/documents/${id}.pdf`),
       { params: Promise.resolve({ id }) },
     );
     expect(pdf.status).toBe(200);
@@ -164,8 +164,8 @@ describe("GET/DELETE envelope", () => {
     await complete(token);
     expect(await store.get(objectKey(id, "sealed"))).not.toBeNull();
 
-    const del = await deleteEnvelope(
-      bearer(key, `http://sign.test/v1/envelopes/${id}`, "DELETE"),
+    const del = await deleteDocument(
+      bearer(key, `http://sign.test/v1/documents/${id}`, "DELETE"),
       { params: Promise.resolve({ id }) },
     );
     expect(del.status).toBe(200);
@@ -175,7 +175,7 @@ describe("GET/DELETE envelope", () => {
     expect(await store.get(objectKey(id, "certificate"))).toBeNull();
 
     const pdf = await getPdf(
-      bearer(key, `http://sign.test/v1/envelopes/${id}.pdf`),
+      bearer(key, `http://sign.test/v1/documents/${id}.pdf`),
       { params: Promise.resolve({ id }) },
     );
     expect(pdf.status).toBe(410);
@@ -183,8 +183,8 @@ describe("GET/DELETE envelope", () => {
     expect(err.error).toBeTruthy();
     expect(err.code).toBeTruthy();
 
-    const status = await getEnvelope(
-      bearer(key, `http://sign.test/v1/envelopes/${id}`),
+    const status = await getDocument(
+      bearer(key, `http://sign.test/v1/documents/${id}`),
       { params: Promise.resolve({ id }) },
     );
     expect(status.status).toBe(401);
@@ -192,22 +192,22 @@ describe("GET/DELETE envelope", () => {
     const audits = await db
       .select()
       .from(auditEvents)
-      .where(eq(auditEvents.envelopeId, id));
+      .where(eq(auditEvents.documentId, id));
     expect(audits.length).toBeGreaterThan(0);
     expect(audits.some((a) => a.event === "deleted")).toBe(true);
     expect(audits.some((a) => a.event === "signed" || a.event === "email_verified")).toBe(
       true,
     );
 
-    const docs = await db.select().from(documents).where(eq(documents.envelopeId, id));
+    const docs = await db.select().from(files).where(eq(files.documentId, id));
     expect(docs.every((d) => !d.storagePath)).toBe(true);
 
-    const [env] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    const [env] = await db.select().from(documents).where(eq(documents.id, id));
     expect(env!.senderEmail).toBe("redacted");
     const [signer] = await db
       .select()
       .from(signersTable)
-      .where(eq(signersTable.envelopeId, id));
+      .where(eq(signersTable.documentId, id));
     expect(signer!.email).toBe("redacted");
   });
 });

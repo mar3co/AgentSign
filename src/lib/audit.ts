@@ -19,7 +19,7 @@ export type AuditDb =
   | PgliteDatabase<typeof schema>;
 
 export type LogEventInput = {
-  envelopeId: string;
+  documentId: string;
   signerId?: string;
   event: AuditEvent;
   ip?: string;
@@ -44,7 +44,7 @@ export async function logEvent(
   input: LogEventInput,
 ): Promise<void> {
   await db.insert(auditEvents).values({
-    envelopeId: input.envelopeId,
+    documentId: input.documentId,
     signerId: input.signerId,
     event: input.event,
     ip: input.ip,

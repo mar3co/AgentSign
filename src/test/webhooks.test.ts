@@ -4,11 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { POST as postEnvelope } from "../../app/v1/envelopes/route.js";
-import { POST as postOtp } from "../../app/v1/envelopes/[id]/otp/route.js";
+import { POST as postDocument } from "../../app/v1/documents/route.js";
+import { POST as postOtp } from "../../app/v1/documents/[id]/otp/route.js";
 import { POST as postConsent } from "../../app/s/[token]/consent/route.js";
 import { POST as postSign } from "../../app/s/[token]/sign/route.js";
-import { auditEvents, envelopes } from "../db/schema.js";
+import { auditEvents, documents } from "../db/schema.js";
 import { setDeps } from "../lib/deps.js";
 import { makeDevP12 } from "../lib/pdf/devP12.js";
 import { createFsStore } from "../lib/storage.js";
@@ -80,8 +80,8 @@ async function startVerified(opts: {
   body.set("signers", JSON.stringify([{ name: "Jane", email: "jane@example.com" }]));
   body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
   if (opts.webhookUrl) body.set("webhook_url", opts.webhookUrl);
-  const res = await postEnvelope(
-    new Request("http://sign.test/v1/envelopes", { method: "POST", body }),
+  const res = await postDocument(
+    new Request("http://sign.test/v1/documents", { method: "POST", body }),
   );
   return { db, store, sent, posts, res, now };
 }
@@ -92,7 +92,7 @@ async function verifyAndSign(
 ) {
   const code = sent[0]!.text.match(/\b(\d{6})\b/)![1]!;
   const verify = await postOtp(
-    new Request(`http://sign.test/v1/envelopes/${id}/otp`, {
+    new Request(`http://sign.test/v1/documents/${id}/otp`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ code }),
@@ -124,7 +124,7 @@ async function verifyAndSign(
   return { done, sign };
 }
 
-describe("envelope.completed webhook", () => {
+describe("document.completed webhook", () => {
   it(
     "create with https hook returns a secret and complete fires one signed POST",
     { timeout: 60_000 },
@@ -141,7 +141,7 @@ describe("envelope.completed webhook", () => {
       };
       expect(created.webhook_secret).toBeTruthy();
       expect(typeof created.webhook_secret).toBe("string");
-      const [row] = await db.select().from(envelopes).where(eq(envelopes.id, created.id));
+      const [row] = await db.select().from(documents).where(eq(documents.id, created.id));
       expect(row!.webhookUrl).toBe("https://example.com/hook");
       expect(row!.webhookSecretHash).not.toBe(created.webhook_secret);
       expect(row!.webhookSecretHash).toMatch(/^enc:/);
@@ -155,7 +155,7 @@ describe("envelope.completed webhook", () => {
 
       const rawBody = String(posts[0]!.init.body);
       const payload = JSON.parse(rawBody) as Record<string, unknown>;
-      expect(payload.event).toBe("envelope.completed");
+      expect(payload.event).toBe("document.completed");
       expect(payload.id).toBe(created.id);
       expect(payload.status).toBe("completed");
       expect(payload.sha256).toBeTruthy();
@@ -180,7 +180,7 @@ describe("envelope.completed webhook", () => {
       const events = await db
         .select()
         .from(auditEvents)
-        .where(eq(auditEvents.envelopeId, created.id));
+        .where(eq(auditEvents.documentId, created.id));
       expect(events.some((e) => e.event === "webhook_sent")).toBe(true);
       expect(events.some((e) => e.event === "webhook_failed")).toBe(false);
     },
@@ -213,7 +213,7 @@ describe("envelope.completed webhook", () => {
   );
 
   it(
-    "webhook fetch failure keeps envelope completed and audits webhook_failed once",
+    "webhook fetch failure keeps document completed and audits webhook_failed once",
     { timeout: 60_000 },
     async () => {
       const { db, sent, posts, res } = await startVerified({
@@ -226,13 +226,13 @@ describe("envelope.completed webhook", () => {
       expect(sign.status).toBe(200);
       const signed = (await sign.json()) as { status: string };
       expect(signed.status).toBe("completed");
-      const [env] = await db.select().from(envelopes).where(eq(envelopes.id, created.id));
+      const [env] = await db.select().from(documents).where(eq(documents.id, created.id));
       expect(env!.status).toBe("completed");
       expect(posts).toHaveLength(1);
       const events = await db
         .select()
         .from(auditEvents)
-        .where(eq(auditEvents.envelopeId, created.id));
+        .where(eq(auditEvents.documentId, created.id));
       expect(events.some((e) => e.event === "webhook_failed")).toBe(true);
       expect(events.some((e) => e.event === "webhook_sent")).toBe(false);
     },

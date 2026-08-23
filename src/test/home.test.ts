@@ -32,7 +32,7 @@ describe("Home", () => {
     vi.unstubAllGlobals();
   });
 
-  it("shows PDF drop, curl example, and posts to /v1/envelopes", async () => {
+  it("shows PDF drop, curl example, and posts to /v1/documents", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ id: "env_1", status: "pending_sender" }), {
         status: 201,
@@ -48,7 +48,7 @@ describe("Home", () => {
     const pre = document.querySelector("pre");
     expect(pre).toBeTruthy();
     expect(pre!.textContent).toMatch(/curl/i);
-    expect(pre!.textContent).toContain("/v1/envelopes");
+    expect(pre!.textContent).toContain("/v1/documents");
     expect(pre!.textContent).toContain("Repair");
     expect(pre!.textContent).toContain("you@example.com");
     expect(pre!.textContent).toContain("file=@form.pdf");
@@ -60,7 +60,7 @@ describe("Home", () => {
         name: /easy signing for everything, by people and their ai agents/i,
       }),
     ).toBeTruthy();
-    expect(document.body.textContent).not.toMatch(/20 envelopes/i);
+    expect(document.body.textContent).not.toMatch(/20 documents/i);
     expect(document.body.textContent).not.toMatch(/AI signing/i);
     expect(screen.queryByRole("img", { name: /byterange/i })).toBeNull();
     expect(screen.getByRole("link", { name: /privacy/i }).getAttribute("href")).toBe(
@@ -73,13 +73,13 @@ describe("Home", () => {
       expect(fetchMock).toHaveBeenCalled();
     });
     const [url, init] = fetchMock.mock.calls[0]!;
-    expect(url).toBe("/v1/envelopes");
+    expect(url).toBe("/v1/documents");
     expect(init?.method).toBe("POST");
     expect(init?.body).toBeInstanceOf(FormData);
     expect(await screen.findByText(/Check your email for a code/i)).toBeTruthy();
   });
 
-  it("keeps envelope id, verifies OTP without login, and shows tmp key plus signer URL", async () => {
+  it("keeps document id, verifies OTP without login, and shows tmp key plus signer URL", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -115,7 +115,7 @@ describe("Home", () => {
       expect(fetchMock).toHaveBeenCalledTimes(2);
     });
     const [otpUrl, otpInit] = fetchMock.mock.calls[1]!;
-    expect(otpUrl).toBe("/v1/envelopes/env_1/otp");
+    expect(otpUrl).toBe("/v1/documents/env_1/otp");
     expect(otpInit?.method).toBe("POST");
     expect(otpInit?.headers).toMatchObject({
       "content-type": "application/json",

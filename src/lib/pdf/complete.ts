@@ -8,7 +8,7 @@ import { sealPdf } from "./seal.js";
 
 export type CompleteMeta = Omit<CertificateInfo, "sha256">;
 
-export type CompleteEnvelopeInput = {
+export type CompleteDocumentInput = {
   original: Uint8Array;
   appearance?: SignatureAppearance;
   appearances?: SignatureAppearance[];
@@ -17,20 +17,20 @@ export type CompleteEnvelopeInput = {
   meta: CompleteMeta;
 };
 
-export type CompleteEnvelopeResult = {
+export type CompleteDocumentResult = {
   sealed: Uint8Array;
   certificate: Uint8Array;
   sha256: string;
 };
 
-export async function completeEnvelopePdf({
+export async function completeDocumentPdf({
   original,
   appearance,
   appearances,
   p12,
   passphrase,
   meta,
-}: CompleteEnvelopeInput): Promise<CompleteEnvelopeResult> {
+}: CompleteDocumentInput): Promise<CompleteDocumentResult> {
   const pages = appearances ?? (appearance ? [appearance] : []);
   if (pages.length === 0) {
     throw new Error("At least one signature appearance is required");
@@ -47,7 +47,7 @@ export async function completeEnvelopePdf({
   for (const next of pages) {
     const stamped: SignatureAppearance = {
       ...next,
-      envelopeId: next.envelopeId ?? meta.envelopeId,
+      documentId: next.documentId ?? meta.documentId,
       banner: next.banner ?? banner,
       humanSignatures: next.humanSignatures ?? humanSignatures,
       agentAttestations: next.agentAttestations ?? agentAttestations,

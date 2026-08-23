@@ -5,7 +5,7 @@ import { agents, oauthClients } from "../db/schema.js";
 import { appOrigin } from "../env.js";
 import { getAuth } from "../lib/auth/supabase.js";
 import type { AuditDb } from "../lib/audit.js";
-import { cabinetForUser } from "../lib/cabinet.js";
+import { teamForUser } from "../lib/team.js";
 import { getDeps } from "../lib/deps.js";
 import { ensureAccount } from "../lib/keys.js";
 import {
@@ -196,12 +196,12 @@ async function resolveAllowedAgentIds(
   userId: string,
   requested: string[] | undefined,
 ): Promise<string[]> {
-  const cabinet = await cabinetForUser(db, userId);
-  if (!cabinet.entitled) return [];
+  const team = await teamForUser(db, userId);
+  if (!team.entitled) return [];
   const active = await db
     .select()
     .from(agents)
-    .where(and(eq(agents.ownerUserId, cabinet.ownerUserId), isNull(agents.revokedAt)));
+    .where(and(eq(agents.ownerUserId, team.ownerUserId), isNull(agents.revokedAt)));
   const allowed = new Set(active.map((row) => row.id));
   if (requested === undefined) return active.map((row) => row.id);
   return requested.filter((id) => allowed.has(id));

@@ -8,8 +8,8 @@ import { GET as getAuthCallback } from "../../app/auth/callback/route.js";
 import { POST as postLogin } from "../../app/login/session/route.js";
 import { POST as postAgents } from "../../app/v1/agents/route.js";
 import { POST as postRotate } from "../../app/v1/agents/[id]/rotate/route.js";
-import { POST as postAttest } from "../../app/v1/envelopes/[id]/attest/route.js";
-import { POST as postEnvelope } from "../../app/v1/envelopes/route.js";
+import { POST as postAttest } from "../../app/v1/documents/[id]/attest/route.js";
+import { POST as postDocument } from "../../app/v1/documents/route.js";
 import { POST as postKeys } from "../../app/v1/keys/route.js";
 import { POST as postInvite } from "../../app/v1/team/invites/route.js";
 import { accounts, apiKeys, signers as signersTable } from "../db/schema.js";
@@ -392,15 +392,15 @@ describe("MCP OAuth 2.1", () => {
         ]),
       );
       form.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
-      const envRes = await postEnvelope(
-        new Request("http://sign.test/v1/envelopes", {
+      const envRes = await postDocument(
+        new Request("http://sign.test/v1/documents", {
           method: "POST",
           headers: { authorization: `Bearer ${key}` },
           body: form,
         }),
       );
       expect(envRes.status).toBe(201);
-      const envelope = (await envRes.json()) as { id: string };
+      const document = (await envRes.json()) as { id: string };
 
       const redirectUri = "https://client.example/cb";
       const clientId = await registerPublicClient(redirectUri, "Empty Grant");
@@ -412,7 +412,7 @@ describe("MCP OAuth 2.1", () => {
       });
 
       const attest = await postAttest(
-        new Request(`http://sign.test/v1/envelopes/${envelope.id}/attest`, {
+        new Request(`http://sign.test/v1/documents/${document.id}/attest`, {
           method: "POST",
           headers: {
             authorization: `Bearer ${access}`,
@@ -420,7 +420,7 @@ describe("MCP OAuth 2.1", () => {
           },
           body: JSON.stringify({ agent: "grok-legal" }),
         }),
-        { params: Promise.resolve({ id: envelope.id }) },
+        { params: Promise.resolve({ id: document.id }) },
       );
       expect(attest.status).toBe(403);
       const json = (await attest.json()) as { error: string; code: string };
@@ -430,7 +430,7 @@ describe("MCP OAuth 2.1", () => {
       const [row] = await db
         .select()
         .from(signersTable)
-        .where(eq(signersTable.envelopeId, envelope.id));
+        .where(eq(signersTable.documentId, document.id));
       expect(row!.attestedAt).toBeNull();
     },
   );

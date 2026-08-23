@@ -99,7 +99,7 @@ describe("TeamList", () => {
   });
 });
 
-describe("cabinet Team link", () => {
+describe("sidebar Team link", () => {
   afterEach(() => {
     cleanup();
   });

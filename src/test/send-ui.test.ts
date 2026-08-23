@@ -68,7 +68,7 @@ describe("SendClient", () => {
       vi.fn(async (url: string, init?: RequestInit) => {
         calls.push({ url: String(url), init });
         if (String(url) === "/auth/whoami") return whoamiOk();
-        if (String(url) === "/v1/envelopes") {
+        if (String(url) === "/v1/documents") {
           return new Response(
             JSON.stringify({ id: "env_1", status: "pending_sender" }),
             { status: 201, headers: { "content-type": "application/json" } },
@@ -80,7 +80,7 @@ describe("SendClient", () => {
     render(createElement(SendClient));
     await fillAndSubmit();
     await screen.findByText(/confirm to send/i);
-    const post = calls.find((c) => c.url === "/v1/envelopes");
+    const post = calls.find((c) => c.url === "/v1/documents");
     expect(post).toBeTruthy();
     const body = post?.init?.body as FormData;
     expect(JSON.parse(String(body.get("signers")))).toEqual([
@@ -95,13 +95,13 @@ describe("SendClient", () => {
       "fetch",
       vi.fn(async (url: string) => {
         if (String(url) === "/auth/whoami") return whoamiOk();
-        if (String(url) === "/v1/envelopes") {
+        if (String(url) === "/v1/documents") {
           return new Response(JSON.stringify({ id: "env_1" }), {
             status: 201,
             headers: { "content-type": "application/json" },
           });
         }
-        if (String(url) === "/v1/envelopes/env_1/otp") {
+        if (String(url) === "/v1/documents/env_1/otp") {
           return new Response(
             JSON.stringify({
               key: "sign_live_abc123",
@@ -131,7 +131,7 @@ describe("SendClient", () => {
       screen.getByRole("link", { name: "https://s.test/sig" }).getAttribute("href"),
     ).toBe("https://s.test/sig");
     expect(
-      screen.getByRole("link", { name: /open cabinet/i }).getAttribute("href"),
-    ).toBe("/envelopes");
+      screen.getByRole("link", { name: /open documents/i }).getAttribute("href"),
+    ).toBe("/documents");
   });
 });

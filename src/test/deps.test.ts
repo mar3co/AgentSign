@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { POST as postEnvelope } from "../../app/v1/envelopes/route.js";
+import { POST as postDocument } from "../../app/v1/documents/route.js";
 import { resetEnvCache } from "../env.js";
 import { getDeps, resetDeps, resolveStoreFromEnv, setDeps } from "../lib/deps.js";
 import { objectKey } from "../lib/storage.js";
@@ -67,7 +67,7 @@ describe("BlobStore composition root", () => {
     }
   });
 
-  it("POST /v1/envelopes is 201 when store is unset and STORAGE_DIR is set", async () => {
+  it("POST /v1/documents is 201 when store is unset and STORAGE_DIR is set", async () => {
     const dir = await mkdtemp(join(tmpdir(), "sign-fallback-"));
     const db = await createTestDb();
     const sent: { to: string }[] = [];
@@ -86,8 +86,8 @@ describe("BlobStore composition root", () => {
         JSON.stringify([{ name: "Jane", email: "jane@example.com" }]),
       );
       body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
-      const res = await postEnvelope(
-        new Request("http://sign.test/v1/envelopes", { method: "POST", body }),
+      const res = await postDocument(
+        new Request("http://sign.test/v1/documents", { method: "POST", body }),
       );
       expect(res.status).toBe(201);
       const json = (await res.json()) as { id: string; status: string };
@@ -99,7 +99,7 @@ describe("BlobStore composition root", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it("POST /v1/envelopes is 503 JSON when store and storage env are unset", async () => {
+  it("POST /v1/documents is 503 JSON when store and storage env are unset", async () => {
     const db = await createTestDb();
     await withEnv(
       {
@@ -122,8 +122,8 @@ describe("BlobStore composition root", () => {
           JSON.stringify([{ name: "Jane", email: "jane@example.com" }]),
         );
         body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
-        const res = await postEnvelope(
-          new Request("http://sign.test/v1/envelopes", { method: "POST", body }),
+        const res = await postDocument(
+          new Request("http://sign.test/v1/documents", { method: "POST", body }),
         );
         expect(res.status).toBe(503);
         const json = (await res.json()) as { error: string; code: string };
