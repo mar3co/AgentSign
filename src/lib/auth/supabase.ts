@@ -55,6 +55,13 @@ function sessionCookie(accessToken: string): string {
   return `${ACCESS_COOKIE}=${accessToken}; ${sessionCookieAttrs()}`;
 }
 
+/** Expired copies of every auth cookie we set, for logout. */
+export function clearedSessionCookies(): string[] {
+  return [ACCESS_COOKIE, PKCE_COOKIE].map(
+    (name) => `${name}=; ${sessionCookieAttrs()}; Max-Age=0`,
+  );
+}
+
 function bagFromCookie(header: string | null): Map<string, string> {
   const bag = new Map<string, string>();
   const raw = parseCookie(header, PKCE_COOKIE);

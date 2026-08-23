@@ -12,6 +12,7 @@ import {
   Send,
   Users,
 } from "lucide-react";
+import { NavUser } from "@/components/nav-user";
 import { Separator } from "@/components/ui/separator";
 import {
   Sidebar,
@@ -113,6 +114,7 @@ export function AppShell({
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
+            <NavUser />
           </SidebarFooter>
           <SidebarRail />
         </Sidebar>

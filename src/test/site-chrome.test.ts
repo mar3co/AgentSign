@@ -67,6 +67,38 @@ describe("AppShell", () => {
   });
 });
 
+describe("NavUser", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("shows the signed-in email from whoami", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ email: "demo@agentsign.dev" }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      ),
+    );
+    render(createElement(AppShell, null, "content"));
+    expect(await screen.findByText("demo@agentsign.dev")).toBeTruthy();
+  });
+
+  it("offers Log in when whoami says there is no session", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("", { status: 401 })),
+    );
+    render(createElement(AppShell, null, "content"));
+    const link = await screen.findByRole("link", { name: /log in/i });
+    expect(link.getAttribute("href")).toBe("/login");
+  });
+});
+
 describe("SiteFooter", () => {
   afterEach(() => {
     cleanup();
