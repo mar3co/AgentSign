@@ -1,5 +1,7 @@
 "use client";
 
+import { Send } from "lucide-react";
+import { EmptyState } from "@/components/empty-state";
 import { LinkButton } from "@/components/link-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,6 +32,26 @@ export type CabinetEnvelope = {
   signers?: CabinetParty[];
 };
 
+const STATUS_BADGES: Record<string, { label: string; dot: string }> = {
+  pending_sender: { label: "Waiting on you", dot: "bg-amber-500" },
+  pending: { label: "Out for signing", dot: "bg-blue-500" },
+  completed: { label: "Completed", dot: "bg-emerald-500" },
+  declined: { label: "Declined", dot: "bg-red-500" },
+  cancelled: { label: "Cancelled", dot: "bg-muted-foreground" },
+  expired: { label: "Expired", dot: "bg-muted-foreground" },
+  deleted: { label: "Deleted", dot: "bg-muted-foreground" },
+};
+
+function StatusBadge({ status }: { status: string }) {
+  const s = STATUS_BADGES[status] ?? { label: status, dot: "bg-muted-foreground" };
+  return (
+    <Badge variant="outline" className="gap-1.5 whitespace-nowrap">
+      <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${s.dot}`} />
+      {s.label}
+    </Badge>
+  );
+}
+
 function partyLine(p: CabinetParty): string {
   const who = p.kind === "agent" ? (p.agent ?? p.name) : p.name;
   const state = p.signed_at ? "signed" : p.attested_at ? "attested" : "waiting";
@@ -49,18 +71,19 @@ export function CabinetList({
     <Card>
       <CardContent>
         {envelopes.length === 0 ? (
-          <div className="flex flex-col gap-4">
-            <p className="text-base text-muted-foreground">No envelopes yet.</p>
-            <LinkButton href="/" className="self-start">
-              Send a PDF
-            </LinkButton>
-          </div>
+          <EmptyState
+            icon={Send}
+            title="No envelopes yet"
+            description="Send a PDF and it shows up here with where it stands."
+          >
+            <LinkButton href="/">Send a PDF</LinkButton>
+          </EmptyState>
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Title</TableHead>
-                <TableHead>Status</TableHead>
+                <TableHead className="w-40">Status</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -80,7 +103,7 @@ export function CabinetList({
                     </div>
                   </TableCell>
                   <TableCell>
-                    <Badge variant="outline">{env.status}</Badge>
+                    <StatusBadge status={env.status} />
                   </TableCell>
                   <TableCell className="text-right">
                     <span className="flex flex-wrap items-center justify-end gap-2">

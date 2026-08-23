@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { LinkButton } from "@/components/link-button";
+import { Bot } from "lucide-react";
+import { UpgradeGate } from "@/components/upgrade-gate";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -45,19 +46,11 @@ export function AgentsList({
 
   if (!entitled) {
     return (
-      <Card>
-        <CardHeader>
-          <CardDescription>
-            Pro named agents can attest on envelopes. Free accounts send and
-            download only.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <LinkButton href="/upgrade">
-            Upgrade
-          </LinkButton>
-        </CardContent>
-      </Card>
+      <UpgradeGate
+        icon={Bot}
+        title="Give your agents their own keys"
+        description="Pro named agents can attest on envelopes. Free accounts send and download only."
+      />
     );
   }
 

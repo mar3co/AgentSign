@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { LinkButton } from "@/components/link-button";
+import { Users } from "lucide-react";
+import { UpgradeGate } from "@/components/upgrade-gate";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -43,18 +44,11 @@ export function TeamList({
 
   if (!entitled) {
     return (
-      <Card>
-        <CardHeader>
-          <CardDescription>
-            Pro lets you invite people to this cabinet.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <LinkButton href="/upgrade">
-            Upgrade
-          </LinkButton>
-        </CardContent>
-      </Card>
+      <UpgradeGate
+        icon={Users}
+        title="Share this cabinet"
+        description="Pro lets you invite people to this cabinet."
+      />
     );
   }
 

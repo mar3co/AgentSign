@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { LinkButton } from "@/components/link-button";
+import { Files } from "lucide-react";
+import { UpgradeGate } from "@/components/upgrade-gate";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,6 +13,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
 
 export type PacketRole = {
   signing_order: number;
@@ -44,18 +46,11 @@ export function PacketsList({ entitled, packets = [] }: PacketsListProps) {
 
   if (!entitled) {
     return (
-      <Card>
-        <CardHeader>
-          <CardDescription>
-            Pro saves a PDF and signer roles so you can send it again.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <LinkButton href="/upgrade">
-            Upgrade
-          </LinkButton>
-        </CardContent>
-      </Card>
+      <UpgradeGate
+        icon={Files}
+        title="Save setups you reuse"
+        description="Pro saves a PDF and signer roles so you can send it again."
+      />
     );
   }
 
@@ -224,7 +219,9 @@ export function PacketsList({ entitled, packets = [] }: PacketsListProps) {
             })}
           </ul>
         )}
+        <Separator />
         <form className="flex flex-col gap-4" onSubmit={onCreate}>
+          <h3 className="text-sm font-semibold">Save a new packet</h3>
           <div className="flex flex-col gap-2">
             <Label htmlFor="title">Title</Label>
             <Input

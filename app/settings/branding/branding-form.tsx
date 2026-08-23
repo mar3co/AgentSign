@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { LinkButton } from "@/components/link-button";
+import { Palette } from "lucide-react";
+import { UpgradeGate } from "@/components/upgrade-gate";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,18 +34,11 @@ export function BrandingForm({
 
   if (!entitled) {
     return (
-      <Card>
-        <CardHeader>
-          <CardDescription>
-            Pro adds your shop name and logo to invite mail and the signing page.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <LinkButton href="/upgrade">
-            Upgrade
-          </LinkButton>
-        </CardContent>
-      </Card>
+      <UpgradeGate
+        icon={Palette}
+        title="Make envelopes look like yours"
+        description="Pro adds your shop name and logo to invite mail and the signing page."
+      />
     );
   }
 

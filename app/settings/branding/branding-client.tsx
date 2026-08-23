@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { LoadingList } from "@/components/loading-list";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { BrandingForm } from "./branding-form";
 
@@ -74,7 +75,7 @@ export function BrandingClient() {
   }
 
   if (state === null) {
-    return <p className="text-base text-muted-foreground">Loading…</p>;
+    return <LoadingList />;
   }
 
   return (
