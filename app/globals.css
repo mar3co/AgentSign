@@ -181,6 +181,18 @@
   /* The floating sidebar and content sit as cards on a muted canvas, so the
      card face must be a full step lighter than the canvas behind it. */
   --sidebar: var(--card);
+  /* Top band behind the app header (shadcn studio application-shell-05).
+     Chromatic indigo, not the neutral primary: Chrome mis-rasterizes large
+     near-black surfaces under this layout (band bleaches to white and the
+     header text inverts), while mid-lightness chromatic colors paint fine. */
+  --app-band: oklch(0.511 0.262 276.966);
+}
+/* Painted as the shell's own background rather than a positioned child; a
+   dark band as an underlay element hits the same Chrome paint glitch. */
+.app-band {
+  background-image: linear-gradient(var(--app-band), var(--app-band));
+  background-size: 100% 26.25rem;
+  background-repeat: no-repeat;
 }
 [data-surface="app"] :is(.font-heading, h1, h2, h3) {
   font-family: inherit;

@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { UploadDropzone } from "@/components/upload-dropzone";
 import { Separator } from "@/components/ui/separator";
 
 export type PacketRole = {
@@ -250,12 +251,13 @@ export function PacketsList({ entitled, packets = [] }: PacketsListProps) {
           </Button>
           <div className="flex flex-col gap-2">
             <Label htmlFor="file">PDF</Label>
-            <Input
+            <UploadDropzone
               id="file"
               name="file"
-              type="file"
               accept="application/pdf,.pdf"
               required
+              prompt="Drag & Drop or Choose a PDF to upload"
+              hint="This PDF is reused every time the packet is sent."
             />
           </div>
           {saved ? (

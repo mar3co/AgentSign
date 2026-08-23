@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
-import { FileUp, Plus, X } from "lucide-react";
+import { useEffect, useState, type FormEvent } from "react";
+import { Plus, X } from "lucide-react";
 import { LinkButton } from "@/components/link-button";
 import { LoadingList } from "@/components/loading-list";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -16,7 +16,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { cn } from "@/lib/utils";
+import { UploadDropzone } from "@/components/upload-dropzone";
 
 type SignerRow = { name: string; email: string };
 
@@ -26,14 +26,11 @@ type Done = {
 };
 
 export function SendClient() {
-  const fileRef = useRef<HTMLInputElement>(null);
   const [senderEmail, setSenderEmail] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [signers, setSigners] = useState<SignerRow[]>([
     { name: "", email: "" },
   ]);
-  const [fileName, setFileName] = useState<string | null>(null);
-  const [over, setOver] = useState(false);
   const [envelopeId, setEnvelopeId] = useState<string | null>(null);
   const [done, setDone] = useState<Done | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -228,52 +225,14 @@ export function SendClient() {
     <Card>
       <CardContent>
         <form className="flex flex-col gap-6" onSubmit={onSubmit}>
-          <label
-            htmlFor="file"
-            className={cn(
-              "flex cursor-pointer items-center gap-4 rounded-lg border-2 border-dashed px-5 py-6 transition-colors",
-              over
-                ? "border-ring bg-accent"
-                : "border-border bg-muted/30 hover:bg-muted/50",
-            )}
-            onDragOver={(e) => {
-              e.preventDefault();
-              setOver(true);
-            }}
-            onDragLeave={() => setOver(false)}
-            onDrop={(e) => {
-              e.preventDefault();
-              setOver(false);
-              const files = e.dataTransfer.files;
-              if (!fileRef.current || !files?.length) return;
-              fileRef.current.files = files;
-              setFileName(files[0]?.name ?? null);
-            }}
-          >
-            <input
-              ref={fileRef}
-              id="file"
-              name="file"
-              type="file"
-              accept="application/pdf,.pdf"
-              required
-              className="sr-only"
-              onChange={(e) => setFileName(e.target.files?.[0]?.name ?? null)}
-            />
-            <div className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-dashed border-border bg-background">
-              <FileUp aria-hidden className="size-4 text-muted-foreground" />
-            </div>
-            <span className="flex min-w-0 flex-col gap-0.5">
-              <span className="text-sm font-medium">
-                {fileName ?? "Drop a PDF here, or click to choose"}
-              </span>
-              <span className="text-xs text-muted-foreground">
-                {fileName
-                  ? "Ready to send."
-                  : "Your signer gets an email link in seconds."}
-              </span>
-            </span>
-          </label>
+          <UploadDropzone
+            id="file"
+            name="file"
+            accept="application/pdf,.pdf"
+            required
+            prompt="Drag & Drop or Choose a PDF to upload"
+            hint="Your signer gets an email link in seconds."
+          />
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="flex flex-col gap-2">

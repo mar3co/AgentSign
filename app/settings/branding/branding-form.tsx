@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { UploadDropzone } from "@/components/upload-dropzone";
 
 export type BrandingFormProps = {
   entitled: boolean;
@@ -149,11 +150,12 @@ export function BrandingForm({
           </div>
           <div className="flex flex-col gap-2">
             <Label htmlFor="logo">Logo</Label>
-            <Input
+            <UploadDropzone
               id="logo"
               name="logo"
-              type="file"
               accept="image/png,image/jpeg,.png,.jpg,.jpeg"
+              prompt="Drag & Drop or Choose a logo to upload"
+              hint="PNG or JPEG."
             />
             {logoOn ? (
               <p className="text-sm text-muted-foreground">A logo is already saved.</p>
