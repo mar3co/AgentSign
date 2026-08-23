@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Archive } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Archive, Clock, Flame, Webhook } from "lucide-react";
 import {
   EnvelopeMiniTable,
   StatusBadge,
@@ -31,43 +31,16 @@ import {
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 
-const DAY_MS = 86_400_000;
-
-function startOfMonth(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), 1);
-}
-
-function dayKey(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
-/** Latest signature/sign-off on the envelope; how we date a completion. */
-function completedAt(env: CabinetEnvelope): Date | null {
-  if (env.status !== "completed") return null;
-  const times = (env.signers ?? [])
-    .flatMap((s) => [s.signed_at, s.attested_at])
-    .filter((t): t is string => Boolean(t))
-    .map((t) => new Date(t).getTime());
-  if (times.length === 0) {
-    return env.createdAt ? new Date(env.createdAt) : null;
-  }
-  return new Date(Math.max(...times));
-}
-
-/** Daily counts over the trailing `days`, oldest first. */
-function dailySeries(dates: Array<Date | null>, days: number): SparkPoint[] {
-  const today = new Date();
-  const counts = new Map<string, number>();
-  for (const d of dates) {
-    if (d) counts.set(dayKey(d), (counts.get(dayKey(d)) ?? 0) + 1);
-  }
-  const points: SparkPoint[] = [];
-  for (let i = days - 1; i >= 0; i -= 1) {
-    const day = new Date(today.getTime() - i * DAY_MS);
-    points.push({ date: dayKey(day), value: counts.get(dayKey(day)) ?? 0 });
-  }
-  return points;
-}
+type Stats = {
+  total: number;
+  by_status: Record<string, number>;
+  sent: { this_month: number; last_month: number; agent_share: number };
+  completed: { this_month: number; last_month: number };
+  daily: Array<{ date: string; human: number; agent: number; completed: number }>;
+  median_signing_hours: number | null;
+  shredding_soon: number;
+  webhooks_30d: { sent: number; failed: number };
+};
 
 function deltaBadge(current: number, previous: number): string | undefined {
   if (previous === 0) return current > 0 ? "New" : undefined;
@@ -75,7 +48,23 @@ function deltaBadge(current: number, previous: number): string | undefined {
   return `${pct > 0 ? "+" : ""}${pct}%`;
 }
 
+function formatHours(hours: number): string {
+  if (hours < 1) return `${Math.max(1, Math.round(hours * 60))} min`;
+  if (hours < 48) return `${Math.round(hours * 10) / 10} h`;
+  return `${Math.round(hours / 24)} days`;
+}
+
+const SENT_SERIES = [
+  { key: "human", label: "Human-only", color: "var(--primary)" },
+  { key: "agent", label: "With agents", color: "var(--chart-2)" },
+];
+
+const COMPLETED_SERIES = [
+  { key: "completed", label: "Completed", color: "var(--primary)" },
+];
+
 export function DashboardClient() {
+  const [stats, setStats] = useState<Stats | null>(null);
   const [envelopes, setEnvelopes] = useState<CabinetEnvelope[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { items: activity } = useActivity();
@@ -84,23 +73,26 @@ export function DashboardClient() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/v1/envelopes", { credentials: "include" });
-        if (res.status === 401) {
+        const [statsRes, envRes] = await Promise.all([
+          fetch("/v1/stats", { credentials: "include" }),
+          fetch("/v1/envelopes", { credentials: "include" }),
+        ]);
+        if (statsRes.status === 401 || envRes.status === 401) {
           window.location.href = `/login?next=${encodeURIComponent("/dashboard")}`;
           return;
         }
-        if (!res.ok) {
-          if (!cancelled) setError("Could not load envelopes.");
+        if (!statsRes.ok || !envRes.ok) {
+          if (!cancelled) setError("Could not load the dashboard.");
           return;
         }
-        const json = (await res.json()) as {
-          envelopes: Array<
-            CabinetEnvelope & { created_at?: string; can_delete?: boolean }
-          >;
+        const statsJson = (await statsRes.json()) as Stats;
+        const envJson = (await envRes.json()) as {
+          envelopes: Array<CabinetEnvelope & { created_at?: string }>;
         };
         if (!cancelled) {
+          setStats(statsJson);
           setEnvelopes(
-            json.envelopes.map((e) => ({
+            envJson.envelopes.map((e) => ({
               ...e,
               createdAt: e.created_at,
               signers: e.signers ?? [],
@@ -108,52 +100,13 @@ export function DashboardClient() {
           );
         }
       } catch {
-        if (!cancelled) setError("Could not load envelopes.");
+        if (!cancelled) setError("Could not load the dashboard.");
       }
     })();
     return () => {
       cancelled = true;
     };
   }, []);
-
-  const stats = useMemo(() => {
-    const list = envelopes ?? [];
-    const now = new Date();
-    const thisMonth = startOfMonth(now);
-    const lastMonth = startOfMonth(new Date(now.getFullYear(), now.getMonth() - 1, 1));
-
-    const created = list.map((e) => (e.createdAt ? new Date(e.createdAt) : null));
-    const completed = list.map(completedAt);
-
-    const inMonth = (d: Date | null, from: Date, to: Date) =>
-      d !== null && d >= from && d < to;
-
-    const sentThis = created.filter((d) => inMonth(d, thisMonth, now)).length;
-    const sentLast = created.filter((d) => inMonth(d, lastMonth, thisMonth)).length;
-    const doneThis = completed.filter((d) => inMonth(d, thisMonth, now)).length;
-    const doneLast = completed.filter((d) => inMonth(d, lastMonth, thisMonth)).length;
-
-    const byStatus = new Map<string, number>();
-    for (const e of list) {
-      byStatus.set(e.status, (byStatus.get(e.status) ?? 0) + 1);
-    }
-
-    return {
-      sentThis,
-      sentBadge: deltaBadge(sentThis, sentLast),
-      sentSeries: dailySeries(created, 14),
-      doneThis,
-      doneBadge: deltaBadge(doneThis, doneLast),
-      doneSeries: dailySeries(completed, 14),
-      total: list.length,
-      totalDelta:
-        sentLast === 0 ? undefined : Math.round(((sentThis - sentLast) / sentLast) * 100),
-      byStatus: [...byStatus.entries()].sort((a, b) => b[1] - a[1]),
-      recent: [...list].sort((a, b) =>
-        (b.createdAt ?? "").localeCompare(a.createdAt ?? ""),
-      ),
-    };
-  }, [envelopes]);
 
   if (error) {
     return (
@@ -163,33 +116,73 @@ export function DashboardClient() {
     );
   }
 
-  if (envelopes === null) {
+  if (stats === null || envelopes === null) {
     return <LoadingList />;
   }
+
+  const recent = [...envelopes].sort((a, b) =>
+    (b.createdAt ?? "").localeCompare(a.createdAt ?? ""),
+  );
+  const byStatus = Object.entries(stats.by_status).sort((a, b) => b[1] - a[1]);
+  const sentSpark: SparkPoint[] = stats.daily;
+  const totalDelta =
+    stats.sent.last_month === 0
+      ? undefined
+      : Math.round(
+          ((stats.sent.this_month - stats.sent.last_month) /
+            stats.sent.last_month) *
+            100,
+        );
+
+  const ops: Array<{ icon: typeof Clock; label: string; value: string }> = [
+    {
+      icon: Clock,
+      label: "Median time to signed",
+      value:
+        stats.median_signing_hours === null
+          ? "—"
+          : formatHours(stats.median_signing_hours),
+    },
+    {
+      icon: Flame,
+      label: "Shredding within 7 days",
+      value: String(stats.shredding_soon),
+    },
+    {
+      icon: Webhook,
+      label: "Webhooks, last 30 days",
+      value:
+        stats.webhooks_30d.sent + stats.webhooks_30d.failed === 0
+          ? "—"
+          : `${stats.webhooks_30d.sent} sent · ${stats.webhooks_30d.failed} failed`,
+    },
+  ];
 
   return (
     <div className="grid grid-cols-6 gap-4 md:gap-6">
       <StatCardSpark
         title="Sent this month"
-        value={String(stats.sentThis)}
-        badge={stats.sentBadge}
+        value={String(stats.sent.this_month)}
+        badge={deltaBadge(stats.sent.this_month, stats.sent.last_month)}
         note="vs last month"
-        data={stats.sentSeries}
+        data={sentSpark}
+        series={SENT_SERIES}
         className="col-span-2 max-lg:col-span-full"
       />
       <StatCardSpark
         title="Completed this month"
-        value={String(stats.doneThis)}
-        badge={stats.doneBadge}
+        value={String(stats.completed.this_month)}
+        badge={deltaBadge(stats.completed.this_month, stats.completed.last_month)}
         note="vs last month"
-        data={stats.doneSeries}
+        data={sentSpark}
+        series={COMPLETED_SERIES}
         className="col-span-2 max-lg:col-span-full"
       />
       <StatCardFigure
         title="All envelopes"
         badgeContent="All time"
         value={String(stats.total)}
-        changePercentage={stats.totalDelta}
+        changePercentage={totalDelta}
         figure={<EnvelopesFigure />}
         className="col-span-2 max-lg:col-span-full"
       />
@@ -202,13 +195,13 @@ export function DashboardClient() {
             Open cabinet
           </LinkButton>
         </div>
-        {stats.recent.length === 0 ? (
+        {recent.length === 0 ? (
           <p className="text-muted-foreground border-t px-6 py-10 text-center text-sm">
             Nothing sent yet. Your latest envelopes land here.
           </p>
         ) : (
           <div className="border-t">
-            <EnvelopeMiniTable envelopes={stats.recent} limit={5} />
+            <EnvelopeMiniTable envelopes={recent} limit={5} />
           </div>
         )}
       </Card>
@@ -219,12 +212,12 @@ export function DashboardClient() {
             <CardTitle className="text-base">Where envelopes stand</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
-            {stats.byStatus.length === 0 ? (
+            {byStatus.length === 0 ? (
               <p className="text-muted-foreground text-sm">
                 Send a PDF to see the breakdown.
               </p>
             ) : (
-              stats.byStatus.map(([status, count]) => (
+              byStatus.map(([status, count]) => (
                 <div key={status} className="flex flex-col gap-1.5">
                   <div className="flex items-center justify-between gap-2">
                     <StatusBadge status={status} />
@@ -233,12 +226,33 @@ export function DashboardClient() {
                   <div className="bg-primary/10 h-1.5 w-full overflow-hidden rounded-full">
                     <div
                       className="bg-primary h-full rounded-full"
-                      style={{ width: `${Math.round((count / stats.total) * 100)}%` }}
+                      style={{
+                        width: `${Math.round((count / stats.total) * 100)}%`,
+                      }}
                     />
                   </div>
                 </div>
               ))
             )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Delivery &amp; retention</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            {ops.map((row) => (
+              <div key={row.label} className="flex items-center gap-3">
+                <row.icon aria-hidden className="text-muted-foreground size-4 shrink-0" />
+                <span className="text-muted-foreground flex-1 text-sm">
+                  {row.label}
+                </span>
+                <span className="text-sm font-medium whitespace-nowrap">
+                  {row.value}
+                </span>
+              </div>
+            ))}
           </CardContent>
         </Card>
 
