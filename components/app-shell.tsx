@@ -9,6 +9,7 @@ import {
   BookOpen,
   Bot,
   Files,
+  LayoutDashboard,
   Palette,
   PanelLeftClose,
   PanelRightClose,
@@ -51,6 +52,12 @@ const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
   {
     label: "Workspace",
     items: [
+      {
+        href: "/dashboard",
+        label: "Dashboard",
+        subtitle: "Your envelopes at a glance.",
+        icon: LayoutDashboard,
+      },
       {
         href: "/send",
         label: "Send",
@@ -169,7 +176,7 @@ export function AppShell({
                   <SidebarMenuButton
                     size="lg"
                     className="gap-2.5"
-                    render={<a href="/envelopes" />}
+                    render={<a href="/dashboard" />}
                   >
                     <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
                       <PenLine className="size-4" />

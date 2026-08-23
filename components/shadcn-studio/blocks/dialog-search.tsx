@@ -9,6 +9,7 @@ import {
   ArrowUp,
   Bot,
   Files,
+  LayoutDashboard,
   Palette,
   Search,
   Send,
@@ -36,6 +37,7 @@ type Props = {
 };
 
 const PAGES = [
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/send", label: "Send a PDF", icon: Send },
   { href: "/envelopes", label: "Cabinet", icon: Archive },
   { href: "/packets", label: "Packets", icon: Files },
