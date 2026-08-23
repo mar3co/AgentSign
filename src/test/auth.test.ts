@@ -19,6 +19,8 @@ import { POST as postOtp } from "../../app/v1/envelopes/[id]/otp/route.js";
 import { POST as postConsent } from "../../app/s/[token]/consent/route.js";
 import { POST as postSign } from "../../app/s/[token]/sign/route.js";
 import { GET as getAuthCallback } from "../../app/auth/callback/route.js";
+import { GET as getWhoami } from "../../app/auth/whoami/route.js";
+import { POST as postLogout } from "../../app/auth/logout/route.js";
 import { envelopes } from "../db/schema.js";
 import { setDeps } from "../lib/deps.js";
 import { makeDevP12 } from "../lib/pdf/devP12.js";
@@ -139,6 +141,58 @@ async function mintWithCookie(cookie: string) {
 function cookieFrom(res: Response): string {
   return (res.headers.get("set-cookie") ?? "").split(";")[0]!;
 }
+
+describe("whoami and logout", () => {
+  it("whoami reports the signed-in email and 401s without a session", async () => {
+    const db = await createTestDb();
+    const fake = createFakeAuth();
+    setDeps({ db, auth: fake.adapter });
+    await postSignup(
+      new Request("http://sign.test/signup", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          email: "shop@example.com",
+          password: "correct-horse",
+        }),
+      }),
+    );
+    const login = await postLogin(
+      new Request("http://sign.test/login/session", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          email: "shop@example.com",
+          password: "correct-horse",
+        }),
+      }),
+    );
+    const cookie = cookieFrom(login);
+    const who = await getWhoami(
+      new Request("http://sign.test/auth/whoami", { headers: { cookie } }),
+    );
+    expect(who.status).toBe(200);
+    expect(await who.json()).toEqual({ email: "shop@example.com" });
+    const anon = await getWhoami(new Request("http://sign.test/auth/whoami"));
+    expect(anon.status).toBe(401);
+  });
+
+  it("logout expires the auth cookies", async () => {
+    const res = await postLogout();
+    expect(res.status).toBe(200);
+    const cookies = res.headers.getSetCookie();
+    expect(
+      cookies.some(
+        (c) => c.startsWith("sb-access-token=;") && c.includes("Max-Age=0"),
+      ),
+    ).toBe(true);
+    expect(
+      cookies.some(
+        (c) => c.startsWith("sign-pkce=;") && c.includes("Max-Age=0"),
+      ),
+    ).toBe(true);
+  });
+});
 
 describe("login", () => {
   it("honors email and next, uses shadcn fields, and does not add a drop form", async () => {

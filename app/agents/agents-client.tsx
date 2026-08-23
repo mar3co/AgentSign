@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { LoadingList } from "@/components/loading-list";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AgentsList, type AgentItem } from "./agents-list";
 
@@ -71,7 +72,7 @@ export function AgentsClient() {
   }
 
   if (state === null) {
-    return <p className="text-base text-muted-foreground">Loading…</p>;
+    return <LoadingList />;
   }
 
   return (

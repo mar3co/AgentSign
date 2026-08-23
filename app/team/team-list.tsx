@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { LinkButton } from "@/components/link-button";
+import { Users } from "lucide-react";
+import { UpgradeGate } from "@/components/upgrade-gate";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,7 +10,6 @@ import {
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -44,19 +44,11 @@ export function TeamList({
 
   if (!entitled) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Team</CardTitle>
-          <CardDescription>
-            Pro lets you invite people to this cabinet.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <LinkButton href="/upgrade" className="h-11 w-full text-base">
-            Upgrade
-          </LinkButton>
-        </CardContent>
-      </Card>
+      <UpgradeGate
+        icon={Users}
+        title="Share this cabinet"
+        description="Pro lets you invite people to this cabinet."
+      />
     );
   }
 
@@ -131,7 +123,6 @@ export function TeamList({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Team</CardTitle>
         <CardDescription>
           {ownerEmail
             ? `Cabinet owner ${ownerEmail}.`
@@ -162,7 +153,7 @@ export function TeamList({
                     <Button
                       type="button"
                       variant="outline"
-                      className="h-8 text-sm"
+                      size="sm"
                       disabled={busy}
                       onClick={() => onRemove(member.id)}
                     >
@@ -184,10 +175,9 @@ export function TeamList({
                 type="email"
                 required
                 autoComplete="email"
-                className="h-11 text-base md:text-base"
               />
             </div>
-            <Button className="h-11 w-full text-base" type="submit" disabled={busy}>
+            <Button className="self-start" type="submit" disabled={busy}>
               Invite
             </Button>
           </form>

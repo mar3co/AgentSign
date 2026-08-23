@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { LinkButton } from "@/components/link-button";
+import { Files } from "lucide-react";
+import { UpgradeGate } from "@/components/upgrade-gate";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,10 +10,10 @@ import {
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
 
 export type PacketRole = {
   signing_order: number;
@@ -45,19 +46,11 @@ export function PacketsList({ entitled, packets = [] }: PacketsListProps) {
 
   if (!entitled) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Packets</CardTitle>
-          <CardDescription>
-            Pro saves a PDF and signer roles so you can send it again.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <LinkButton href="/upgrade" className="h-11 w-full text-base">
-            Upgrade
-          </LinkButton>
-        </CardContent>
-      </Card>
+      <UpgradeGate
+        icon={Files}
+        title="Save setups you reuse"
+        description="Pro saves a PDF and signer roles so you can send it again."
+      />
     );
   }
 
@@ -152,7 +145,6 @@ export function PacketsList({ entitled, packets = [] }: PacketsListProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Packets</CardTitle>
         <CardDescription>
           Save a PDF and role names, then send it again with new people.
         </CardDescription>
@@ -192,7 +184,6 @@ export function PacketsList({ entitled, packets = [] }: PacketsListProps) {
                               id={`${packet.id}-name-${i}`}
                               name={`name-${i}`}
                               required
-                              className="h-11 text-base md:text-base"
                             />
                           </div>
                           <div className="flex flex-col gap-2">
@@ -205,7 +196,6 @@ export function PacketsList({ entitled, packets = [] }: PacketsListProps) {
                               type="email"
                               required
                               autoComplete="email"
-                              className="h-11 text-base md:text-base"
                             />
                           </div>
                         </div>
@@ -216,7 +206,7 @@ export function PacketsList({ entitled, packets = [] }: PacketsListProps) {
                         </Alert>
                       ) : null}
                       <Button
-                        className="h-11 w-full text-base"
+                        className="self-start"
                         type="submit"
                         disabled={busy}
                       >
@@ -229,14 +219,15 @@ export function PacketsList({ entitled, packets = [] }: PacketsListProps) {
             })}
           </ul>
         )}
+        <Separator />
         <form className="flex flex-col gap-4" onSubmit={onCreate}>
+          <h3 className="text-sm font-semibold">Save a new packet</h3>
           <div className="flex flex-col gap-2">
             <Label htmlFor="title">Title</Label>
             <Input
               id="title"
               name="title"
               required
-              className="h-11 text-base md:text-base"
             />
           </div>
           {Array.from({ length: roleCount }, (_, i) => (
@@ -246,14 +237,13 @@ export function PacketsList({ entitled, packets = [] }: PacketsListProps) {
                 id={`role_name_${i}`}
                 name="role_name"
                 required
-                className="h-11 text-base md:text-base"
               />
             </div>
           ))}
           <Button
+            className="self-start"
             type="button"
             variant="outline"
-            className="h-11 w-full text-base"
             onClick={() => setRoleCount((n) => n + 1)}
           >
             Add role
@@ -266,7 +256,6 @@ export function PacketsList({ entitled, packets = [] }: PacketsListProps) {
               type="file"
               accept="application/pdf,.pdf"
               required
-              className="h-11 text-base md:text-base"
             />
           </div>
           {saved ? (
@@ -274,7 +263,7 @@ export function PacketsList({ entitled, packets = [] }: PacketsListProps) {
               <AlertDescription>Saved.</AlertDescription>
             </Alert>
           ) : null}
-          <Button className="h-11 w-full text-base" type="submit" disabled={busy}>
+          <Button className="self-start" type="submit" disabled={busy}>
             Save packet
           </Button>
         </form>

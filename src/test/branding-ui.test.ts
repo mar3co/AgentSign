@@ -4,7 +4,11 @@ import { afterEach, describe, it, expect, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { BrandingClient } from "../../app/settings/branding/branding-client.js";
 import { BrandingForm } from "../../app/settings/branding/branding-form.js";
-import { SiteHeader } from "../../components/site-header.js";
+import { AppShell } from "../../components/app-shell.js";
+
+vi.mock("next/navigation", () => ({
+  usePathname: () => "",
+}));
 
 describe("BrandingForm", () => {
   afterEach(() => {
@@ -52,7 +56,7 @@ describe("cabinet Branding link", () => {
   });
 
   it("links Branding to /settings/branding", () => {
-    render(createElement(SiteHeader, { variant: "app" }));
+    render(createElement(AppShell, null, "content"));
     expect(
       screen.getAllByRole("link", { name: /^branding$/i })[0]?.getAttribute("href"),
     ).toBe("/settings/branding");

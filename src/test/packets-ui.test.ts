@@ -3,7 +3,11 @@ import { createElement } from "react";
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { CabinetList } from "../../app/envelopes/cabinet-list.js";
-import { SiteHeader } from "../../components/site-header.js";
+import { AppShell } from "../../components/app-shell.js";
+
+vi.mock("next/navigation", () => ({
+  usePathname: () => "",
+}));
 import { PacketsClient } from "../../app/packets/packets-client.js";
 import { PacketsList } from "../../app/packets/packets-list.js";
 
@@ -58,8 +62,8 @@ describe("cabinet Packets link", () => {
     cleanup();
   });
 
-  it("links Packets to /packets from the app header", () => {
-    render(createElement(SiteHeader, { variant: "app" }));
+  it("links Packets to /packets from the app sidebar", () => {
+    render(createElement(AppShell, null, "content"));
     expect(screen.getAllByRole("link", { name: /^packets$/i })[0]?.getAttribute("href")).toBe(
       "/packets",
     );

@@ -1,6 +1,6 @@
 import { getDb } from "../db/client.js";
 import { appOrigin, getEnv } from "../env.js";
-import { getAuth } from "../lib/auth/supabase.js";
+import { clearedSessionCookies, getAuth } from "../lib/auth/supabase.js";
 import { getDeps } from "../lib/deps.js";
 import { claimSends, ensureAccount } from "../lib/keys.js";
 import { safeNext } from "../lib/safeNext.js";
@@ -79,6 +79,18 @@ export async function postSignup(req: Request): Promise<Response> {
   const result = await getAuth().signUp({ email, password });
   if (!result.ok) return jsonError(400, result.error, result.code);
   return Response.json({ ok: true });
+}
+
+export async function getWhoami(req: Request): Promise<Response> {
+  const user = await getAuth().userFromCookie(req.headers.get("cookie"));
+  if (!user) return jsonError(401, "Unauthorized", "unauthorized");
+  return Response.json({ email: user.email });
+}
+
+export function postLogout(): Response {
+  const headers = cookieHeaders(clearedSessionCookies());
+  headers.set("content-type", "application/json");
+  return new Response(JSON.stringify({ ok: true }), { status: 200, headers });
 }
 
 export async function getLoginOAuth(

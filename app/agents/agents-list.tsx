@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { LinkButton } from "@/components/link-button";
+import { Bot } from "lucide-react";
+import { UpgradeGate } from "@/components/upgrade-gate";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,7 +10,6 @@ import {
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -46,20 +46,11 @@ export function AgentsList({
 
   if (!entitled) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Agents</CardTitle>
-          <CardDescription>
-            Pro named agents can attest on envelopes. Free accounts send and
-            download only.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <LinkButton href="/upgrade" className="h-11 w-full text-base">
-            Upgrade
-          </LinkButton>
-        </CardContent>
-      </Card>
+      <UpgradeGate
+        icon={Bot}
+        title="Give your agents their own keys"
+        description="Pro named agents can attest on envelopes. Free accounts send and download only."
+      />
     );
   }
 
@@ -258,7 +249,6 @@ export function AgentsList({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Agents</CardTitle>
         <CardDescription>
           Named agents that may attest for people on this cabinet.
         </CardDescription>
@@ -310,7 +300,7 @@ export function AgentsList({
                       <Button
                         type="button"
                         variant="outline"
-                        className="h-8 text-sm"
+                        size="sm"
                         disabled={busy}
                         onClick={() => onRotate(agent.id)}
                       >
@@ -319,7 +309,7 @@ export function AgentsList({
                       <Button
                         type="button"
                         variant="outline"
-                        className="h-8 text-sm"
+                        size="sm"
                         disabled={busy}
                         onClick={() => onRevoke(agent.id)}
                       >
@@ -339,27 +329,23 @@ export function AgentsList({
                           name="webhook_url"
                           type="url"
                           placeholder={agent.has_webhook ? "Webhook set" : ""}
-                          className="h-11 text-base md:text-base"
                         />
                       </div>
-                      <Button
-                        className="h-11 w-full text-base"
-                        type="submit"
-                        disabled={busy}
-                      >
-                        Save webhook
-                      </Button>
-                      {agent.has_webhook ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="h-11 w-full text-base"
-                          disabled={busy}
-                          onClick={() => onClearWebhook(agent.id)}
-                        >
-                          Clear webhook
+                      <span className="flex flex-wrap items-center gap-3">
+                        <Button type="submit" disabled={busy}>
+                          Save webhook
                         </Button>
-                      ) : null}
+                        {agent.has_webhook ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={busy}
+                            onClick={() => onClearWebhook(agent.id)}
+                          >
+                            Clear webhook
+                          </Button>
+                        ) : null}
+                      </span>
                     </form>
                   ) : null}
                 </li>
@@ -375,7 +361,6 @@ export function AgentsList({
                 id="slug"
                 name="slug"
                 required
-                className="h-11 text-base md:text-base"
               />
             </div>
             <div className="flex flex-col gap-2">
@@ -384,7 +369,6 @@ export function AgentsList({
                 id="name"
                 name="name"
                 required
-                className="h-11 text-base md:text-base"
               />
             </div>
             <div className="flex flex-col gap-2">
@@ -393,10 +377,9 @@ export function AgentsList({
                 id="webhook_url"
                 name="webhook_url"
                 type="url"
-                className="h-11 text-base md:text-base"
               />
             </div>
-            <Button className="h-11 w-full text-base" type="submit" disabled={busy}>
+            <Button className="self-start" type="submit" disabled={busy}>
               Create agent
             </Button>
           </form>

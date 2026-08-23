@@ -72,7 +72,7 @@ describe("CabinetList", () => {
     render(createElement(CabinetList, { envelopes: [] }));
     expect(screen.getByText(/no envelopes yet/i)).toBeTruthy();
     expect(screen.getByRole("link", { name: /send a pdf/i }).getAttribute("href")).toBe(
-      "/",
+      "/send",
     );
     expect(document.querySelector('input[type="file"]')).toBeNull();
   });

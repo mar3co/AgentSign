@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { AppShell } from "@/components/app-shell";
 import { ByteRange } from "@/components/byte-range";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader, type SiteHeaderVariant } from "@/components/site-header";
@@ -8,6 +9,15 @@ const WIDTH = {
   md: "max-w-lg",
   lg: "max-w-2xl",
   xl: "max-w-4xl",
+  full: "max-w-none",
+} as const;
+
+// Inside the app shell the content is left-aligned: form pages cap their
+// column, list pages take the full inset.
+const APP_WIDTH = {
+  md: "max-w-2xl",
+  lg: "max-w-3xl",
+  xl: "max-w-none",
   full: "max-w-none",
 } as const;
 
@@ -22,13 +32,16 @@ export function PageShell({
   showFooter = true,
   children,
 }: {
-  variant: SiteHeaderVariant;
+  variant: SiteHeaderVariant | "app";
   width?: keyof typeof WIDTH;
   sealed?: boolean;
   showRange?: boolean;
   showFooter?: boolean;
   children: ReactNode;
 }) {
+  if (variant === "app") {
+    return <AppShell widthClassName={APP_WIDTH[width]}>{children}</AppShell>;
+  }
   if (variant === "public" || variant === "auth") {
     return (
       <div

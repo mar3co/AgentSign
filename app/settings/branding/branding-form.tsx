@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { LinkButton } from "@/components/link-button";
+import { Palette } from "lucide-react";
+import { UpgradeGate } from "@/components/upgrade-gate";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,7 +10,6 @@ import {
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -34,19 +34,11 @@ export function BrandingForm({
 
   if (!entitled) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Branding</CardTitle>
-          <CardDescription>
-            Pro adds your shop name and logo to invite mail and the signing page.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <LinkButton href="/upgrade" className="h-11 w-full text-base">
-            Upgrade
-          </LinkButton>
-        </CardContent>
-      </Card>
+      <UpgradeGate
+        icon={Palette}
+        title="Make envelopes look like yours"
+        description="Pro adds your shop name and logo to invite mail and the signing page."
+      />
     );
   }
 
@@ -54,7 +46,6 @@ export function BrandingForm({
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Branding</CardTitle>
           <CardDescription>This cabinet&apos;s name and logo.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
@@ -141,7 +132,6 @@ export function BrandingForm({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Branding</CardTitle>
         <CardDescription>
           Shown on invite mail and the signing page. Not on the sealed PDF.
         </CardDescription>
@@ -155,7 +145,6 @@ export function BrandingForm({
               name="display_name"
               maxLength={80}
               defaultValue={displayName ?? ""}
-              className="h-11 text-base md:text-base"
             />
           </div>
           <div className="flex flex-col gap-2">
@@ -165,7 +154,6 @@ export function BrandingForm({
               name="logo"
               type="file"
               accept="image/png,image/jpeg,.png,.jpg,.jpeg"
-              className="h-11 text-base md:text-base"
             />
             {logoOn ? (
               <p className="text-sm text-muted-foreground">A logo is already saved.</p>
@@ -181,14 +169,14 @@ export function BrandingForm({
               <AlertDescription>Saved.</AlertDescription>
             </Alert>
           ) : null}
-          <Button className="h-11 w-full text-base" type="submit" disabled={busy}>
+          <Button className="self-start" type="submit" disabled={busy}>
             Save
           </Button>
           {logoOn ? (
             <Button
+              className="self-start"
               type="button"
               variant="outline"
-              className="h-11 w-full text-base"
               disabled={busy}
               onClick={onRemoveLogo}
             >

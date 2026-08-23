@@ -2,7 +2,11 @@
 import { createElement } from "react";
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { SiteHeader } from "../../components/site-header.js";
+import { AppShell } from "../../components/app-shell.js";
+
+vi.mock("next/navigation", () => ({
+  usePathname: () => "",
+}));
 import { TeamAccept } from "../../app/team/accept/team-accept.js";
 import { TeamClient } from "../../app/team/team-client.js";
 import { TeamList } from "../../app/team/team-list.js";
@@ -101,7 +105,7 @@ describe("cabinet Team link", () => {
   });
 
   it("links Team to /team", () => {
-    render(createElement(SiteHeader, { variant: "app" }));
+    render(createElement(AppShell, null, "content"));
     expect(screen.getAllByRole("link", { name: /^team$/i })[0]?.getAttribute("href")).toBe(
       "/team",
     );
