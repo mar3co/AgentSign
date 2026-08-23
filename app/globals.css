@@ -6,7 +6,9 @@
 
 @theme inline {
     --font-heading: "Big Shoulders", "Public Sans", ui-sans-serif, sans-serif;
-    --font-sans: "Public Sans", ui-sans-serif, system-ui, sans-serif;
+    /* Lead with the next/font variable: the loaded face registers under a
+       hashed family name, so the literal "Public Sans" alone never matches. */
+    --font-sans: var(--font-sans-face), "Public Sans", ui-sans-serif, system-ui, sans-serif;
     --font-mono: "IBM Plex Mono", ui-monospace, monospace;
     --font-serif: var(--font-serif-face), Georgia, serif;
     --color-bond: var(--bond);
@@ -46,6 +48,7 @@
     --color-foreground: var(--foreground);
     --color-background: var(--background);
     --color-seal: var(--seal);
+    --color-brand-wax: var(--brand-wax);
     --radius-sm: calc(var(--radius) * 0.6);
     --radius-md: calc(var(--radius) * 0.8);
     --radius-lg: var(--radius);
@@ -81,7 +84,10 @@
     --tint: #2b4c9b;
     --terminal: #0e1420;
     --ledger: #c9d6ee;
-    --seal: #8c2b2b;
+    /* Retuned to the brand wax (Brand.md); predates the wax system. */
+    --seal: var(--brand-wax);
+    /* Brand accent: Sealing Wax (see Brand.md). AA on white at 4.77:1. */
+    --brand-wax: #cc4416;
     --chart-1: oklch(0.646 0.222 41.116);
     --chart-2: oklch(0.6 0.118 184.704);
     --chart-3: oklch(0.398 0.07 227.392);
@@ -99,6 +105,8 @@
 }
 
 .dark {
+    /* Brand accent on dark grounds: 7.9:1 against near-black text. */
+    --brand-wax: #ff8a5c;
     --background: oklch(0.145 0 0);
     --foreground: oklch(0.985 0 0);
     --card: oklch(0.205 0 0);
@@ -124,7 +132,8 @@
     --chart-5: oklch(0.269 0 0);
     --sidebar: oklch(0.205 0 0);
     --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
+    /* Bond Navy: the brand's support blue (Brand.md), replacing stock indigo. */
+    --sidebar-primary: var(--tint);
     --sidebar-primary-foreground: oklch(0.985 0 0);
     --sidebar-accent: oklch(0.269 0 0);
     --sidebar-accent-foreground: oklch(0.985 0 0);
@@ -140,9 +149,11 @@
     --card-foreground: var(--ink);
     --border: #e6e3da;
     --input: #c9cdd4;
-    --primary: var(--tint);
-    --primary-foreground: var(--bond);
-    --ring: var(--tint);
+    /* Wax leads (Brand.md): primary CTAs and focus rings carry the brand
+       accent; navy demotes to support (links, charts, depth). */
+    --primary: var(--brand-wax);
+    --primary-foreground: #ffffff;
+    --ring: var(--brand-wax);
     --muted: #f1efe9;
     --muted-foreground: #6b7280;
     --secondary: #f1efe9;
@@ -182,10 +193,11 @@
      card face must be a full step lighter than the canvas behind it. */
   --sidebar: var(--card);
   /* Top band behind the app header (shadcn studio application-shell-05).
-     Chromatic indigo, not the neutral primary: Chrome mis-rasterizes large
-     near-black surfaces under this layout (band bleaches to white and the
-     header text inverts), while mid-lightness chromatic colors paint fine. */
-  --app-band: oklch(0.511 0.262 276.966);
+     Bond Navy (Brand.md) — chromatic and mid-lightness, which also matters
+     here: Chrome mis-rasterizes large near-black surfaces under this layout
+     (band bleaches to white and the header text inverts), while mid-lightness
+     chromatic colors paint fine. */
+  --app-band: var(--tint);
 }
 /* Painted as the shell's own background rather than a positioned child; a
    dark band as an underlay element hits the same Chrome paint glitch. */
