@@ -1,3 +1,4 @@
+import { WaxStop } from "@/components/brand-mark";
 import { cn } from "@/lib/utils";
 
 export type SiteHeaderVariant = "public" | "ceremony" | "auth";
@@ -27,6 +28,7 @@ export function SiteHeader({
         )}
       >
         AgentSign
+        <WaxStop />
       </a>
       {variant === "public" ? (
         <nav aria-label="Account" className="flex items-center gap-4 sm:gap-8">

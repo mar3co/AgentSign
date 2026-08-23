@@ -8,11 +8,11 @@ import {
   BookOpen,
   PanelLeftClose,
   PanelRightClose,
-  PenLine,
   Search,
   Send,
 } from "lucide-react";
 import { NAV, NAV_GROUPS, type NavItem } from "@/components/app-nav";
+import { AgentSignMark } from "@/components/brand-mark";
 import { LinkButton } from "@/components/link-button";
 import { NavUser } from "@/components/nav-user";
 import { ActivityDialog } from "@/components/shadcn-studio/blocks/dialog-activity";
@@ -110,9 +110,12 @@ export function AppShell({
                     render={<a href="/dashboard" />}
                   >
                     <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-                      <PenLine className="size-4" />
+                      <AgentSignMark className="size-4" />
                     </div>
-                    <span className="text-xl font-semibold">AgentSign</span>
+                    {/* Lockup: the mark carries the wax pixel, so no full-stop. */}
+                    <span className="font-sans text-xl font-semibold">
+                      AgentSign
+                    </span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               </SidebarMenu>
