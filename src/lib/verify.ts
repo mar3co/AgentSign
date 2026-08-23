@@ -23,9 +23,8 @@ const AGENT_RE =
   /^Attested by .+ for (\S+) at (\d{4}-\d{2}-\d{2}T[^\s]+)\. Not an electronic signature\.$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ISO_RE = /^\d{4}-\d{2}-\d{2}T[\d:.+-]+Z$/;
-// PDFs sealed before the rename carry the immutable "Envelope id:" line.
 const DOCUMENT_RE =
-  /^(?:Document|Envelope) id: ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+  /^Document id: ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 const HUMAN_COUNT_RE = /^human_signatures: (\d+)$/;
 const AGENT_COUNT_RE = /^agent_attestations: (\d+)$/;
 const MESSAGE_DIGEST_OID = "1.2.840.113549.1.9.4";

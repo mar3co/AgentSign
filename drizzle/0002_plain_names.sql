@@ -2,8 +2,9 @@
 -- cabinet_members -> team_members.
 -- Apply against a v1.2 Postgres (Supabase) before deploying this branch.
 -- Tests use PGlite pushSchema and do not run this file.
--- Storage note: the Supabase Storage bucket keeps its historical "envelopes"
--- name (buckets cannot be renamed in place); STORAGE_BUCKET defaults match.
+-- Storage note: buckets cannot be renamed in place, so create a "documents"
+-- bucket in Supabase Storage (STORAGE_BUCKET default), copy over any objects
+-- still worth keeping, then drop "envelopes".
 
 BEGIN;
 
