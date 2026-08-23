@@ -1,25 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { ReactNode } from "react";
+import type { ReactElement } from "react";
 
+import { ArrowDown, ArrowUp, Files, Search, Undo2 } from "lucide-react";
+import { NAV } from "@/components/app-nav";
 import {
-  Archive,
-  ArrowDown,
-  ArrowUp,
-  Bot,
-  Files,
-  LayoutDashboard,
-  Palette,
-  Search,
-  Send,
-  Undo2,
-  Users,
-} from "lucide-react";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import {
   Combobox,
-  ComboboxEmpty,
   ComboboxGroup,
   ComboboxInput,
   ComboboxItem,
@@ -29,7 +22,7 @@ import {
 import { InputGroupAddon } from "@/components/ui/input-group";
 
 type Props = {
-  trigger: ReactNode;
+  trigger: ReactElement;
   defaultOpen?: boolean;
   className?: string;
   /** Register the global ⌘K / Ctrl+K shortcut. Enable on ONE instance only. */
@@ -37,13 +30,7 @@ type Props = {
 };
 
 const PAGES = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/send", label: "Send a PDF", icon: Send },
-  { href: "/envelopes", label: "Cabinet", icon: Archive },
-  { href: "/packets", label: "Packets", icon: Files },
-  { href: "/team", label: "Team", icon: Users },
-  { href: "/agents", label: "Agents", icon: Bot },
-  { href: "/settings/branding", label: "Branding", icon: Palette },
+  ...NAV.map(({ href, label, icon }) => ({ href, label, icon })),
   { href: "/docs", label: "Docs", icon: Files },
 ];
 
@@ -79,8 +66,8 @@ export function SearchDialog({
 
   return (
     <div className={className}>
-      <div onClick={() => setOpen(true)}>{trigger}</div>
       <Dialog open={open} onOpenChange={(next) => (next ? setOpen(true) : close())}>
+        <DialogTrigger render={trigger} />
         <DialogContent
           className="gap-0 overflow-hidden border-0 p-0 *:data-[slot=dialog-close]:top-1.5 *:data-[slot=dialog-close]:right-1.5 sm:max-w-lg"
           aria-describedby={undefined}
@@ -107,8 +94,11 @@ export function SearchDialog({
               </InputGroupAddon>
             </ComboboxInput>
             <ComboboxList className="border-0">
-              <ComboboxEmpty>No results found.</ComboboxEmpty>
-              {pages.length > 0 && (
+              {pages.length === 0 ? (
+                <div className="text-muted-foreground p-4 text-center text-sm">
+                  No results found.
+                </div>
+              ) : (
                 <ComboboxGroup className="p-4!">
                   <ComboboxLabel>Pages</ComboboxLabel>
                   {pages.map((page) => (
