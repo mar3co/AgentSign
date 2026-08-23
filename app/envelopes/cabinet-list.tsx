@@ -1,19 +1,25 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
+  columnFilteringFeature,
+  columnSizingFeature,
+  createFilteredRowModel,
+  createPaginatedRowModel,
+  createSortedRowModel,
+  filterFn_equals,
   flexRender,
-  getCoreRowModel,
-  getFacetedUniqueValues,
-  getFilteredRowModel,
-  getPaginationRowModel,
-  getSortedRowModel,
-  useReactTable,
+  globalFilteringFeature,
+  rowPaginationFeature,
+  rowSortingFeature,
+  sortFn_alphanumeric,
+  sortFn_basic,
+  sortFn_datetime,
+  sortFn_text,
+  tableFeatures,
+  useTable,
   type ColumnDef,
-  type ColumnFiltersState,
-  type PaginationState,
   type Row,
-  type SortingState,
 } from "@tanstack/react-table";
 import {
   Ban,
@@ -85,6 +91,31 @@ export type CabinetEnvelope = {
   canDelete?: boolean;
   signers?: CabinetParty[];
 };
+
+/* v9 is feature-modular: only the features the cabinet uses get compiled in,
+   along with their row models and the filter fns referenced by string key.
+   Built statically, as the docs recommend, so the set is stable across renders. */
+const cabinetFeatures = tableFeatures({
+  columnFilteringFeature,
+  columnSizingFeature,
+  globalFilteringFeature,
+  rowPaginationFeature,
+  rowSortingFeature,
+  filteredRowModel: createFilteredRowModel(),
+  paginatedRowModel: createPaginatedRowModel(),
+  sortedRowModel: createSortedRowModel(),
+  filterFns: { equals: filterFn_equals },
+  // "auto" resolution picks from these by sampled value shape; unregistered
+  // picks fall back to basic with a console warning.
+  sortFns: {
+    alphanumeric: sortFn_alphanumeric,
+    basic: sortFn_basic,
+    datetime: sortFn_datetime,
+    text: sortFn_text,
+  },
+});
+
+type CabinetFeatures = typeof cabinetFeatures;
 
 const STATUS_BADGES: Record<string, { label: string; dot: string }> = {
   pending_sender: { label: "Waiting on you", dot: "bg-amber-500" },
@@ -290,7 +321,7 @@ function ActionsCell({
 
 /** Match against the title and every signer's name and email. */
 function matchesEnvelope(
-  row: Row<CabinetEnvelope>,
+  row: Row<CabinetFeatures, CabinetEnvelope>,
   _columnId: string,
   value: string,
 ): boolean {
@@ -325,17 +356,7 @@ export function CabinetList({
   onVoid?: (id: string) => void;
   onSavePacket?: (id: string) => void;
 }) {
-  const [sorting, setSorting] = useState<SortingState>([
-    { id: "createdAt", desc: true },
-  ]);
-  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
-  const [globalFilter, setGlobalFilter] = useState("");
-  const [pagination, setPagination] = useState<PaginationState>({
-    pageIndex: 0,
-    pageSize: 10,
-  });
-
-  const columns = useMemo<ColumnDef<CabinetEnvelope>[]>(
+  const columns = useMemo<ColumnDef<CabinetFeatures, CabinetEnvelope>[]>(
     () => [
       {
         id: "icon",
@@ -385,20 +406,16 @@ export function CabinetList({
     [onVoid, onSavePacket],
   );
 
-  const table = useReactTable({
+  // v9's store owns the table state; we seed it and read back table.state.
+  const table = useTable({
+    features: cabinetFeatures,
     data: envelopes,
     columns,
-    state: { sorting, columnFilters, globalFilter, pagination },
-    onSortingChange: setSorting,
-    onColumnFiltersChange: setColumnFilters,
-    onGlobalFilterChange: setGlobalFilter,
-    onPaginationChange: setPagination,
+    initialState: {
+      sorting: [{ id: "createdAt", desc: true }],
+      pagination: { pageIndex: 0, pageSize: 10 },
+    },
     globalFilterFn: matchesEnvelope,
-    getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-    getFacetedUniqueValues: getFacetedUniqueValues(),
     enableSortingRemoval: false,
     autoResetPageIndex: true,
   });
@@ -411,7 +428,7 @@ export function CabinetList({
     (table.getColumn("status")?.getFilterValue() as string | undefined) ?? "all";
 
   const filteredCount = table.getFilteredRowModel().rows.length;
-  const { pageIndex, pageSize } = table.getState().pagination;
+  const { pageIndex, pageSize } = table.state.pagination;
   const pageCount = table.getPageCount();
   const { pages, leftEllipsis, rightEllipsis } = pageWindow(
     pageIndex + 1,
@@ -479,7 +496,7 @@ export function CabinetList({
                   id="cabinet-search"
                   type="text"
                   placeholder="Search documents"
-                  value={globalFilter}
+                  value={(table.state.globalFilter as string | undefined) ?? ""}
                   onChange={(e) => table.setGlobalFilter(e.target.value)}
                 />
               </InputGroup>
@@ -583,7 +600,7 @@ export function CabinetList({
             ) : (
               table.getRowModel().rows.map((row) => (
                 <TableRow key={row.id}>
-                  {row.getVisibleCells().map((cell) => (
+                  {row.getAllCells().map((cell) => (
                     <TableCell
                       key={cell.id}
                       className={cn(
