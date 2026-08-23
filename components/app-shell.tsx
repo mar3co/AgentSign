@@ -45,7 +45,7 @@ const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
     label: "Workspace",
     items: [
       {
-        href: "/",
+        href: "/send",
         label: "Send",
         subtitle: "Send a PDF for signature.",
         icon: Send,
@@ -193,12 +193,12 @@ export function AppShell({
                 </p>
               ) : null}
             </div>
-            {pathname !== "/" ? (
-              <LinkButton href="/" size="sm" className="ml-auto">
+            {pathname === "/send" ? null : (
+              <LinkButton href="/send" size="sm" className="ml-auto">
                 <Send className="size-3.5" />
                 Send a PDF
               </LinkButton>
-            ) : null}
+            )}
           </header>
           <main
             className={cn(

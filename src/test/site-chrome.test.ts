@@ -45,7 +45,7 @@ describe("AppShell", () => {
     render(createElement(AppShell, null, "content"));
     const href = (name: RegExp) =>
       screen.getAllByRole("link", { name })[0]?.getAttribute("href");
-    expect(href(/^send$/i)).toBe("/");
+    expect(href(/^send$/i)).toBe("/send");
     expect(href(/^cabinet$/i)).toBe("/envelopes");
     expect(href(/^packets$/i)).toBe("/packets");
     expect(href(/^branding$/i)).toBe("/settings/branding");
