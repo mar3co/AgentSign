@@ -2,10 +2,26 @@
 
 import { useMemo, useState } from "react";
 import {
+  flexRender,
+  getCoreRowModel,
+  getFacetedUniqueValues,
+  getFilteredRowModel,
+  getPaginationRowModel,
+  getSortedRowModel,
+  useReactTable,
+  type ColumnDef,
+  type ColumnFiltersState,
+  type PaginationState,
+  type Row,
+  type SortingState,
+} from "@tanstack/react-table";
+import {
   Ban,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   Clock,
   Hourglass,
   Search,
@@ -50,6 +66,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 
 export type CabinetParty = {
   name: string;
@@ -91,10 +108,7 @@ export function StatusBadge({ status }: { status: string }) {
 
 /* Tinted status glyph in an avatar circle, after the invoice datatable in
    shadcn studio's dashboard-shell-05. */
-const STATUS_ICONS: Record<
-  string,
-  { icon: typeof Send; tint: string }
-> = {
+const STATUS_ICONS: Record<string, { icon: typeof Send; tint: string }> = {
   pending_sender: {
     icon: Hourglass,
     tint: "bg-amber-600/10 text-amber-600 dark:bg-amber-400/10 dark:text-amber-400",
@@ -201,6 +215,94 @@ export function EnvelopeMiniTable({
   );
 }
 
+function ActionsCell({
+  env,
+  onVoid,
+  onSavePacket,
+}: {
+  env: CabinetEnvelope;
+  onVoid?: (id: string) => void;
+  onSavePacket?: (id: string) => void;
+}) {
+  return (
+    <span className="flex flex-wrap items-center justify-end gap-2">
+      {env.status === "completed" ? (
+        <>
+          <LinkButton
+            href={`/v1/envelopes/${env.id}/pdf`}
+            variant="outline"
+            size="sm"
+          >
+            Download
+          </LinkButton>
+          <LinkButton
+            href={`/v1/envelopes/${env.id}/pdf?kind=certificate`}
+            variant="outline"
+            size="sm"
+          >
+            Certificate
+          </LinkButton>
+        </>
+      ) : null}
+      {env.status === "completed" && env.canDelete ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => onSavePacket?.(env.id)}
+        >
+          Save as packet
+        </Button>
+      ) : null}
+      {env.canDelete ? (
+        <AlertDialog>
+          <AlertDialogTrigger
+            render={<Button type="button" variant="outline" size="sm" />}
+          >
+            Void
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Void “{env.title}”?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Signing links stop working and the envelope cannot be reopened.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogClose
+                render={<Button type="button" variant="outline" />}
+              >
+                Keep envelope
+              </AlertDialogClose>
+              <AlertDialogClose
+                render={<Button type="button" variant="destructive" />}
+                onClick={() => onVoid?.(env.id)}
+              >
+                Void envelope
+              </AlertDialogClose>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      ) : null}
+    </span>
+  );
+}
+
+/** Match against the title and every signer's name and email. */
+function matchesEnvelope(
+  row: Row<CabinetEnvelope>,
+  _columnId: string,
+  value: string,
+): boolean {
+  const q = String(value).trim().toLowerCase();
+  if (!q) return true;
+  const env = row.original;
+  if (env.title.toLowerCase().includes(q)) return true;
+  return (env.signers ?? []).some(
+    (p) => p.name.toLowerCase().includes(q) || p.email.toLowerCase().includes(q),
+  );
+}
+
 const PAGE_SIZES = [5, 10, 25, 50];
 
 /** Page numbers around the current page, with ellipsis flags. */
@@ -223,33 +325,98 @@ export function CabinetList({
   onVoid?: (id: string) => void;
   onSavePacket?: (id: string) => void;
 }) {
-  const [query, setQuery] = useState("");
-  const [status, setStatus] = useState("all");
-  const [pageSize, setPageSize] = useState(10);
-  const [pageIndex, setPageIndex] = useState(0);
+  const [sorting, setSorting] = useState<SortingState>([
+    { id: "createdAt", desc: true },
+  ]);
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
+  const [globalFilter, setGlobalFilter] = useState("");
+  const [pagination, setPagination] = useState<PaginationState>({
+    pageIndex: 0,
+    pageSize: 10,
+  });
+
+  const columns = useMemo<ColumnDef<CabinetEnvelope>[]>(
+    () => [
+      {
+        id: "icon",
+        header: () => null,
+        cell: ({ row }) => <StatusIconAvatar status={row.original.status} />,
+        enableSorting: false,
+        size: 56,
+      },
+      {
+        accessorKey: "title",
+        header: "Document",
+        cell: ({ row }) => <DocumentCell env={row.original} />,
+        size: 380,
+      },
+      {
+        accessorKey: "status",
+        header: "Status",
+        cell: ({ row }) => <StatusBadge status={row.original.status} />,
+        filterFn: "equals",
+        size: 144,
+      },
+      {
+        id: "createdAt",
+        accessorFn: (env) => env.createdAt ?? "",
+        header: "Sent",
+        cell: ({ row }) => (
+          <span className="text-muted-foreground whitespace-nowrap">
+            {formatSentDate(row.original.createdAt)}
+          </span>
+        ),
+        size: 128,
+      },
+      {
+        id: "actions",
+        header: () => "Actions",
+        cell: ({ row }) => (
+          <ActionsCell
+            env={row.original}
+            onVoid={onVoid}
+            onSavePacket={onSavePacket}
+          />
+        ),
+        enableSorting: false,
+        size: 256,
+      },
+    ],
+    [onVoid, onSavePacket],
+  );
+
+  const table = useReactTable({
+    data: envelopes,
+    columns,
+    state: { sorting, columnFilters, globalFilter, pagination },
+    onSortingChange: setSorting,
+    onColumnFiltersChange: setColumnFilters,
+    onGlobalFilterChange: setGlobalFilter,
+    onPaginationChange: setPagination,
+    globalFilterFn: matchesEnvelope,
+    getCoreRowModel: getCoreRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+    getFacetedUniqueValues: getFacetedUniqueValues(),
+    enableSortingRemoval: false,
+    autoResetPageIndex: true,
+  });
 
   const statuses = useMemo(
     () => [...new Set(envelopes.map((e) => e.status))],
     [envelopes],
   );
+  const statusFilter =
+    (table.getColumn("status")?.getFilterValue() as string | undefined) ?? "all";
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return envelopes.filter((env) => {
-      if (status !== "all" && env.status !== status) return false;
-      if (!q) return true;
-      if (env.title.toLowerCase().includes(q)) return true;
-      return (env.signers ?? []).some(
-        (p) =>
-          p.name.toLowerCase().includes(q) || p.email.toLowerCase().includes(q),
-      );
-    });
-  }, [envelopes, query, status]);
-
-  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const page = Math.min(pageIndex, pageCount - 1);
-  const rows = filtered.slice(page * pageSize, page * pageSize + pageSize);
-  const { pages, leftEllipsis, rightEllipsis } = pageWindow(page + 1, pageCount);
+  const filteredCount = table.getFilteredRowModel().rows.length;
+  const { pageIndex, pageSize } = table.getState().pagination;
+  const pageCount = table.getPageCount();
+  const { pages, leftEllipsis, rightEllipsis } = pageWindow(
+    pageIndex + 1,
+    Math.max(1, pageCount),
+  );
 
   if (envelopes.length === 0) {
     return (
@@ -282,9 +449,7 @@ export function CabinetList({
               items={PAGE_SIZES.map((s) => ({ label: String(s), value: String(s) }))}
               value={String(pageSize)}
               onValueChange={(value: string | null) => {
-                if (!value) return;
-                setPageSize(Number(value));
-                setPageIndex(0);
+                if (value) table.setPageSize(Number(value));
               }}
             >
               <SelectTrigger id="cabinet-page-size" className="w-fit whitespace-nowrap">
@@ -314,11 +479,8 @@ export function CabinetList({
                   id="cabinet-search"
                   type="text"
                   placeholder="Search documents"
-                  value={query}
-                  onChange={(e) => {
-                    setQuery(e.target.value);
-                    setPageIndex(0);
-                  }}
+                  value={globalFilter}
+                  onChange={(e) => table.setGlobalFilter(e.target.value)}
                 />
               </InputGroup>
             </div>
@@ -334,10 +496,11 @@ export function CabinetList({
                     value: s,
                   })),
                 ]}
-                value={status}
+                value={statusFilter}
                 onValueChange={(value: string | null) => {
-                  setStatus(value ?? "all");
-                  setPageIndex(0);
+                  table
+                    .getColumn("status")
+                    ?.setFilterValue(value === "all" || value === null ? undefined : value);
                 }}
               >
                 <SelectTrigger id="cabinet-status" className="w-full">
@@ -359,107 +522,78 @@ export function CabinetList({
         </div>
         <Table>
           <TableHeader>
-            <TableRow className="h-14 border-t">
-              <TableHead className="text-muted-foreground w-14 first:pl-4" />
-              <TableHead className="text-muted-foreground">Document</TableHead>
-              <TableHead className="text-muted-foreground w-36">Status</TableHead>
-              <TableHead className="text-muted-foreground w-32">Sent</TableHead>
-              <TableHead className="text-muted-foreground w-64 text-right last:pr-4">
-                Actions
-              </TableHead>
-            </TableRow>
+            {table.getHeaderGroups().map((headerGroup) => (
+              <TableRow key={headerGroup.id} className="h-14 border-t">
+                {headerGroup.headers.map((header) => (
+                  <TableHead
+                    key={header.id}
+                    style={{ width: `${header.getSize()}px` }}
+                    className="text-muted-foreground first:pl-4 last:pr-4 last:text-right"
+                  >
+                    {header.isPlaceholder ? null : header.column.getCanSort() ? (
+                      <div
+                        className={cn(
+                          "flex h-full cursor-pointer items-center gap-2 select-none",
+                        )}
+                        onClick={header.column.getToggleSortingHandler()}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            header.column.getToggleSortingHandler()?.(e);
+                          }
+                        }}
+                        tabIndex={0}
+                        role="button"
+                        aria-label={`Sort by ${String(header.column.columnDef.header)}`}
+                      >
+                        {flexRender(
+                          header.column.columnDef.header,
+                          header.getContext(),
+                        )}
+                        {{
+                          asc: (
+                            <ChevronUp
+                              aria-hidden
+                              className="size-4 shrink-0 opacity-60"
+                            />
+                          ),
+                          desc: (
+                            <ChevronDown
+                              aria-hidden
+                              className="size-4 shrink-0 opacity-60"
+                            />
+                          ),
+                        }[header.column.getIsSorted() as string] ?? null}
+                      </div>
+                    ) : (
+                      flexRender(header.column.columnDef.header, header.getContext())
+                    )}
+                  </TableHead>
+                ))}
+              </TableRow>
+            ))}
           </TableHeader>
           <TableBody>
-            {rows.length === 0 ? (
+            {table.getRowModel().rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="h-24 text-center">
+                <TableCell colSpan={columns.length} className="h-24 text-center">
                   No documents match.
                 </TableCell>
               </TableRow>
             ) : (
-              rows.map((env) => (
-                <TableRow key={env.id}>
-                  <TableCell className="h-14 first:pl-4">
-                    <StatusIconAvatar status={env.status} />
-                  </TableCell>
-                  <TableCell className="h-14 max-w-0">
-                    <DocumentCell env={env} />
-                  </TableCell>
-                  <TableCell className="h-14">
-                    <StatusBadge status={env.status} />
-                  </TableCell>
-                  <TableCell className="text-muted-foreground h-14 whitespace-nowrap">
-                    {formatSentDate(env.createdAt)}
-                  </TableCell>
-                  <TableCell className="h-14 text-right last:pr-4">
-                    <span className="flex flex-wrap items-center justify-end gap-2">
-                      {env.status === "completed" ? (
-                        <>
-                          <LinkButton
-                            href={`/v1/envelopes/${env.id}/pdf`}
-                            variant="outline"
-                            size="sm"
-                          >
-                            Download
-                          </LinkButton>
-                          <LinkButton
-                            href={`/v1/envelopes/${env.id}/pdf?kind=certificate`}
-                            variant="outline"
-                            size="sm"
-                          >
-                            Certificate
-                          </LinkButton>
-                        </>
-                      ) : null}
-                      {env.status === "completed" && env.canDelete ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => onSavePacket?.(env.id)}
-                        >
-                          Save as packet
-                        </Button>
-                      ) : null}
-                      {env.canDelete ? (
-                        <AlertDialog>
-                          <AlertDialogTrigger
-                            render={
-                              <Button type="button" variant="outline" size="sm" />
-                            }
-                          >
-                            Void
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>
-                                Void “{env.title}”?
-                              </AlertDialogTitle>
-                              <AlertDialogDescription>
-                                Signing links stop working and the envelope
-                                cannot be reopened.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogClose
-                                render={<Button type="button" variant="outline" />}
-                              >
-                                Keep envelope
-                              </AlertDialogClose>
-                              <AlertDialogClose
-                                render={
-                                  <Button type="button" variant="destructive" />
-                                }
-                                onClick={() => onVoid?.(env.id)}
-                              >
-                                Void envelope
-                              </AlertDialogClose>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      ) : null}
-                    </span>
-                  </TableCell>
+              table.getRowModel().rows.map((row) => (
+                <TableRow key={row.id}>
+                  {row.getVisibleCells().map((cell) => (
+                    <TableCell
+                      key={cell.id}
+                      className={cn(
+                        "h-14 first:pl-4 last:pr-4 last:text-right",
+                        cell.column.id === "title" && "max-w-0",
+                      )}
+                    >
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </TableCell>
+                  ))}
                 </TableRow>
               ))
             )}
@@ -471,17 +605,17 @@ export function CabinetList({
         <p className="text-muted-foreground text-sm whitespace-nowrap" aria-live="polite">
           Showing{" "}
           <span>
-            {filtered.length === 0 ? 0 : page * pageSize + 1} to{" "}
-            {Math.min((page + 1) * pageSize, filtered.length)}
+            {filteredCount === 0 ? 0 : pageIndex * pageSize + 1} to{" "}
+            {Math.min((pageIndex + 1) * pageSize, filteredCount)}
           </span>{" "}
-          of <span>{filtered.length} documents</span>
+          of <span>{filteredCount} documents</span>
         </p>
         <nav aria-label="Pagination" className="flex items-center gap-1">
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setPageIndex(page - 1)}
-            disabled={page === 0}
+            onClick={() => table.previousPage()}
+            disabled={!table.getCanPreviousPage()}
             aria-label="Go to previous page"
           >
             <ChevronLeft aria-hidden />
@@ -491,7 +625,7 @@ export function CabinetList({
             <span className="text-muted-foreground px-1">…</span>
           ) : null}
           {pages.map((p) => {
-            const isActive = p === page + 1;
+            const isActive = p === pageIndex + 1;
             return (
               <Button
                 key={p}
@@ -502,7 +636,7 @@ export function CabinetList({
                     : "bg-primary/10 text-primary hover:bg-primary/20"
                 }
                 variant={isActive ? "default" : "ghost"}
-                onClick={() => setPageIndex(p - 1)}
+                onClick={() => table.setPageIndex(p - 1)}
                 aria-current={isActive ? "page" : undefined}
               >
                 {p}
@@ -515,8 +649,8 @@ export function CabinetList({
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setPageIndex(page + 1)}
-            disabled={page + 1 >= pageCount}
+            onClick={() => table.nextPage()}
+            disabled={!table.getCanNextPage()}
             aria-label="Go to next page"
           >
             Next
