@@ -70,9 +70,16 @@ export function ActivityDialog({ defaultOpen = false, trigger }: Props) {
               Loading…
             </p>
           ) : events.length === 0 ? (
-            <p className="text-muted-foreground px-4 py-8 text-center text-sm">
-              Nothing yet. Send a PDF and its progress shows up here.
-            </p>
+            <div className="m-4 rounded-md border border-dashed p-6 text-center">
+              <FileText
+                aria-hidden
+                className="text-muted-foreground mx-auto size-8"
+              />
+              <p className="mt-2 text-sm font-medium">Nothing yet</p>
+              <p className="text-muted-foreground mt-1 text-sm">
+                Send a PDF and its progress shows up here.
+              </p>
+            </div>
           ) : (
             events.map((item, i) => (
               <div key={item.id}>

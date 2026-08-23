@@ -23,7 +23,9 @@ export function UpgradeGate({
           titleBadge={<Badge variant="secondary">Pro</Badge>}
           description={description}
         >
-          <LinkButton href="/upgrade">Upgrade</LinkButton>
+          <LinkButton href="/upgrade" size="sm">
+            Upgrade
+          </LinkButton>
         </EmptyState>
       </CardContent>
     </Card>

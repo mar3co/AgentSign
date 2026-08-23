@@ -86,7 +86,9 @@ export function CabinetList({
             title="No envelopes yet"
             description="Send a PDF and it shows up here with where it stands."
           >
-            <LinkButton href="/send">Send a PDF</LinkButton>
+            <LinkButton href="/send" size="sm">
+              Send a PDF
+            </LinkButton>
           </EmptyState>
         ) : (
           <Table>

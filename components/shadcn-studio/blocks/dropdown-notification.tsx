@@ -2,6 +2,7 @@
 
 import type { ReactElement } from "react";
 
+import { BellOff } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
@@ -100,9 +101,13 @@ export function NotificationDropdown({ trigger, defaultOpen, align = "end" }: Pr
             Loading…
           </p>
         ) : events.length === 0 ? (
-          <p className="text-muted-foreground px-2 py-6 text-center text-sm">
-            Nothing yet. Activity on your envelopes shows up here.
-          </p>
+          <div className="m-2 rounded-md border border-dashed p-6 text-center">
+            <BellOff aria-hidden className="text-muted-foreground mx-auto size-8" />
+            <p className="mt-2 text-sm font-medium">Nothing yet</p>
+            <p className="text-muted-foreground mt-1 text-sm">
+              Activity on your envelopes shows up here.
+            </p>
+          </div>
         ) : (
           events.slice(0, 6).map((item, i) => (
             <div key={item.id}>
