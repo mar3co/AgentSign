@@ -178,6 +178,9 @@
 /* The app surface reads as stock shadcn: Geist everywhere, no display face. */
 [data-surface="app"] {
   font-family: var(--font-geist-face), "Geist", ui-sans-serif, system-ui, sans-serif;
+  /* The floating sidebar and content sit as cards on a muted canvas, so the
+     card face must be a full step lighter than the canvas behind it. */
+  --sidebar: var(--card);
 }
 [data-surface="app"] :is(.font-heading, h1, h2, h3) {
   font-family: inherit;

@@ -123,7 +123,8 @@ export function AppShell({
   const subtitle = currentNav(pathname)?.subtitle;
   return (
     <div data-surface="app" className="contents">
-      <SidebarProvider>
+      <SidebarProvider className="bg-muted">
+
         <Sidebar collapsible="icon" variant="floating">
           <SidebarHeader>
             <SidebarMenu>
@@ -151,6 +152,7 @@ export function AppShell({
                         <SidebarMenuButton
                           isActive={isActive(pathname, item.href)}
                           tooltip={item.label}
+                          className="h-10 rounded-lg px-3"
                           render={<a href={item.href} />}
                         >
                           <item.icon />
@@ -166,7 +168,11 @@ export function AppShell({
           <SidebarFooter>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton tooltip="Docs" render={<a href="/docs" />}>
+                <SidebarMenuButton
+                  tooltip="Docs"
+                  className="h-10 rounded-lg px-3"
+                  render={<a href="/docs" />}
+                >
                   <BookOpen />
                   <span>Docs</span>
                 </SidebarMenuButton>
@@ -176,7 +182,7 @@ export function AppShell({
           </SidebarFooter>
           <SidebarRail />
         </Sidebar>
-        <SidebarInset>
+        <SidebarInset className="md:m-2 md:ml-0 md:overflow-hidden md:rounded-2xl md:shadow-sm md:ring-1 md:ring-sidebar-border">
           <header className="flex h-16 shrink-0 items-center gap-2 border-b border-border px-4">
             <SidebarTrigger className="-ml-1" />
             <Separator
