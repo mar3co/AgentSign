@@ -50,7 +50,7 @@ describe("BrandingForm", () => {
   });
 });
 
-describe("cabinet Branding link", () => {
+describe("sidebar Branding link", () => {
   afterEach(() => {
     cleanup();
   });

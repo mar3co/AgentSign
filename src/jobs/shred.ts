@@ -2,8 +2,8 @@ import { and, count, eq, lte, ne } from "drizzle-orm";
 import {
   apiKeys,
   auditEvents,
+  files,
   documents,
-  envelopes,
   signers as signersTable,
 } from "../db/schema.js";
 import { logEvent, type AuditDb } from "../lib/audit.js";
@@ -25,54 +25,54 @@ const REMIND_AFTER_MS = 3 * 86_400_000;
 const MAX_REMINDERS = 2;
 
 /** Hard-delete blobs, null document paths, tombstone, expire tmp keys, redact emails. */
-export async function purgeEnvelope(
+export async function purgeDocument(
   db: AuditDb,
   store: BlobStore,
-  envelopeId: string,
+  documentId: string,
   now: Date,
   opts?: { force?: boolean },
 ): Promise<void> {
   const [claimed] = await db
-    .update(envelopes)
+    .update(documents)
     .set({ status: "deleted", senderEmail: "redacted" })
     .where(
       opts?.force
-        ? and(eq(envelopes.id, envelopeId), ne(envelopes.status, "deleted"))
+        ? and(eq(documents.id, documentId), ne(documents.status, "deleted"))
         : and(
-            eq(envelopes.id, envelopeId),
-            lte(envelopes.shredAt, now),
-            ne(envelopes.status, "deleted"),
+            eq(documents.id, documentId),
+            lte(documents.shredAt, now),
+            ne(documents.status, "deleted"),
           ),
     )
     .returning();
   if (!claimed) return;
 
   for (const kind of KINDS) {
-    await store.delete(objectKey(envelopeId, kind));
+    await store.delete(objectKey(documentId, kind));
   }
   const signerRows = await db
     .select()
     .from(signersTable)
-    .where(eq(signersTable.envelopeId, envelopeId));
+    .where(eq(signersTable.documentId, documentId));
   for (const signer of signerRows) {
-    await store.delete(appearanceKey(envelopeId, signer.id));
+    await store.delete(appearanceKey(documentId, signer.id));
   }
   await db
-    .update(documents)
+    .update(files)
     .set({ storagePath: "" })
-    .where(eq(documents.envelopeId, envelopeId));
+    .where(eq(files.documentId, documentId));
   await db
     .update(signersTable)
     .set({ email: "redacted" })
-    .where(eq(signersTable.envelopeId, envelopeId));
+    .where(eq(signersTable.documentId, documentId));
   await db
     .update(apiKeys)
     .set({ expiresAt: now })
-    .where(and(eq(apiKeys.envelopeId, envelopeId), eq(apiKeys.kind, "tmp")));
-  await logEvent(db, { envelopeId, event: "deleted" });
+    .where(and(eq(apiKeys.documentId, documentId), eq(apiKeys.kind, "tmp")));
+  await logEvent(db, { documentId, event: "deleted" });
 }
 
-/** Envelopes whose shred_at has passed; skip already deleted. */
+/** Documents whose shred_at has passed; skip already deleted. */
 export async function shredDue(
   db: AuditDb,
   store: BlobStore,
@@ -80,16 +80,16 @@ export async function shredDue(
 ): Promise<void> {
   const due = await db
     .select()
-    .from(envelopes)
-    .where(and(lte(envelopes.shredAt, now), ne(envelopes.status, "deleted")));
-  for (const envelope of due) {
-    if (envelope.status === "pending") {
-      await fireAgentPartyWebhooks(db, envelope.id, {
-        event: "envelope.expired",
+    .from(documents)
+    .where(and(lte(documents.shredAt, now), ne(documents.status, "deleted")));
+  for (const document of due) {
+    if (document.status === "pending") {
+      await fireAgentPartyWebhooks(db, document.id, {
+        event: "document.expired",
         status: "expired",
       });
     }
-    await purgeEnvelope(db, store, envelope.id, now);
+    await purgeDocument(db, store, document.id, now);
   }
 }
 
@@ -101,14 +101,14 @@ export async function remindDue(
 ): Promise<void> {
   const pending = await db
     .select()
-    .from(envelopes)
-    .where(eq(envelopes.status, "pending"));
-  for (const envelope of pending) {
-    if (envelope.expiresAt.getTime() <= now.getTime()) continue;
+    .from(documents)
+    .where(eq(documents.status, "pending"));
+  for (const document of pending) {
+    if (document.expiresAt.getTime() <= now.getTime()) continue;
     const rows = await db
       .select()
       .from(signersTable)
-      .where(eq(signersTable.envelopeId, envelope.id));
+      .where(eq(signersTable.documentId, document.id));
     for (const signer of rows) {
       if (signer.kind === "agent") continue;
       if (signer.signedAt || signer.declinedAt || !signer.sentAt) continue;
@@ -134,7 +134,7 @@ export async function remindDue(
         .update(signersTable)
         .set({ remindedAt: now })
         .where(eq(signersTable.id, signer.id));
-      const brand = await loadBrand(db, envelope.userId, getDeps().store);
+      const brand = await loadBrand(db, document.userId, getDeps().store);
       let signUrl: string | undefined;
       if (signer.tokenEnc) {
         try {
@@ -144,9 +144,9 @@ export async function remindDue(
         }
       }
       const reminder = reminderEmail({
-        senderEmail: envelope.senderEmail,
-        title: envelope.title,
-        expiresAt: envelope.expiresAt,
+        senderEmail: document.senderEmail,
+        title: document.title,
+        expiresAt: document.expiresAt,
         brand: {
           displayName: brand.displayName,
           hasLogo: Boolean(brand.logoBytes),
@@ -161,14 +161,14 @@ export async function remindDue(
         });
       } catch (err) {
         await logEvent(db, {
-          envelopeId: envelope.id,
+          documentId: document.id,
           signerId: signer.id,
           event: "emailed_failed",
           payload: { error: err instanceof Error ? err.message : "mail_failed" },
         });
       }
       await logEvent(db, {
-        envelopeId: envelope.id,
+        documentId: document.id,
         signerId: signer.id,
         event: "reminded",
       });

@@ -3,8 +3,8 @@ import { eq } from "drizzle-orm";
 import { createTestDb } from "./db.js";
 import { createFsStore } from "../lib/storage.js";
 import { setDeps } from "../lib/deps.js";
-import { POST as postEnvelope } from "../../app/v1/envelopes/route.js";
-import { POST as postOtp } from "../../app/v1/envelopes/[id]/otp/route.js";
+import { POST as postDocument } from "../../app/v1/documents/route.js";
+import { POST as postOtp } from "../../app/v1/documents/[id]/otp/route.js";
 import { POST as postConsent } from "../../app/s/[token]/consent/route.js";
 import { POST as postSign } from "../../app/s/[token]/sign/route.js";
 import { makeDevP12 } from "../lib/pdf/devP12.js";
@@ -55,8 +55,8 @@ async function startFlow(opts?: {
     ),
   );
   body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
-  const res = await postEnvelope(
-    new Request("http://sign.test/v1/envelopes", { method: "POST", body }),
+  const res = await postDocument(
+    new Request("http://sign.test/v1/documents", { method: "POST", body }),
   );
   expect(res.status).toBe(201);
   const created = (await res.json()) as { id: string };
@@ -66,7 +66,7 @@ async function startFlow(opts?: {
 
 async function verifyOtp(id: string, code: string) {
   const verify = await postOtp(
-    new Request(`http://sign.test/v1/envelopes/${id}/otp`, {
+    new Request(`http://sign.test/v1/documents/${id}/otp`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ code }),
@@ -127,7 +127,7 @@ describe("email templates", () => {
   });
 
   it(
-    "completion mail includes shred sentence, attachments, and cabinet CTA",
+    "completion mail includes shred sentence, attachments, and keep CTA",
     { timeout: 60_000 },
     async () => {
       const frozen = new Date("2026-08-20T12:00:00Z");
@@ -152,9 +152,9 @@ describe("email templates", () => {
       expect(completion.length).toBeGreaterThanOrEqual(2);
       for (const mail of completion) {
         expect(mail.text).toContain(`Download this. We delete it on ${shredAt}`);
-        expect(mail.text).toContain("Keep it in a cabinet");
+        expect(mail.text).toContain("Keep it in your documents");
         expect(mail.text).toContain(
-          `http://localhost:3000/login?email=${encodeURIComponent(mail.to)}&next=/envelopes`,
+          `http://localhost:3000/login?email=${encodeURIComponent(mail.to)}&next=/documents`,
         );
         expect(mail.text).toContain("Keep this a year");
         expect(mail.text).toContain("http://localhost:3000/upgrade");
@@ -172,7 +172,7 @@ describe("email templates", () => {
       const events = await db
         .select()
         .from(auditEvents)
-        .where(eq(auditEvents.envelopeId, id));
+        .where(eq(auditEvents.documentId, id));
       expect(events.some((e) => e.event === "emailed")).toBe(true);
     },
   );
@@ -203,7 +203,7 @@ describe("email templates", () => {
     const rowsBefore = await db
       .select()
       .from(signersTable)
-      .where(eq(signersTable.envelopeId, id));
+      .where(eq(signersTable.documentId, id));
     rowsBefore.sort((a, b) => a.signingOrder - b.signingOrder);
     const janeHashBefore = rowsBefore[0]!.tokenHash;
 
@@ -230,7 +230,7 @@ describe("email templates", () => {
     const rows = await db
       .select()
       .from(signersTable)
-      .where(eq(signersTable.envelopeId, id));
+      .where(eq(signersTable.documentId, id));
     rows.sort((a, b) => a.signingOrder - b.signingOrder);
     expect(rows[0]!.sentAt).not.toBeNull();
     expect(rows[1]!.sentAt).not.toBeNull();

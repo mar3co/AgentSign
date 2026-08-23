@@ -13,14 +13,14 @@ import {
   mcpResource,
   mcpUnauthorized,
 } from "../lib/oauth.js";
-import { attestEnvelope, rejectEnvelope } from "../routes/attest.js";
+import { attestDocument, rejectDocument } from "../routes/attest.js";
 import {
-  createEnvelope,
-  getEnvelope,
-  getEnvelopePdf,
-} from "../routes/envelopes.js";
-import { listPackets, sendPacket } from "../routes/packets.js";
-import { verifyEnvelope } from "../routes/verify.js";
+  createDocument,
+  getDocument,
+  getDocumentPdf,
+} from "../routes/documents.js";
+import { listTemplates, sendTemplate } from "../routes/templates.js";
+import { verifyDocument } from "../routes/verify.js";
 
 const signerSchema = z.object({
   name: z.string().min(1),
@@ -29,7 +29,7 @@ const signerSchema = z.object({
   agent: z.string().optional(),
 });
 
-const packetSignerSchema = z.object({
+const templateSignerSchema = z.object({
   name: z.string().min(1),
   email: z.string().min(1),
 });
@@ -87,19 +87,19 @@ async function jsonOrText(res: Response): Promise<string> {
 export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer {
   const allowEnvKey = opts?.allowEnvKey === true;
   const server = new McpServer(
-    { name: "agentsign", version: "1.2.0" },
+    { name: "agentsign", version: "2.0.0" },
     {
       instructions:
-        "AgentSign is a signing primitive. Human always signs. Keys authenticate the caller and never sign. No sign tool. Humans Finish. Agents Attest. Tools: send, status, download, attest, reject, verify, list_packets, send_packet.",
+        "AgentSign is a signing primitive. Human always signs. Keys authenticate the caller and never sign. No sign tool. Humans Finish. Agents Attest. Tools: send, status, download, attest, reject, verify, list_templates, send_template.",
     },
   );
 
   server.registerTool(
     "send",
     {
-      title: "Send envelope",
+      title: "Send document",
       description:
-        "Create and send a signing envelope (POST /v1/envelopes). Pass PDF bytes as base64, not a public pdf_url. Optional Bearer sign_live_ key. Without a key, starts a sender OTP one-off — tell the operator to check sender email. sign_tmp_ cannot send or list. Signer objects may include kind (human|agent) and agent slug. No sign tool. Humans Finish. Agents Attest.",
+        "Create and send a signing document (POST /v1/documents). Pass PDF bytes as base64, not a public pdf_url. Optional Bearer sign_live_ key. Without a key, starts a sender OTP one-off — tell the operator to check sender email. sign_tmp_ cannot send or list. Signer objects may include kind (human|agent) and agent slug. No sign tool. Humans Finish. Agents Attest.",
       inputSchema: {
         title: z.string().min(1),
         sender_email: z.string().min(1),
@@ -126,8 +126,8 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
       const headers = new Headers();
       const key = resolveKey(args, extra, allowEnvKey);
       if (key) headers.set("authorization", `Bearer ${key}`);
-      const res = await createEnvelope(
-        new Request("http://sign.local/v1/envelopes", {
+      const res = await createDocument(
+        new Request("http://sign.local/v1/documents", {
           method: "POST",
           headers,
           body: form,
@@ -145,7 +145,7 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
       const message =
         body.status === "pending_sender"
           ? "Check sender email for a verification code. Human always signs."
-          : "Envelope sent. A human must sign. Keys never sign.";
+          : "Document sent. A human must sign. Keys never sign.";
       return toolText(JSON.stringify({ ...body, message }));
     },
   );
@@ -153,9 +153,9 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
   server.registerTool(
     "status",
     {
-      title: "Envelope status",
+      title: "Document status",
       description:
-        "GET /v1/envelopes/{id}. Requires a tmp or live Bearer key. Returns status, signers, and audit. Human always signs — this tool never completes a signature.",
+        "GET /v1/documents/{id}. Requires a tmp or live Bearer key. Returns status, signers, and audit. Human always signs — this tool never completes a signature.",
       inputSchema: {
         id: z.string().min(1),
         api_key: z.string().optional(),
@@ -169,8 +169,8 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
           true,
         );
       }
-      const res = await getEnvelope(
-        new Request(`http://sign.local/v1/envelopes/${args.id}`, {
+      const res = await getDocument(
+        new Request(`http://sign.local/v1/documents/${args.id}`, {
           headers: { authorization: `Bearer ${key}` },
         }),
         args.id,
@@ -184,7 +184,7 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
     {
       title: "Download sealed PDF",
       description:
-        "GET /v1/envelopes/{id}.pdf. Requires a tmp or live Bearer key. Returns the sealed PDF after the human ceremony. 409 if not completed.",
+        "GET /v1/documents/{id}.pdf. Requires a tmp or live Bearer key. Returns the sealed PDF after the human ceremony. 409 if not completed.",
       inputSchema: {
         id: z.string().min(1),
         api_key: z.string().optional(),
@@ -198,8 +198,8 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
           true,
         );
       }
-      const res = await getEnvelopePdf(
-        new Request(`http://sign.local/v1/envelopes/${args.id}.pdf`, {
+      const res = await getDocumentPdf(
+        new Request(`http://sign.local/v1/documents/${args.id}.pdf`, {
           headers: { authorization: `Bearer ${key}` },
         }),
         args.id,
@@ -217,9 +217,9 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
     {
       title: "Attest as an agent",
       description:
-        "POST /v1/envelopes/{id}/attest. Current party must be an agent this caller may use. Named-agent sign_agent_ key infers the slug; live/session must pass agent. No sign tool. Humans Finish. Agents Attest.",
+        "POST /v1/documents/{id}/attest. Current party must be an agent this caller may use. Named-agent sign_agent_ key infers the slug; live/session must pass agent. No sign tool. Humans Finish. Agents Attest.",
       inputSchema: {
-        envelope_id: z.string(),
+        document_id: z.string(),
         agent: z.string().optional(),
         api_key: z.string().optional(),
       },
@@ -228,13 +228,13 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
       const headers = new Headers({ "content-type": "application/json" });
       const key = resolveKey(args, extra, allowEnvKey);
       if (key) headers.set("authorization", `Bearer ${key}`);
-      const res = await attestEnvelope(
-        new Request(`http://sign.local/v1/envelopes/${args.envelope_id}/attest`, {
+      const res = await attestDocument(
+        new Request(`http://sign.local/v1/documents/${args.document_id}/attest`, {
           method: "POST",
           headers,
           body: JSON.stringify(args.agent ? { agent: args.agent } : {}),
         }),
-        args.envelope_id,
+        args.document_id,
       );
       return toolText(await jsonOrText(res), !res.ok);
     },
@@ -245,9 +245,9 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
     {
       title: "Reject as an agent",
       description:
-        "POST /v1/envelopes/{id}/reject. Agent decline for the current party. Same auth as attest. No sign tool. Humans Finish. Agents Attest.",
+        "POST /v1/documents/{id}/reject. Agent decline for the current party. Same auth as attest. No sign tool. Humans Finish. Agents Attest.",
       inputSchema: {
-        envelope_id: z.string(),
+        document_id: z.string(),
         agent: z.string().optional(),
         api_key: z.string().optional(),
       },
@@ -256,13 +256,13 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
       const headers = new Headers({ "content-type": "application/json" });
       const key = resolveKey(args, extra, allowEnvKey);
       if (key) headers.set("authorization", `Bearer ${key}`);
-      const res = await rejectEnvelope(
-        new Request(`http://sign.local/v1/envelopes/${args.envelope_id}/reject`, {
+      const res = await rejectDocument(
+        new Request(`http://sign.local/v1/documents/${args.document_id}/reject`, {
           method: "POST",
           headers,
           body: JSON.stringify(args.agent ? { agent: args.agent } : {}),
         }),
-        args.envelope_id,
+        args.document_id,
       );
       return toolText(await jsonOrText(res), !res.ok);
     },
@@ -288,7 +288,7 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
           true,
         );
       }
-      const res = await verifyEnvelope(
+      const res = await verifyDocument(
         new Request("http://sign.local/v1/verify", {
           method: "POST",
           headers: { "content-type": "application/pdf" },
@@ -300,11 +300,11 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
   );
 
   server.registerTool(
-    "list_packets",
+    "list_templates",
     {
-      title: "List packets",
+      title: "List templates",
       description:
-        "GET /v1/packets. Requires a session or sign_live_ Bearer. sign_tmp_ cannot list. Returns saved packets for the cabinet.",
+        "GET /v1/templates. Requires a session or sign_live_ Bearer. sign_tmp_ cannot list. Returns saved templates for the team.",
       inputSchema: {
         api_key: z.string().optional(),
       },
@@ -317,8 +317,8 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
           true,
         );
       }
-      const res = await listPackets(
-        new Request("http://sign.local/v1/packets", {
+      const res = await listTemplates(
+        new Request("http://sign.local/v1/templates", {
           headers: { authorization: `Bearer ${key}` },
         }),
       );
@@ -327,14 +327,14 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
   );
 
   server.registerTool(
-    "send_packet",
+    "send_template",
     {
-      title: "Send a packet",
+      title: "Send a template",
       description:
-        "POST /v1/packets/{id}/send. Requires a session or sign_live_ Bearer. signers.length must equal packet role count; order is signing_order. Each signer is { name, email } only — no kind/agent. Mixed parties use send. Human always signs.",
+        "POST /v1/templates/{id}/send. Requires a session or sign_live_ Bearer. signers.length must equal template role count; order is signing_order. Each signer is { name, email } only — no kind/agent. Mixed parties use send. Human always signs.",
       inputSchema: {
         id: z.string().min(1),
-        signers: z.array(packetSignerSchema).min(1),
+        signers: z.array(templateSignerSchema).min(1),
         api_key: z.string().optional(),
       },
     },
@@ -346,8 +346,8 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
           true,
         );
       }
-      const res = await sendPacket(
-        new Request(`http://sign.local/v1/packets/${args.id}/send`, {
+      const res = await sendTemplate(
+        new Request(`http://sign.local/v1/templates/${args.id}/send`, {
           method: "POST",
           headers: {
             authorization: `Bearer ${key}`,

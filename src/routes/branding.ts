@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { accounts } from "../db/schema.js";
 import { brandingKey, parseLogo } from "../lib/branding.js";
-import { cabinetForUser } from "../lib/cabinet.js";
+import { teamForUser } from "../lib/team.js";
 import { requireCaller } from "../lib/caller.js";
 import { getDeps, storeUnavailableResponse } from "../lib/deps.js";
 
@@ -10,7 +10,7 @@ function jsonError(status: number, error: string, code: string): Response {
 }
 
 function brandingJson(
-  cabinet: {
+  team: {
     displayName: string | null;
     logoPath: string | null;
     ownerUserId: string;
@@ -18,9 +18,9 @@ function brandingJson(
   callerId: string,
 ): { display_name: string | null; has_logo: boolean; can_edit: boolean } {
   return {
-    display_name: cabinet.displayName,
-    has_logo: Boolean(cabinet.logoPath),
-    can_edit: callerId === cabinet.ownerUserId,
+    display_name: team.displayName,
+    has_logo: Boolean(team.logoPath),
+    can_edit: callerId === team.ownerUserId,
   };
 }
 
@@ -48,17 +48,17 @@ function parseDisplayName(
   return { ok: true, value: trimmed };
 }
 
-async function requireEntitledCabinet(req: Request) {
+async function requireEntitledTeam(req: Request) {
   const caller = await requireCaller(req, { allowOauth: false });
   if (!caller.ok) return caller;
-  const cabinet = await cabinetForUser(caller.db, caller.user.id);
-  if (!cabinet.entitled) {
+  const team = await teamForUser(caller.db, caller.user.id);
+  if (!team.entitled) {
     return {
       ok: false as const,
       response: jsonError(403, "Pro plan required", "pro_required"),
     };
   }
-  return { ok: true as const, caller, cabinet };
+  return { ok: true as const, caller, team };
 }
 
 function requireOwner(
@@ -72,15 +72,15 @@ function requireOwner(
 }
 
 export async function getBranding(req: Request): Promise<Response> {
-  const gate = await requireEntitledCabinet(req);
+  const gate = await requireEntitledTeam(req);
   if (!gate.ok) return gate.response;
-  return Response.json(brandingJson(gate.cabinet, gate.caller.user.id));
+  return Response.json(brandingJson(gate.team, gate.caller.user.id));
 }
 
 export async function putBranding(req: Request): Promise<Response> {
-  const gate = await requireEntitledCabinet(req);
+  const gate = await requireEntitledTeam(req);
   if (!gate.ok) return gate.response;
-  const owner = requireOwner(gate.caller.user.id, gate.cabinet.ownerUserId);
+  const owner = requireOwner(gate.caller.user.id, gate.team.ownerUserId);
   if (!owner.ok) return owner.response;
 
   let nextName: string | null | undefined;
@@ -132,7 +132,7 @@ export async function putBranding(req: Request): Promise<Response> {
   if (logoBytes) {
     const store = getDeps().store;
     if (!store) return storeUnavailableResponse();
-    const key = brandingKey(gate.cabinet.ownerUserId);
+    const key = brandingKey(gate.team.ownerUserId);
     await store.put(key, logoBytes);
     patch.logoPath = key;
   }
@@ -140,27 +140,27 @@ export async function putBranding(req: Request): Promise<Response> {
     await gate.caller.db
       .update(accounts)
       .set(patch)
-      .where(eq(accounts.userId, gate.cabinet.ownerUserId));
+      .where(eq(accounts.userId, gate.team.ownerUserId));
   }
 
-  const updated = await cabinetForUser(gate.caller.db, gate.caller.user.id);
+  const updated = await teamForUser(gate.caller.db, gate.caller.user.id);
   return Response.json(brandingJson(updated, gate.caller.user.id));
 }
 
 export async function deleteBrandingLogo(req: Request): Promise<Response> {
-  const gate = await requireEntitledCabinet(req);
+  const gate = await requireEntitledTeam(req);
   if (!gate.ok) return gate.response;
-  const owner = requireOwner(gate.caller.user.id, gate.cabinet.ownerUserId);
+  const owner = requireOwner(gate.caller.user.id, gate.team.ownerUserId);
   if (!owner.ok) return owner.response;
 
   const store = getDeps().store;
   if (!store) return storeUnavailableResponse();
-  await store.delete(brandingKey(gate.cabinet.ownerUserId));
+  await store.delete(brandingKey(gate.team.ownerUserId));
   await gate.caller.db
     .update(accounts)
     .set({ logoPath: null })
-    .where(eq(accounts.userId, gate.cabinet.ownerUserId));
+    .where(eq(accounts.userId, gate.team.ownerUserId));
 
-  const updated = await cabinetForUser(gate.caller.db, gate.caller.user.id);
+  const updated = await teamForUser(gate.caller.db, gate.caller.user.id);
   return Response.json(brandingJson(updated, gate.caller.user.id));
 }

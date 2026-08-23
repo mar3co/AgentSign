@@ -9,7 +9,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
-export const envelopeStatus = [
+export const documentStatus = [
   "pending_sender",
   "pending",
   "completed",
@@ -18,7 +18,7 @@ export const envelopeStatus = [
   "expired",
   "deleted",
 ] as const;
-export type EnvelopeStatus = (typeof envelopeStatus)[number];
+export type DocumentStatus = (typeof documentStatus)[number];
 
 export const auditEvent = [
   "sent",
@@ -40,8 +40,8 @@ export const auditEvent = [
 ] as const;
 export type AuditEvent = (typeof auditEvent)[number];
 
-export const documentKind = ["original", "sealed", "certificate"] as const;
-export type DocumentKind = (typeof documentKind)[number];
+export const fileKind = ["original", "sealed", "certificate"] as const;
+export type FileKind = (typeof fileKind)[number];
 
 export const apiKeyKind = ["tmp", "live", "agent"] as const;
 export type ApiKeyKind = (typeof apiKeyKind)[number];
@@ -58,12 +58,12 @@ export type AccountPlan = (typeof accountPlan)[number];
 const timestamptz = (name: string) =>
   timestamp(name, { withTimezone: true, mode: "date" });
 
-export const envelopes = pgTable("envelopes", {
+export const documents = pgTable("documents", {
   id: uuid("id")
     .primaryKey()
     .$defaultFn(() => randomUUID()),
   userId: uuid("user_id"),
-  status: text("status", { enum: envelopeStatus }).notNull(),
+  status: text("status", { enum: documentStatus }).notNull(),
   title: text("title").notNull(),
   senderEmail: text("sender_email").notNull(),
   expiresAt: timestamptz("expires_at").notNull(),
@@ -79,9 +79,9 @@ export const signers = pgTable("signers", {
   id: uuid("id")
     .primaryKey()
     .$defaultFn(() => randomUUID()),
-  envelopeId: uuid("envelope_id")
+  documentId: uuid("document_id")
     .notNull()
-    .references(() => envelopes.id),
+    .references(() => documents.id),
   name: text("name").notNull(),
   email: text("email").notNull(),
   signingOrder: integer("signing_order").notNull(),
@@ -104,26 +104,26 @@ export const signers = pgTable("signers", {
   consentUa: text("consent_ua"),
 }).enableRLS();
 
-export const documents = pgTable("documents", {
+export const files = pgTable("files", {
   id: uuid("id")
     .primaryKey()
     .$defaultFn(() => randomUUID()),
-  envelopeId: uuid("envelope_id")
+  documentId: uuid("document_id")
     .notNull()
-    .references(() => envelopes.id),
-  kind: text("kind", { enum: documentKind }).notNull(),
+    .references(() => documents.id),
+  kind: text("kind", { enum: fileKind }).notNull(),
   storagePath: text("storage_path").notNull(),
-  documentHash: text("document_hash").notNull(),
+  fileHash: text("file_hash").notNull(),
 }).enableRLS();
 
-/** Envelope/PDF shred leaves rows; do not ON DELETE CASCADE. */
+/** Document/PDF shred leaves rows; do not ON DELETE CASCADE. */
 export const auditEvents = pgTable("audit_events", {
   id: uuid("id")
     .primaryKey()
     .$defaultFn(() => randomUUID()),
-  envelopeId: uuid("envelope_id")
+  documentId: uuid("document_id")
     .notNull()
-    .references(() => envelopes.id),
+    .references(() => documents.id),
   signerId: uuid("signer_id").references(() => signers.id),
   event: text("event", { enum: auditEvent }).notNull(),
   ip: text("ip"),
@@ -136,9 +136,9 @@ export const otpChallenges = pgTable("otp_challenges", {
   id: uuid("id")
     .primaryKey()
     .$defaultFn(() => randomUUID()),
-  envelopeId: uuid("envelope_id")
+  documentId: uuid("document_id")
     .notNull()
-    .references(() => envelopes.id),
+    .references(() => documents.id),
   codeHash: text("code_hash").notNull(),
   expiresAt: timestamptz("expires_at").notNull(),
   attempts: integer("attempts").notNull().default(0),
@@ -152,7 +152,7 @@ export const apiKeys = pgTable("api_keys", {
   kind: text("kind", { enum: apiKeyKind }).notNull(),
   prefix: text("prefix").notNull(),
   tokenHash: text("token_hash").notNull().unique(),
-  envelopeId: uuid("envelope_id").references(() => envelopes.id),
+  documentId: uuid("document_id").references(() => documents.id),
   userId: uuid("user_id"),
   agentId: uuid("agent_id").references(() => agents.id),
   createdAt: timestamptz("created_at").notNull().defaultNow(),
@@ -173,7 +173,7 @@ export const accounts = pgTable("accounts", {
 export const memberStatus = ["invited", "active"] as const;
 export type MemberStatus = (typeof memberStatus)[number];
 
-export const packets = pgTable("packets", {
+export const templates = pgTable("templates", {
   id: uuid("id")
     .primaryKey()
     .$defaultFn(() => randomUUID()),
@@ -184,19 +184,19 @@ export const packets = pgTable("packets", {
   createdAt: timestamptz("created_at").notNull().defaultNow(),
 }).enableRLS();
 
-export const packetRoles = pgTable("packet_roles", {
+export const templateRoles = pgTable("template_roles", {
   id: uuid("id")
     .primaryKey()
     .$defaultFn(() => randomUUID()),
-  packetId: uuid("packet_id")
+  templateId: uuid("template_id")
     .notNull()
-    .references(() => packets.id),
+    .references(() => templates.id),
   signingOrder: integer("signing_order").notNull(),
   roleName: text("role_name").notNull(),
 }).enableRLS();
 
-export const cabinetMembers = pgTable(
-  "cabinet_members",
+export const teamMembers = pgTable(
+  "team_members",
   {
     id: uuid("id")
       .primaryKey()
@@ -209,7 +209,7 @@ export const cabinetMembers = pgTable(
     invitedAt: timestamptz("invited_at").notNull(),
     acceptedAt: timestamptz("accepted_at"),
   },
-  (t) => [uniqueIndex("cabinet_members_owner_email").on(t.ownerUserId, t.email)],
+  (t) => [uniqueIndex("team_members_owner_email").on(t.ownerUserId, t.email)],
 ).enableRLS();
 
 export const agents = pgTable(

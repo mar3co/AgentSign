@@ -24,10 +24,10 @@ function statsOk() {
   );
 }
 
-function envelopesOk() {
+function documentsOk() {
   return new Response(
     JSON.stringify({
-      envelopes: [
+      documents: [
         {
           id: "env_1",
           title: "Repair authorization",
@@ -67,7 +67,7 @@ describe("DashboardClient", () => {
       "fetch",
       vi.fn(async (url: string) => {
         if (String(url) === "/v1/stats") return statsOk();
-        if (String(url) === "/v1/envelopes") return envelopesOk();
+        if (String(url) === "/v1/documents") return documentsOk();
         if (String(url) === "/v1/activity") {
           return new Response(JSON.stringify({ events: [] }), {
             status: 200,
@@ -80,11 +80,11 @@ describe("DashboardClient", () => {
     render(createElement(DashboardClient));
     expect(await screen.findByText(/sent this month/i)).toBeTruthy();
     expect(screen.getByText(/completed this month/i)).toBeTruthy();
-    expect(screen.getByText(/all envelopes/i)).toBeTruthy();
+    expect(screen.getByText(/all documents/i)).toBeTruthy();
     expect(screen.getByText(/recent documents/i)).toBeTruthy();
     expect(screen.getByText("Repair authorization")).toBeTruthy();
     expect(screen.getByText("Mutual NDA")).toBeTruthy();
-    expect(screen.getByText(/where envelopes stand/i)).toBeTruthy();
+    expect(screen.getByText(/where documents stand/i)).toBeTruthy();
     // Overlay legend and the ops rows from /v1/stats.
     expect(screen.getByText(/human-only/i)).toBeTruthy();
     expect(screen.getByText(/with agents/i)).toBeTruthy();
@@ -92,8 +92,8 @@ describe("DashboardClient", () => {
     expect(screen.getByText("24 h")).toBeTruthy();
     expect(screen.getByText(/2 sent · 1 failed/)).toBeTruthy();
     expect(
-      screen.getByRole("link", { name: /open cabinet/i }).getAttribute("href"),
-    ).toBe("/envelopes");
+      screen.getByRole("link", { name: /open documents/i }).getAttribute("href"),
+    ).toBe("/documents");
   });
 
   it("shows the empty note when nothing was sent", async () => {
@@ -112,8 +112,8 @@ describe("DashboardClient", () => {
                 shredding_soon: 0,
                 webhooks_30d: { sent: 0, failed: 0 },
               }
-            : String(url) === "/v1/envelopes"
-              ? { envelopes: [] }
+            : String(url) === "/v1/documents"
+              ? { documents: [] }
               : { events: [] };
         return new Response(JSON.stringify(body), {
           status: 200,

@@ -30,13 +30,13 @@ const ROW_LABEL = "font-mono text-[11px] tracking-[0.22em]";
 // public header (22px padding, hairline) when measurement is unavailable.
 const HEADER_H = "var(--public-header-h,81px)";
 
-const STATUS_CALL = `$ curl https://agentsign.co/v1/envelopes/env_kx3q9 \\
+const STATUS_CALL = `$ curl https://agentsign.co/v1/documents/doc_kx3q9 \\
        -H 'authorization: Bearer sign_live_...'
 { "status": "completed", "signers": [ … ], "audit": [ … ] }`;
 
 const AGENT_CALL = `# its own named key. its own receipt.
 $ curl -X POST \\
-    https://agentsign.co/v1/envelopes/env_kx3q9/attest \\
+    https://agentsign.co/v1/documents/doc_kx3q9/attest \\
     -H 'authorization: Bearer sign_agent_...'`;
 
 const VERIFY_CALL = `$ curl -F file=@sealed.pdf \\
@@ -94,7 +94,7 @@ const CHAPTERS: readonly Chapter[] = [
     cta: { label: "Choose a PDF" },
     terminal: {
       eyebrow: "Status",
-      address: "GET /v1/envelopes/{id}",
+      address: "GET /v1/documents/{id}",
       call: STATUS_CALL,
       note: "> completed 14:09:41 UTC · kept 7 days unless you keep it",
     },
@@ -124,7 +124,7 @@ const CHAPTERS: readonly Chapter[] = [
     links: [{ href: "/docs", label: "MCP tools →" }],
     terminal: {
       eyebrow: "Your agent's turn",
-      address: "POST /v1/envelopes/{id}/attest",
+      address: "POST /v1/documents/{id}/attest",
       call: AGENT_CALL,
       note: "> receipt 4c19…9e2f · recorded 14:02:59 UTC",
     },
@@ -307,7 +307,7 @@ export function ScrollStory({
             </div>
             <p className="hidden items-baseline gap-2.5 whitespace-nowrap font-mono text-[12.5px] md:flex">
               <span className="text-muted-foreground">send from code:</span>
-              <span className="text-tint">POST /v1/envelopes</span>
+              <span className="text-tint">POST /v1/documents</span>
               <span aria-hidden className="text-input">
                 &middot;
               </span>

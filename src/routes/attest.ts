@@ -1,8 +1,8 @@
 import { and, eq, isNull } from "drizzle-orm";
-import { agents, envelopes, signers as signersTable } from "../db/schema.js";
+import { agents, documents, signers as signersTable } from "../db/schema.js";
 import { loadActiveAgentBySlug, parseAgentSlug, type AgentRow } from "../lib/agents.js";
 import { logEvent, type AuditDb } from "../lib/audit.js";
-import { cabinetForUser } from "../lib/cabinet.js";
+import { teamForUser } from "../lib/team.js";
 import { requireCaller, type CallerOk } from "../lib/caller.js";
 import { getDeps, storeUnavailableResponse } from "../lib/deps.js";
 import { flagOn } from "../lib/flags.js";
@@ -10,10 +10,10 @@ import type { BlobStore } from "../lib/storage.js";
 import { fireAgentPartyWebhooks } from "../lib/webhooks.js";
 import {
   buildCompleteAppearances,
-  commitCompletedEnvelope,
+  commitCompletedDocument,
   inviteNextHumanIfNeeded,
   partyDone,
-  type EnvelopeRow,
+  type DocumentRow,
   type SignerRow,
 } from "./signing.js";
 
@@ -39,12 +39,12 @@ async function readJson(req: Request): Promise<unknown> {
   }
 }
 
-type LoadedEnvelope =
+type LoadedDocument =
   | {
       ok: true;
       db: AuditDb;
       caller: CallerOk;
-      envelope: EnvelopeRow;
+      document: DocumentRow;
       allSigners: SignerRow[];
       party: SignerRow;
       agent: AgentRow;
@@ -56,7 +56,7 @@ type LoadedEnvelope =
 async function resolveAttestAgent(
   db: AuditDb,
   caller: CallerOk,
-  envelope: EnvelopeRow,
+  document: DocumentRow,
   body: unknown,
 ): Promise<
   | {
@@ -67,24 +67,24 @@ async function resolveAttestAgent(
     }
   | { ok: false; error: Response }
 > {
-  if (!envelope.userId) {
-    return { ok: false, error: jsonError(403, "Cannot attest this envelope", "cannot_attest") };
+  if (!document.userId) {
+    return { ok: false, error: jsonError(403, "Cannot attest this document", "cannot_attest") };
   }
-  const cabinet = await cabinetForUser(db, envelope.userId);
-  if (!cabinet.entitled) {
+  const team = await teamForUser(db, document.userId);
+  if (!team.entitled) {
     return { ok: false, error: jsonError(403, "Pro plan required", "pro_required") };
   }
-  if (!cabinet.memberUserIds.includes(caller.user.id) && caller.via !== "agent") {
-    return { ok: false, error: jsonError(403, "Cannot attest this envelope", "cannot_attest") };
+  if (!team.memberUserIds.includes(caller.user.id) && caller.via !== "agent") {
+    return { ok: false, error: jsonError(403, "Cannot attest this document", "cannot_attest") };
   }
 
   if (caller.via === "agent") {
     if (!caller.agentId) {
-      return { ok: false, error: jsonError(403, "Cannot attest this envelope", "cannot_attest") };
+      return { ok: false, error: jsonError(403, "Cannot attest this document", "cannot_attest") };
     }
     const [agent] = await db.select().from(agents).where(eq(agents.id, caller.agentId));
-    if (!agent || agent.revokedAt || agent.ownerUserId !== cabinet.ownerUserId) {
-      return { ok: false, error: jsonError(403, "Cannot attest this envelope", "cannot_attest") };
+    if (!agent || agent.revokedAt || agent.ownerUserId !== team.ownerUserId) {
+      return { ok: false, error: jsonError(403, "Cannot attest this document", "cannot_attest") };
     }
     return {
       ok: true,
@@ -96,7 +96,7 @@ async function resolveAttestAgent(
 
   if (caller.via === "oauth") {
     if (!caller.allowedAgentIds?.length) {
-      return { ok: false, error: jsonError(403, "Cannot attest this envelope", "cannot_attest") };
+      return { ok: false, error: jsonError(403, "Cannot attest this document", "cannot_attest") };
     }
     const slug =
       body && typeof body === "object" && !Array.isArray(body)
@@ -108,12 +108,12 @@ async function resolveAttestAgent(
         error: jsonError(403, "Name an allowed agent to attest", "cannot_attest"),
       };
     }
-    const agent = await loadActiveAgentBySlug(db, cabinet.ownerUserId, slug);
+    const agent = await loadActiveAgentBySlug(db, team.ownerUserId, slug);
     if (!agent || !caller.allowedAgentIds.includes(agent.id)) {
-      return { ok: false, error: jsonError(403, "Cannot attest this envelope", "cannot_attest") };
+      return { ok: false, error: jsonError(403, "Cannot attest this document", "cannot_attest") };
     }
-    if (!cabinet.memberUserIds.includes(caller.user.id)) {
-      return { ok: false, error: jsonError(403, "Cannot attest this envelope", "cannot_attest") };
+    if (!team.memberUserIds.includes(caller.user.id)) {
+      return { ok: false, error: jsonError(403, "Cannot attest this document", "cannot_attest") };
     }
     return {
       ok: true,
@@ -133,19 +133,19 @@ async function resolveAttestAgent(
       error: jsonError(403, "Name an allowed agent to attest", "cannot_attest"),
     };
   }
-  const agent = await loadActiveAgentBySlug(db, cabinet.ownerUserId, slug);
+  const agent = await loadActiveAgentBySlug(db, team.ownerUserId, slug);
   if (!agent) {
-    return { ok: false, error: jsonError(403, "Cannot attest this envelope", "cannot_attest") };
+    return { ok: false, error: jsonError(403, "Cannot attest this document", "cannot_attest") };
   }
-  if (!cabinet.memberUserIds.includes(caller.user.id)) {
-    return { ok: false, error: jsonError(403, "Cannot attest this envelope", "cannot_attest") };
+  if (!team.memberUserIds.includes(caller.user.id)) {
+    return { ok: false, error: jsonError(403, "Cannot attest this document", "cannot_attest") };
   }
   return { ok: true, agent, attestMethod: null, attestLabel: caller.via };
 }
 
-async function loadAttestContext(req: Request, envelopeId: string): Promise<LoadedEnvelope> {
-  if (!envelopeId) {
-    return { ok: false, error: jsonError(400, "Envelope id is required", "invalid_request") };
+async function loadAttestContext(req: Request, documentId: string): Promise<LoadedDocument> {
+  if (!documentId) {
+    return { ok: false, error: jsonError(400, "Document id is required", "invalid_request") };
   }
   const caller = await requireCaller(req, { allowAgent: true });
   if (!caller.ok) return { ok: false, error: caller.response };
@@ -154,44 +154,44 @@ async function loadAttestContext(req: Request, envelopeId: string): Promise<Load
   }
 
   const db = caller.db;
-  const [envelope] = await db.select().from(envelopes).where(eq(envelopes.id, envelopeId));
-  if (!envelope) {
-    return { ok: false, error: jsonError(404, "Envelope not found", "not_found") };
+  const [document] = await db.select().from(documents).where(eq(documents.id, documentId));
+  if (!document) {
+    return { ok: false, error: jsonError(404, "Document not found", "not_found") };
   }
   const at = now();
-  if (envelope.status === "deleted") {
+  if (document.status === "deleted") {
     return { ok: false, error: jsonError(410, "This link has expired", "deleted") };
   }
-  if (envelope.expiresAt.getTime() <= at.getTime() && envelope.status === "pending") {
+  if (document.expiresAt.getTime() <= at.getTime() && document.status === "pending") {
     return { ok: false, error: jsonError(410, "This link has expired", "expired") };
   }
-  if (envelope.status !== "pending") {
+  if (document.status !== "pending") {
     return {
       ok: false,
-      error: jsonError(409, "Envelope is not awaiting attestation", "invalid_state"),
+      error: jsonError(409, "Document is not awaiting attestation", "invalid_state"),
     };
   }
 
   const body = await readJson(req);
-  const named = await resolveAttestAgent(db, caller, envelope, body);
+  const named = await resolveAttestAgent(db, caller, document, body);
   if (!named.ok) return named;
 
   const allSigners = await db
     .select()
     .from(signersTable)
-    .where(eq(signersTable.envelopeId, envelope.id));
+    .where(eq(signersTable.documentId, document.id));
   allSigners.sort((a, b) => a.signingOrder - b.signingOrder);
   const current = allSigners.find((s) => !partyDone(s));
   if (!current || current.kind !== "agent") {
     return {
       ok: false,
-      error: jsonError(409, "Envelope is not awaiting attestation", "invalid_state"),
+      error: jsonError(409, "Document is not awaiting attestation", "invalid_state"),
     };
   }
   if (current.agentId !== named.agent.id) {
     return {
       ok: false,
-      error: jsonError(403, "Cannot attest this envelope", "cannot_attest"),
+      error: jsonError(403, "Cannot attest this document", "cannot_attest"),
     };
   }
 
@@ -199,7 +199,7 @@ async function loadAttestContext(req: Request, envelopeId: string): Promise<Load
     ok: true,
     db,
     caller,
-    envelope,
+    document,
     allSigners,
     party: current,
     agent: named.agent,
@@ -208,10 +208,10 @@ async function loadAttestContext(req: Request, envelopeId: string): Promise<Load
   };
 }
 
-export async function attestEnvelope(req: Request, envelopeId: string): Promise<Response> {
-  const loaded = await loadAttestContext(req, envelopeId);
+export async function attestDocument(req: Request, documentId: string): Promise<Response> {
+  const loaded = await loadAttestContext(req, documentId);
   if (!loaded.ok) return loaded.error;
-  const { db, envelope, allSigners, party, attestMethod, attestLabel } = loaded;
+  const { db, document, allSigners, party, attestMethod, attestLabel } = loaded;
   const at = now();
 
   const last = allSigners.every((s) => s.id === party.id || partyDone(s));
@@ -223,15 +223,15 @@ export async function attestEnvelope(req: Request, envelopeId: string): Promise<
     if (!store) return storeUnavailableResponse();
     const built = await buildCompleteAppearances(
       store,
-      envelope.id,
+      document.id,
       allSigners,
       party.id,
       at,
     );
     if (!built.ok) return built.error;
-    return commitCompletedEnvelope({
+    return commitCompletedDocument({
       db,
-      envelope,
+      document,
       signer: party,
       allSigners,
       at,
@@ -249,8 +249,8 @@ export async function attestEnvelope(req: Request, envelopeId: string): Promise<
     await db.transaction(async (tx) => {
       const [env] = await tx
         .select()
-        .from(envelopes)
-        .where(and(eq(envelopes.id, envelope.id), eq(envelopes.status, "pending")));
+        .from(documents)
+        .where(and(eq(documents.id, document.id), eq(documents.status, "pending")));
       if (!env) throw new Error("attest_conflict");
       const [row] = await tx
         .update(signersTable)
@@ -272,28 +272,28 @@ export async function attestEnvelope(req: Request, envelopeId: string): Promise<
       claimed = row;
     });
   } catch {
-    return jsonError(409, "Envelope is not awaiting attestation", "invalid_state");
+    return jsonError(409, "Document is not awaiting attestation", "invalid_state");
   }
   if (!claimed) {
-    return jsonError(409, "Envelope is not awaiting attestation", "invalid_state");
+    return jsonError(409, "Document is not awaiting attestation", "invalid_state");
   }
 
   if (last && !anySigned && !allowAgentOnly) {
     await logEvent(db, {
-      envelopeId: envelope.id,
+      documentId: document.id,
       signerId: party.id,
       event: "attested",
     });
     return jsonError(
       400,
-      "A human electronic signature is required to complete this envelope",
+      "A human electronic signature is required to complete this document",
       "human_required",
     );
   }
 
   const inviteFail = await inviteNextHumanIfNeeded(
     db,
-    envelope,
+    document,
     allSigners,
     party,
     at,
@@ -307,7 +307,7 @@ export async function attestEnvelope(req: Request, envelopeId: string): Promise<
   if (inviteFail) return inviteFail;
 
   await logEvent(db, {
-    envelopeId: envelope.id,
+    documentId: document.id,
     signerId: party.id,
     event: "attested",
   });
@@ -315,10 +315,10 @@ export async function attestEnvelope(req: Request, envelopeId: string): Promise<
   return Response.json({ status: "pending" });
 }
 
-export async function rejectEnvelope(req: Request, envelopeId: string): Promise<Response> {
-  const loaded = await loadAttestContext(req, envelopeId);
+export async function rejectDocument(req: Request, documentId: string): Promise<Response> {
+  const loaded = await loadAttestContext(req, documentId);
   if (!loaded.ok) return loaded.error;
-  const { db, envelope, party } = loaded;
+  const { db, document, party } = loaded;
   const at = now();
 
   try {
@@ -337,23 +337,23 @@ export async function rejectEnvelope(req: Request, envelopeId: string): Promise<
         .returning();
       if (!row) throw new Error("reject_conflict");
       const [envRow] = await tx
-        .update(envelopes)
+        .update(documents)
         .set({ status: "declined" })
-        .where(and(eq(envelopes.id, envelope.id), eq(envelopes.status, "pending")))
+        .where(and(eq(documents.id, document.id), eq(documents.status, "pending")))
         .returning();
       if (!envRow) throw new Error("reject_conflict");
     });
   } catch {
-    return jsonError(409, "Envelope is not awaiting attestation", "invalid_state");
+    return jsonError(409, "Document is not awaiting attestation", "invalid_state");
   }
 
   await logEvent(db, {
-    envelopeId: envelope.id,
+    documentId: document.id,
     signerId: party.id,
     event: "rejected",
   });
-  await fireAgentPartyWebhooks(db, envelope.id, {
-    event: "envelope.declined",
+  await fireAgentPartyWebhooks(db, document.id, {
+    event: "document.declined",
     status: "declined",
   });
   return Response.json({ status: "declined" });

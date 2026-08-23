@@ -32,17 +32,17 @@ function actionLine(item: ActivityItem): string {
     case "sent":
       return "went out for signing";
     case "opened":
-      return "opened the envelope";
+      return "opened the document";
     case "consented":
       return "agreed to sign";
     case "signed":
-      return "signed the envelope";
+      return "signed the document";
     case "attested":
-      return "signed off on the envelope";
+      return "signed off on the document";
     case "declined":
       return "declined to sign";
     case "rejected":
-      return "rejected the envelope";
+      return "rejected the document";
     case "reminded":
       return "was sent a reminder";
     case "expired":
@@ -92,7 +92,7 @@ export function ActivityDialog({ defaultOpen = false, trigger }: Props) {
                     <div className="text-muted-foreground flex flex-col items-start text-sm">
                       <p>
                         <span className="text-foreground font-semibold">
-                          {item.actor ?? "Envelope"}
+                          {item.actor ?? "Document"}
                         </span>{" "}
                         {actionLine(item)}
                       </p>

@@ -54,7 +54,7 @@ function pageTitle(pathname: string): string {
   for (const [prefix, title] of EXTRA_TITLES) {
     if (pathname.startsWith(prefix)) return title;
   }
-  return currentNav(pathname)?.label ?? "Cabinet";
+  return currentNav(pathname)?.label ?? "Documents";
 }
 
 /* The header sits on the primary band, so the trigger inverts: primary-

@@ -22,7 +22,7 @@ export const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
       {
         href: "/dashboard",
         label: "Dashboard",
-        subtitle: "Your envelopes at a glance.",
+        subtitle: "Your documents at a glance.",
         icon: LayoutDashboard,
       },
       {
@@ -32,15 +32,15 @@ export const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
         icon: Send,
       },
       {
-        href: "/envelopes",
-        label: "Cabinet",
-        subtitle: "Envelopes you have sent and where they stand.",
+        href: "/documents",
+        label: "Documents",
+        subtitle: "Documents you have sent and where they stand.",
         icon: Archive,
       },
       {
-        href: "/packets",
-        label: "Packets",
-        subtitle: "Reusable setups for envelopes you send often.",
+        href: "/templates",
+        label: "Templates",
+        subtitle: "Reusable setups for documents you send often.",
         icon: Files,
       },
     ],
@@ -51,7 +51,7 @@ export const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
       {
         href: "/team",
         label: "Team",
-        subtitle: "People who share this cabinet.",
+        subtitle: "People who share your documents.",
         icon: Users,
       },
       {
@@ -63,7 +63,7 @@ export const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
       {
         href: "/settings/branding",
         label: "Branding",
-        subtitle: "How your envelopes look to signers.",
+        subtitle: "How your documents look to signers.",
         icon: Palette,
       },
     ],

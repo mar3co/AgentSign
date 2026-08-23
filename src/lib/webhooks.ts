@@ -23,8 +23,8 @@ const BLOCKED_HOSTS = new Set([
   "metadata.goog",
 ]);
 
-export type EnvelopeCompletedPayload = {
-  event: "envelope.completed";
+export type DocumentCompletedPayload = {
+  event: "document.completed";
   id: string;
   status: string;
   sha256: string;
@@ -259,12 +259,12 @@ function now(): Date {
 
 async function auditWebhook(
   db: AuditDb | undefined,
-  envelopeId: string,
+  documentId: string,
   event: "webhook_sent" | "webhook_failed",
   payload?: Record<string, unknown>,
 ): Promise<void> {
   if (!db) return;
-  await logEvent(db, { envelopeId, event, payload });
+  await logEvent(db, { documentId, event, payload });
 }
 
 /** One POST; failures audit webhook_failed (when db is available) and do not throw. */
@@ -272,12 +272,12 @@ async function postSignedWebhook(
   url: string,
   secretHash: string,
   rawBody: string,
-  envelopeId: string,
+  documentId: string,
   db?: AuditDb,
 ): Promise<void> {
   const blocked = await webhookUrlError(url);
   if (blocked) {
-    await auditWebhook(db, envelopeId, "webhook_failed", { error: "blocked_url" });
+    await auditWebhook(db, documentId, "webhook_failed", { error: "blocked_url" });
     return;
   }
   const timestamp = String(Math.floor(now().getTime() / 1000));
@@ -287,7 +287,7 @@ async function postSignedWebhook(
     const parsed = new URL(url);
     const resolved = await resolveHost(normalizeHost(parsed.hostname));
     if (resolved.length === 0 || resolved.some((row) => isBlockedIp(normalizeHost(row.address)))) {
-      await auditWebhook(db, envelopeId, "webhook_failed", { error: "blocked_url" });
+      await auditWebhook(db, documentId, "webhook_failed", { error: "blocked_url" });
       return;
     }
     const res = await pinnedFetch(
@@ -306,27 +306,27 @@ async function postSignedWebhook(
       resolved,
     );
     if (!res.ok) {
-      await auditWebhook(db, envelopeId, "webhook_failed", { status: res.status });
+      await auditWebhook(db, documentId, "webhook_failed", { status: res.status });
       return;
     }
-    await auditWebhook(db, envelopeId, "webhook_sent");
+    await auditWebhook(db, documentId, "webhook_sent");
   } catch (err) {
     const error = err instanceof Error ? err.message : "webhook_failed";
-    await auditWebhook(db, envelopeId, "webhook_failed", { error });
+    await auditWebhook(db, documentId, "webhook_failed", { error });
   }
 }
 
 /** One POST; failures audit webhook_failed and do not throw. */
-export async function fireEnvelopeCompleted(
+export async function fireDocumentCompleted(
   db: AuditDb,
-  envelope: {
+  document: {
     id: string;
     webhookUrl: string | null;
     webhookSecretHash: string | null;
   },
-  payload: EnvelopeCompletedPayload,
+  payload: DocumentCompletedPayload,
 ): Promise<void> {
-  if (!envelope.webhookUrl || !envelope.webhookSecretHash) return;
+  if (!document.webhookUrl || !document.webhookSecretHash) return;
   const body = {
     event: payload.event,
     id: payload.id,
@@ -335,10 +335,10 @@ export async function fireEnvelopeCompleted(
     shred_at: payload.shred_at.toISOString(),
   };
   await postSignedWebhook(
-    envelope.webhookUrl,
-    envelope.webhookSecretHash,
+    document.webhookUrl,
+    document.webhookSecretHash,
     JSON.stringify(body),
-    envelope.id,
+    document.id,
     db,
   );
 }
@@ -373,7 +373,7 @@ export async function fireAgentWebhook(
 
 export async function fireAgentPartyReady(
   db: AuditDb,
-  envelope: { id: string; status: string },
+  document: { id: string; status: string },
   party: { kind: string; agentId: string | null },
 ): Promise<void> {
   if (party.kind !== "agent" || !party.agentId) return;
@@ -381,21 +381,21 @@ export async function fireAgentPartyReady(
   if (!agent) return;
   await deliverAgentWebhook(db, agent, {
     event: "party.ready",
-    id: envelope.id,
+    id: document.id,
     agent: agent.slug,
-    status: envelope.status,
+    status: document.status,
   });
 }
 
 export async function fireAgentPartyWebhooks(
   db: AuditDb,
-  envelopeId: string,
+  documentId: string,
   payload: { event: string; status: string },
 ): Promise<void> {
   const parties = await db
     .select()
     .from(signersTable)
-    .where(eq(signersTable.envelopeId, envelopeId));
+    .where(eq(signersTable.documentId, documentId));
   const agentIds = [
     ...new Set(
       parties
@@ -408,7 +408,7 @@ export async function fireAgentPartyWebhooks(
   for (const agent of rows) {
     await deliverAgentWebhook(db, agent, {
       event: payload.event,
-      id: envelopeId,
+      id: documentId,
       agent: agent.slug,
       status: payload.status,
     });

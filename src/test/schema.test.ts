@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { createTestDb } from "./db.js";
 import {
-  envelopes,
+  documents,
   accounts,
-  packets,
-  packetRoles,
+  templates,
+  templateRoles,
   agents,
   signers,
   apiKeys,
@@ -16,10 +16,10 @@ import {
 import { newAgentKey } from "../lib/tokens.js";
 
 describe("schema", () => {
-  it("inserts an envelope", async () => {
+  it("inserts a document", async () => {
     const db = await createTestDb();
     const [row] = await db
-      .insert(envelopes)
+      .insert(documents)
       .values({
         title: "Repair authorization",
         senderEmail: "shop@example.com",
@@ -32,22 +32,22 @@ describe("schema", () => {
     expect(row.status).toBe("pending_sender");
   });
 
-  it("inserts a packet with a role", async () => {
+  it("inserts a template with a role", async () => {
     const db = await createTestDb();
     const userId = crypto.randomUUID();
     await db.insert(accounts).values({ userId, email: "a@b.c", plan: "pro" });
-    const [p] = await db.insert(packets).values({
+    const [p] = await db.insert(templates).values({
       ownerUserId: userId,
       createdByUserId: userId,
-      title: "Repair packet",
-      storagePath: "packets/x/original.pdf",
+      title: "Repair template",
+      storagePath: "templates/x/original.pdf",
     }).returning();
-    await db.insert(packetRoles).values({
-      packetId: p.id,
+    await db.insert(templateRoles).values({
+      templateId: p.id,
       signingOrder: 1,
       roleName: "Customer",
     });
-    expect(p.title).toBe("Repair packet");
+    expect(p.title).toBe("Repair template");
   });
 
   it("inserts an agent and an agent signer with null tokenHash", async () => {
@@ -65,7 +65,7 @@ describe("schema", () => {
     expect(agent!.revokedAt).toBeNull();
 
     const [env] = await db
-      .insert(envelopes)
+      .insert(documents)
       .values({
         title: "Agent attest",
         senderEmail: "shop@example.com",
@@ -78,7 +78,7 @@ describe("schema", () => {
     const [signer] = await db
       .insert(signers)
       .values({
-        envelopeId: env!.id,
+        documentId: env!.id,
         name: "Grok Legal",
         email: "shop@example.com",
         signingOrder: 1,
@@ -113,7 +113,7 @@ describe("schema", () => {
       .values({
         ownerUserId: crypto.randomUUID(),
         slug: "ops",
-        name: "Other cabinet",
+        name: "Other team",
       })
       .returning();
     expect(other!.slug).toBe("ops");
@@ -164,7 +164,7 @@ describe("schema", () => {
     expect(row!.kind).toBe("agent");
 
     const [env] = await db
-      .insert(envelopes)
+      .insert(documents)
       .values({
         title: "t",
         senderEmail: "a@b.c",
@@ -174,8 +174,8 @@ describe("schema", () => {
       })
       .returning();
     await db.insert(auditEvents).values([
-      { envelopeId: env!.id, event: "attested" },
-      { envelopeId: env!.id, event: "rejected" },
+      { documentId: env!.id, event: "attested" },
+      { documentId: env!.id, event: "rejected" },
     ]);
   });
 });

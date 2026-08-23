@@ -13,13 +13,13 @@ describe("TerminalPanel", () => {
     render(
       createElement(TerminalPanel, {
         eyebrow: "For agents & developers",
-        address: "POST /v1/envelopes",
+        address: "POST /v1/documents",
         footer: createElement("span", null, "footer-line"),
         children: createElement("code", null, "curl"),
       }),
     );
     expect(screen.getByText("For agents & developers")).toBeTruthy();
-    expect(screen.getByText("POST /v1/envelopes")).toBeTruthy();
+    expect(screen.getByText("POST /v1/documents")).toBeTruthy();
     expect(screen.getByText("curl")).toBeTruthy();
     expect(screen.getByText("footer-line")).toBeTruthy();
   });

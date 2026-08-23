@@ -39,7 +39,7 @@ function NotificationItem({
   return (
     <DropdownMenuItem
       className="gap-3 px-2 py-3 text-base not-data-[variant=destructive]:focus:**:text-[revert-rule]"
-      render={<a href="/envelopes" />}
+      render={<a href="/documents" />}
     >
       <Avatar className="size-9.5">
         <AvatarFallback>{activityInitials(item)}</AvatarFallback>
@@ -105,7 +105,7 @@ export function NotificationDropdown({ trigger, defaultOpen, align = "end" }: Pr
             <BellOff aria-hidden className="text-muted-foreground mx-auto size-8" />
             <p className="mt-2 text-sm font-medium">Nothing yet</p>
             <p className="text-muted-foreground mt-1 text-sm">
-              Activity on your envelopes shows up here.
+              Activity on your documents shows up here.
             </p>
           </div>
         ) : (

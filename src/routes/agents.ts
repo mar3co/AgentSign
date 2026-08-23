@@ -7,7 +7,7 @@ import {
   type AgentRow,
 } from "../lib/agents.js";
 import type { AuditDb } from "../lib/audit.js";
-import { cabinetForUser } from "../lib/cabinet.js";
+import { teamForUser } from "../lib/team.js";
 import { requireCaller } from "../lib/caller.js";
 import { getDeps } from "../lib/deps.js";
 import { AGENT_CAP } from "../lib/entitlement.js";
@@ -65,20 +65,20 @@ async function requireAgentApi(req: Request, write: boolean) {
       response: jsonError(403, "Agent parties are disabled", "flag_off"),
     };
   }
-  const cabinet = await cabinetForUser(caller.db, caller.user.id);
-  if (!cabinet.entitled) {
+  const team = await teamForUser(caller.db, caller.user.id);
+  if (!team.entitled) {
     return {
       ok: false as const,
       response: jsonError(403, "Pro plan required", "pro_required"),
     };
   }
-  if (write && caller.user.id !== cabinet.ownerUserId) {
+  if (write && caller.user.id !== team.ownerUserId) {
     return {
       ok: false as const,
       response: jsonError(403, "Only the owner can manage agents", "not_owner"),
     };
   }
-  return { ok: true as const, caller, cabinet };
+  return { ok: true as const, caller, team };
 }
 
 async function requireActiveAgent(
@@ -147,11 +147,11 @@ export async function listAgents(req: Request): Promise<Response> {
   const rows = await gate.caller.db
     .select()
     .from(agents)
-    .where(eq(agents.ownerUserId, gate.cabinet.ownerUserId));
+    .where(eq(agents.ownerUserId, gate.team.ownerUserId));
   rows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
   return Response.json({
     agents: rows.map(agentJson),
-    can_edit: gate.caller.user.id === gate.cabinet.ownerUserId,
+    can_edit: gate.caller.user.id === gate.team.ownerUserId,
   });
 }
 
@@ -173,7 +173,7 @@ export async function createAgent(req: Request): Promise<Response> {
   if (!webhook.ok) return webhook.response;
 
   const { db } = gate.caller;
-  const ownerUserId = gate.cabinet.ownerUserId;
+  const ownerUserId = gate.team.ownerUserId;
   const [taken] = await db
     .select()
     .from(agents)
@@ -210,14 +210,14 @@ export async function createAgent(req: Request): Promise<Response> {
 export async function rotateAgent(req: Request, id: string): Promise<Response> {
   const gate = await requireAgentApi(req, true);
   if (!gate.ok) return gate.response;
-  const loaded = await requireActiveAgent(gate.caller.db, gate.cabinet.ownerUserId, id);
+  const loaded = await requireActiveAgent(gate.caller.db, gate.team.ownerUserId, id);
   if (!loaded.ok) return loaded.response;
 
   const at = now();
   await expireAgentKeys(gate.caller.db, loaded.agent.id, at);
   const minted = await mintAgentKey(
     gate.caller.db,
-    gate.cabinet.ownerUserId,
+    gate.team.ownerUserId,
     loaded.agent.id,
     at,
   );
@@ -231,7 +231,7 @@ export async function rotateAgent(req: Request, id: string): Promise<Response> {
 export async function putAgentWebhook(req: Request, id: string): Promise<Response> {
   const gate = await requireAgentApi(req, true);
   if (!gate.ok) return gate.response;
-  const loaded = await requireActiveAgent(gate.caller.db, gate.cabinet.ownerUserId, id);
+  const loaded = await requireActiveAgent(gate.caller.db, gate.team.ownerUserId, id);
   if (!loaded.ok) return loaded.response;
 
   const body = await readJson(req);
@@ -269,7 +269,7 @@ export async function putAgentWebhook(req: Request, id: string): Promise<Respons
 export async function revokeAgent(req: Request, id: string): Promise<Response> {
   const gate = await requireAgentApi(req, true);
   if (!gate.ok) return gate.response;
-  const loaded = await requireActiveAgent(gate.caller.db, gate.cabinet.ownerUserId, id);
+  const loaded = await requireActiveAgent(gate.caller.db, gate.team.ownerUserId, id);
   if (!loaded.ok) return loaded.response;
 
   const at = now();

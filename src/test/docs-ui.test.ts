@@ -33,8 +33,8 @@ describe("docs page", () => {
   it("shows the real endpoints as addresses", () => {
     render(createElement(DocsPage));
     const text = document.body.textContent ?? "";
-    expect(text).toContain("POST /v1/envelopes");
-    expect(text).toContain("GET /v1/envelopes/{id}");
+    expect(text).toContain("POST /v1/documents");
+    expect(text).toContain("GET /v1/documents/{id}");
     expect(text).toContain("POST /v1/verify");
   });
 });

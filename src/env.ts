@@ -6,7 +6,7 @@ const envSchema = z.object({
   SUPABASE_URL: z.string().default(""),
   SUPABASE_ANON_KEY: z.string().default(""),
   SUPABASE_SERVICE_ROLE_KEY: z.string().default(""),
-  STORAGE_BUCKET: z.string().default("envelopes"),
+  STORAGE_BUCKET: z.string().default("documents"),
   STORAGE_DIR: z.string().default(""),
   APP_URL: z.string().default(""),
   APP_ORIGIN: z.string().default(""),

@@ -49,7 +49,7 @@ export function AgentsList({
       <UpgradeGate
         icon={Bot}
         title="Give your agents their own keys"
-        description="Pro named agents can attest on envelopes. Free accounts send and download only."
+        description="Pro named agents can attest on documents. Free accounts send and download only."
       />
     );
   }
@@ -250,7 +250,7 @@ export function AgentsList({
     <Card>
       <CardHeader>
         <CardDescription>
-          Named agents that may attest for people on this cabinet.
+          Named agents that may attest for people on this team.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-6">

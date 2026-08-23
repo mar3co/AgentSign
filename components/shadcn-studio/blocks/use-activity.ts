@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 export type ActivityItem = {
   id: string;
   event: string;
-  envelope_id: string;
+  document_id: string;
   title: string;
   actor: string | null;
   actor_kind: "human" | "agent" | null;
@@ -22,7 +22,7 @@ function lastSeen(): number {
   }
 }
 
-/** One sentence per event, from the reader's side of the envelope. */
+/** One sentence per event, from the reader's side of the document. */
 export function activityLine(item: ActivityItem): string {
   const who = item.actor ?? "A signer";
   const title = `“${item.title}”`;
@@ -70,7 +70,7 @@ export function relativeTime(iso: string): string {
 }
 
 /**
- * Recent envelope events for the header blocks. `items` is null while
+ * Recent document events for the header blocks. `items` is null while
  * loading; unread is anything newer than the per-browser seen mark.
  */
 export function useActivity() {

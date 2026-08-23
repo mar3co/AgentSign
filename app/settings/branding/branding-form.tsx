@@ -37,7 +37,7 @@ export function BrandingForm({
     return (
       <UpgradeGate
         icon={Palette}
-        title="Make envelopes look like yours"
+        title="Make documents look like yours"
         description="Pro adds your shop name and logo to invite mail and the signing page."
       />
     );
@@ -47,7 +47,7 @@ export function BrandingForm({
     return (
       <Card>
         <CardHeader>
-          <CardDescription>This cabinet&apos;s name and logo.</CardDescription>
+          <CardDescription>Your team&apos;s name and logo.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           {displayName ? (

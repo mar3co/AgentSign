@@ -1,5 +1,5 @@
 import type { AuditDb } from "./audit.js";
-import { cabinetForUser } from "./cabinet.js";
+import { teamForUser } from "./team.js";
 import { LOGO_MAX_BYTES } from "./entitlement.js";
 import type { BlobStore } from "./storage.js";
 
@@ -14,13 +14,13 @@ export async function loadBrand(
   store?: BlobStore | null,
 ): Promise<LoadedBrand> {
   if (!userId) return { displayName: null };
-  const cabinet = await cabinetForUser(db, userId);
-  if (!cabinet.logoPath || !store) {
-    return { displayName: cabinet.displayName };
+  const team = await teamForUser(db, userId);
+  if (!team.logoPath || !store) {
+    return { displayName: team.displayName };
   }
-  const bytes = await store.get(cabinet.logoPath);
+  const bytes = await store.get(team.logoPath);
   return {
-    displayName: cabinet.displayName,
+    displayName: team.displayName,
     ...(bytes ? { logoBytes: bytes } : {}),
   };
 }

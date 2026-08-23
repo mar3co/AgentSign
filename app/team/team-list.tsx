@@ -46,8 +46,8 @@ export function TeamList({
     return (
       <UpgradeGate
         icon={Users}
-        title="Share this cabinet"
-        description="Pro lets you invite people to this cabinet."
+        title="Share your documents"
+        description="Pro lets you invite people to your team."
       />
     );
   }
@@ -125,8 +125,8 @@ export function TeamList({
       <CardHeader>
         <CardDescription>
           {ownerEmail
-            ? `Cabinet owner ${ownerEmail}.`
-            : "People on this cabinet."}
+            ? `Team owner ${ownerEmail}.`
+            : "People on this team."}
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-6">

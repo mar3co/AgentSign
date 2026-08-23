@@ -1,7 +1,7 @@
 import { and, count, eq } from "drizzle-orm";
-import { accounts, cabinetMembers } from "../db/schema.js";
+import { accounts, teamMembers } from "../db/schema.js";
 import { getEnv } from "../env.js";
-import { cabinetForUser } from "../lib/cabinet.js";
+import { teamForUser } from "../lib/team.js";
 import { requireCaller } from "../lib/caller.js";
 import { getDeps } from "../lib/deps.js";
 import { createMailer, teamInviteEmail } from "../lib/email.js";
@@ -39,40 +39,40 @@ function requireOwner(
 async function requireTeamCaller(req: Request) {
   const caller = await requireCaller(req, { allowOauth: false });
   if (!caller.ok) return caller;
-  const cabinet = await cabinetForUser(caller.db, caller.user.id);
-  return { ok: true as const, caller, cabinet };
+  const team = await teamForUser(caller.db, caller.user.id);
+  return { ok: true as const, caller, team };
 }
 
 async function requireEntitledOwner(req: Request) {
   const gate = await requireTeamCaller(req);
   if (!gate.ok) return gate;
-  if (!gate.cabinet.entitled) {
+  if (!gate.team.entitled) {
     return {
       ok: false as const,
       response: jsonError(403, "Pro plan required", "pro_required"),
     };
   }
-  const owner = requireOwner(gate.caller.user.id, gate.cabinet.ownerUserId);
+  const owner = requireOwner(gate.caller.user.id, gate.team.ownerUserId);
   if (!owner.ok) return owner;
   return gate;
 }
 
 function teamJson(
-  cabinet: Awaited<ReturnType<typeof cabinetForUser>>,
+  team: Awaited<ReturnType<typeof teamForUser>>,
   callerId: string,
 ) {
   return {
-    owner_email: cabinet.ownerEmail,
-    entitled: cabinet.entitled,
-    role: callerId === cabinet.ownerUserId ? ("owner" as const) : ("member" as const),
+    owner_email: team.ownerEmail,
+    entitled: team.entitled,
+    role: callerId === team.ownerUserId ? ("owner" as const) : ("member" as const),
     members: [
       {
-        id: cabinet.ownerUserId,
-        email: cabinet.ownerEmail,
+        id: team.ownerUserId,
+        email: team.ownerEmail,
         status: "active" as const,
         role: "owner" as const,
       },
-      ...cabinet.members.map((m) => ({
+      ...team.members.map((m) => ({
         id: m.id,
         email: m.email,
         status: m.status,
@@ -106,7 +106,7 @@ async function sendInviteMail(email: string, rawToken: string): Promise<void> {
 export async function getTeam(req: Request): Promise<Response> {
   const gate = await requireTeamCaller(req);
   if (!gate.ok) return gate.response;
-  return Response.json(teamJson(gate.cabinet, gate.caller.user.id));
+  return Response.json(teamJson(gate.team, gate.caller.user.id));
 }
 
 export async function inviteMember(req: Request): Promise<Response> {
@@ -123,14 +123,14 @@ export async function inviteMember(req: Request): Promise<Response> {
   }
 
   const { db } = gate.caller;
-  const ownerUserId = gate.cabinet.ownerUserId;
+  const ownerUserId = gate.team.ownerUserId;
   const [existing] = await db
     .select()
-    .from(cabinetMembers)
+    .from(teamMembers)
     .where(
       and(
-        eq(cabinetMembers.ownerUserId, ownerUserId),
-        eq(cabinetMembers.email, email),
+        eq(teamMembers.ownerUserId, ownerUserId),
+        eq(teamMembers.email, email),
       ),
     );
   if (existing?.status === "active") {
@@ -142,9 +142,9 @@ export async function inviteMember(req: Request): Promise<Response> {
 
   if (existing?.status === "invited") {
     await db
-      .update(cabinetMembers)
+      .update(teamMembers)
       .set({ tokenHash: token.hash, invitedAt: at })
-      .where(eq(cabinetMembers.id, existing.id));
+      .where(eq(teamMembers.id, existing.id));
     await sendInviteMail(email, token.raw);
     return Response.json(
       { id: existing.id, email, status: "invited" },
@@ -154,14 +154,14 @@ export async function inviteMember(req: Request): Promise<Response> {
 
   const [n] = await db
     .select({ n: count() })
-    .from(cabinetMembers)
-    .where(eq(cabinetMembers.ownerUserId, ownerUserId));
+    .from(teamMembers)
+    .where(eq(teamMembers.ownerUserId, ownerUserId));
   if (teamSeatCount(n?.n) >= TEAM_CAP) {
     return jsonError(400, "Team is full", "team_full");
   }
 
   const [row] = await db
-    .insert(cabinetMembers)
+    .insert(teamMembers)
     .values({
       ownerUserId,
       email,
@@ -180,7 +180,7 @@ export async function inviteMember(req: Request): Promise<Response> {
 export async function removeMember(req: Request, id: string): Promise<Response> {
   const gate = await requireTeamCaller(req);
   if (!gate.ok) return gate.response;
-  const owner = requireOwner(gate.caller.user.id, gate.cabinet.ownerUserId);
+  const owner = requireOwner(gate.caller.user.id, gate.team.ownerUserId);
   if (!owner.ok) return owner.response;
   if (!id) {
     return jsonError(400, "Member id is required", "invalid_request");
@@ -188,17 +188,17 @@ export async function removeMember(req: Request, id: string): Promise<Response> 
 
   const [row] = await gate.caller.db
     .select()
-    .from(cabinetMembers)
+    .from(teamMembers)
     .where(
       and(
-        eq(cabinetMembers.id, id),
-        eq(cabinetMembers.ownerUserId, gate.cabinet.ownerUserId),
+        eq(teamMembers.id, id),
+        eq(teamMembers.ownerUserId, gate.team.ownerUserId),
       ),
     );
   if (!row) {
     return jsonError(404, "Member not found", "not_found");
   }
-  await gate.caller.db.delete(cabinetMembers).where(eq(cabinetMembers.id, id));
+  await gate.caller.db.delete(teamMembers).where(eq(teamMembers.id, id));
   return new Response(null, { status: 204 });
 }
 
@@ -233,8 +233,8 @@ export async function acceptInvite(req: Request): Promise<Response> {
   const hash = hashSigningToken(token);
   const [invite] = await caller.db
     .select()
-    .from(cabinetMembers)
-    .where(eq(cabinetMembers.tokenHash, hash));
+    .from(teamMembers)
+    .where(eq(teamMembers.tokenHash, hash));
   if (!invite || !equalHex(invite.tokenHash, hash)) {
     return jsonError(404, "Invite not found", "not_found");
   }
@@ -251,11 +251,11 @@ export async function acceptInvite(req: Request): Promise<Response> {
 
   const [active] = await caller.db
     .select()
-    .from(cabinetMembers)
+    .from(teamMembers)
     .where(
       and(
-        eq(cabinetMembers.userId, caller.user.id),
-        eq(cabinetMembers.status, "active"),
+        eq(teamMembers.userId, caller.user.id),
+        eq(teamMembers.status, "active"),
       ),
     );
   if (active) {
@@ -264,8 +264,8 @@ export async function acceptInvite(req: Request): Promise<Response> {
 
   const [owned] = await caller.db
     .select()
-    .from(cabinetMembers)
-    .where(eq(cabinetMembers.ownerUserId, caller.user.id));
+    .from(teamMembers)
+    .where(eq(teamMembers.ownerUserId, caller.user.id));
   if (owned) {
     return jsonError(409, "Already owns a team", "already_owns_a_team");
   }
@@ -281,13 +281,13 @@ export async function acceptInvite(req: Request): Promise<Response> {
   }
 
   const [updated] = await caller.db
-    .update(cabinetMembers)
+    .update(teamMembers)
     .set({
       userId: caller.user.id,
       status: "active",
       acceptedAt: at,
     })
-    .where(eq(cabinetMembers.id, invite.id))
+    .where(eq(teamMembers.id, invite.id))
     .returning();
 
   return Response.json({

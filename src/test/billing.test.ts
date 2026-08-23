@@ -8,7 +8,7 @@ import { POST as postUpgrade } from "../../app/upgrade/checkout/route.js";
 import { POST as postStripe } from "../../app/internal/stripe/route.js";
 import { POST as postLogin } from "../../app/login/session/route.js";
 import { GET as getAuthCallback } from "../../app/auth/callback/route.js";
-import { accounts, envelopes, signers as signersTable } from "../db/schema.js";
+import { accounts, documents, signers as signersTable } from "../db/schema.js";
 import { setDeps } from "../lib/deps.js";
 import { resetEnvCache } from "../env.js";
 import { createTestDb } from "./db.js";
@@ -214,7 +214,7 @@ describe("Stripe Checkout Pro", () => {
         plan: "free",
       });
       const [envRow] = await db
-        .insert(envelopes)
+        .insert(documents)
         .values({
           title: "Sent",
           senderEmail: "shop@example.com",
@@ -225,7 +225,7 @@ describe("Stripe Checkout Pro", () => {
         })
         .returning();
       await db.insert(signersTable).values({
-        envelopeId: envRow!.id,
+        documentId: envRow!.id,
         name: "Jane",
         email: "jane@example.com",
         signingOrder: 1,
@@ -254,8 +254,8 @@ describe("Stripe Checkout Pro", () => {
 
       const [after] = await db
         .select()
-        .from(envelopes)
-        .where(eq(envelopes.id, envRow!.id));
+        .from(documents)
+        .where(eq(documents.id, envRow!.id));
       expect(after!.shredAt.getTime()).toBe(signedAt.getTime() + 365 * 86_400_000);
     });
   });
@@ -309,7 +309,7 @@ describe("Stripe Checkout Pro", () => {
         stripeCustomerId: "cus_keep",
       });
       const [envRow] = await db
-        .insert(envelopes)
+        .insert(documents)
         .values({
           title: "Kept",
           senderEmail: "shop@example.com",
@@ -338,8 +338,8 @@ describe("Stripe Checkout Pro", () => {
       expect(account!.plan).toBe("free");
       const [after] = await db
         .select()
-        .from(envelopes)
-        .where(eq(envelopes.id, envRow!.id));
+        .from(documents)
+        .where(eq(documents.id, envRow!.id));
       expect(after!.shredAt.getTime()).toBe(shredAt.getTime());
     });
   });

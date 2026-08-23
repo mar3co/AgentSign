@@ -12,10 +12,10 @@ import { GET as getCeremonyPdf } from "../../app/s/[token]/pdf/route.js";
 import { POST as postSign } from "../../app/s/[token]/sign/route.js";
 import { DELETE as deleteLogo } from "../../app/v1/branding/logo/route.js";
 import { GET as getBranding, PUT as putBranding } from "../../app/v1/branding/route.js";
-import { POST as postEnvelope } from "../../app/v1/envelopes/route.js";
-import { POST as postOtp } from "../../app/v1/envelopes/[id]/otp/route.js";
+import { POST as postDocument } from "../../app/v1/documents/route.js";
+import { POST as postOtp } from "../../app/v1/documents/[id]/otp/route.js";
 import { POST as postKeys } from "../../app/v1/keys/route.js";
-import { accounts, cabinetMembers } from "../db/schema.js";
+import { accounts, teamMembers } from "../db/schema.js";
 import { setDeps } from "../lib/deps.js";
 import { declineEmail, inviteEmail, type MailMessage } from "../lib/email.js";
 import { LOGO_MAX_BYTES } from "../lib/entitlement.js";
@@ -144,7 +144,7 @@ async function boot() {
   return { db, store, userFor, sent };
 }
 
-async function envelopeForm() {
+async function documentForm() {
   const pdf = await minimalPdf();
   const body = new FormData();
   body.set("title", "Repair authorization");
@@ -448,7 +448,7 @@ describe("branding API", () => {
     const { userId: ownerId } = await asPro(db, userFor, "owner@example.com");
     const memberCookie = await magicCookie("tech@example.com");
     const memberId = userFor("tech@example.com").id;
-    await db.insert(cabinetMembers).values({
+    await db.insert(teamMembers).values({
       ownerUserId: ownerId,
       email: "tech@example.com",
       userId: memberId,
@@ -521,11 +521,11 @@ describe("branding on mail and signing page", () => {
       expect(minted.status).toBe(201);
       const { key } = (await minted.json()) as { key: string };
 
-      const created = await postEnvelope(
-        new Request("http://sign.test/v1/envelopes", {
+      const created = await postDocument(
+        new Request("http://sign.test/v1/documents", {
           method: "POST",
           headers: { authorization: `Bearer ${key}` },
-          body: await envelopeForm(),
+          body: await documentForm(),
         }),
       );
       expect(created.status).toBe(201);
@@ -608,10 +608,10 @@ describe("branding on mail and signing page", () => {
     const { cookie } = await asPro(db, userFor);
     await putShopBranding(cookie);
 
-    const res = await postEnvelope(
-      new Request("http://sign.test/v1/envelopes", {
+    const res = await postDocument(
+      new Request("http://sign.test/v1/documents", {
         method: "POST",
-        body: await envelopeForm(),
+        body: await documentForm(),
       }),
     );
     expect(res.status).toBe(201);
@@ -623,7 +623,7 @@ describe("branding on mail and signing page", () => {
 
     const code = otp!.text.match(/\b(\d{6})\b/)![1]!;
     const verify = await postOtp(
-      new Request(`http://sign.test/v1/envelopes/${id}/otp`, {
+      new Request(`http://sign.test/v1/documents/${id}/otp`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ code }),

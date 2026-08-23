@@ -6,12 +6,12 @@ import { AppShell } from "../../components/app-shell.js";
 import { ByteRange } from "../../components/byte-range.js";
 import { SiteFooter } from "../../components/site-footer.js";
 import { SiteHeader } from "../../components/site-header.js";
-import { CabinetList } from "../../app/envelopes/cabinet-list.js";
+import { DocumentsList } from "../../app/documents/documents-list.js";
 import PrivacyPage from "../../app/privacy/page.js";
 import TermsPage from "../../app/terms/page.js";
 
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/envelopes",
+  usePathname: () => "/documents",
 }));
 
 describe("SiteHeader", () => {
@@ -19,7 +19,7 @@ describe("SiteHeader", () => {
     cleanup();
   });
 
-  it("public header links the wordmark home and Log in, not cabinet items", () => {
+  it("public header links the wordmark home and Log in, not app nav items", () => {
     render(createElement(SiteHeader, { variant: "public" }));
     expect(screen.getByRole("link", { name: /^agentsign$/i }).getAttribute("href")).toBe(
       "/",
@@ -30,7 +30,7 @@ describe("SiteHeader", () => {
     expect(screen.getByRole("link", { name: /^pricing$/i }).getAttribute("href")).toBe(
       "/upgrade",
     );
-    expect(screen.queryByRole("link", { name: /^packets$/i })).toBeNull();
+    expect(screen.queryByRole("link", { name: /^templates$/i })).toBeNull();
     expect(screen.queryByRole("link", { name: /^branding$/i })).toBeNull();
   });
 
@@ -41,27 +41,27 @@ describe("AppShell", () => {
     cleanup();
   });
 
-  it("sidebar is the only cabinet nav and marks the active page", () => {
+  it("sidebar is the only app nav and marks the active page", () => {
     render(createElement(AppShell, null, "content"));
     const href = (name: RegExp) =>
       screen.getAllByRole("link", { name })[0]?.getAttribute("href");
     expect(href(/^send$/i)).toBe("/send");
-    expect(href(/^cabinet$/i)).toBe("/envelopes");
-    expect(href(/^packets$/i)).toBe("/packets");
+    expect(href(/^documents$/i)).toBe("/documents");
+    expect(href(/^templates$/i)).toBe("/templates");
     expect(href(/^branding$/i)).toBe("/settings/branding");
     expect(href(/^team$/i)).toBe("/team");
     expect(href(/^agents$/i)).toBe("/agents");
     expect(href(/^docs$/i)).toBe("/docs");
-    // The header title reflects the mocked /envelopes pathname.
-    expect(screen.getByRole("heading", { name: /^cabinet$/i })).toBeTruthy();
+    // The header title reflects the mocked /documents pathname.
+    expect(screen.getByRole("heading", { name: /^documents$/i })).toBeTruthy();
     expect(
       screen
-        .getAllByRole("link", { name: /^cabinet$/i })[0]
+        .getAllByRole("link", { name: /^documents$/i })[0]
         ?.hasAttribute("data-active"),
     ).toBe(true);
     expect(
       screen
-        .getAllByRole("link", { name: /^packets$/i })[0]
+        .getAllByRole("link", { name: /^templates$/i })[0]
         ?.hasAttribute("data-active"),
     ).toBe(false);
   });
@@ -159,15 +159,15 @@ describe("legal pages", () => {
   });
 });
 
-describe("CabinetList table", () => {
+describe("DocumentsList table", () => {
   afterEach(() => {
     cleanup();
   });
 
-  it("renders envelopes in a table and no duplicate app nav", () => {
+  it("renders documents in a table and no duplicate app nav", () => {
     render(
-      createElement(CabinetList, {
-        envelopes: [
+      createElement(DocumentsList, {
+        documents: [
           {
             id: "env_1",
             title: "Repair authorization",
@@ -181,7 +181,7 @@ describe("CabinetList table", () => {
     expect(screen.getByRole("columnheader", { name: /document/i })).toBeTruthy();
     expect(screen.getByRole("columnheader", { name: /status/i })).toBeTruthy();
     expect(screen.getByText("Repair authorization")).toBeTruthy();
-    expect(screen.queryByRole("link", { name: /^packets$/i })).toBeNull();
+    expect(screen.queryByRole("link", { name: /^templates$/i })).toBeNull();
     expect(screen.queryByRole("link", { name: /^branding$/i })).toBeNull();
     expect(screen.queryByRole("link", { name: /^team$/i })).toBeNull();
     expect(screen.queryByRole("link", { name: /^agents$/i })).toBeNull();

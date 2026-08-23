@@ -12,8 +12,8 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return [
       {
-        source: "/v1/envelopes/:id.pdf",
-        destination: "/v1/envelopes/:id/pdf",
+        source: "/v1/documents/:id.pdf",
+        destination: "/v1/documents/:id/pdf",
       },
     ];
   },

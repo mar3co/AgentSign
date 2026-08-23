@@ -7,18 +7,18 @@ import { eq } from "drizzle-orm";
 import { GET as getAuthCallback } from "../../app/auth/callback/route.js";
 import { POST as postLogin } from "../../app/login/session/route.js";
 import { POST as postAgents } from "../../app/v1/agents/route.js";
-import { POST as postAttest } from "../../app/v1/envelopes/[id]/attest/route.js";
-import { POST as postReject } from "../../app/v1/envelopes/[id]/reject/route.js";
-import { POST as postEnvelope } from "../../app/v1/envelopes/route.js";
-import { GET as getEnvelope } from "../../app/v1/envelopes/[id]/route.js";
+import { POST as postAttest } from "../../app/v1/documents/[id]/attest/route.js";
+import { POST as postReject } from "../../app/v1/documents/[id]/reject/route.js";
+import { POST as postDocument } from "../../app/v1/documents/route.js";
+import { GET as getDocument } from "../../app/v1/documents/[id]/route.js";
 import { POST as postKeys } from "../../app/v1/keys/route.js";
 import { POST as postConsent } from "../../app/s/[token]/consent/route.js";
 import { POST as postSign } from "../../app/s/[token]/sign/route.js";
 import {
   accounts,
   auditEvents,
+  files,
   documents,
-  envelopes,
   signers as signersTable,
 } from "../db/schema.js";
 import { resetEnvCache } from "../env.js";
@@ -189,7 +189,7 @@ async function createNamedAgent(
   return json;
 }
 
-async function envelopeBody(
+async function documentBody(
   signers: unknown,
   sender = "shop@example.com",
   webhookUrl?: string,
@@ -204,12 +204,12 @@ async function envelopeBody(
   return body;
 }
 
-async function sendEnvelope(liveKey: string, signers: unknown, webhookUrl?: string) {
-  const res = await postEnvelope(
-    new Request("http://sign.test/v1/envelopes", {
+async function sendDocument(liveKey: string, signers: unknown, webhookUrl?: string) {
+  const res = await postDocument(
+    new Request("http://sign.test/v1/documents", {
       method: "POST",
       headers: { authorization: `Bearer ${liveKey}` },
-      body: await envelopeBody(signers, "shop@example.com", webhookUrl),
+      body: await documentBody(signers, "shop@example.com", webhookUrl),
     }),
   );
   expect(res.status).toBe(201);
@@ -223,7 +223,7 @@ async function sendEnvelope(liveKey: string, signers: unknown, webhookUrl?: stri
 }
 
 function attestReq(id: string, key: string, body?: unknown) {
-  return new Request(`http://sign.test/v1/envelopes/${id}/attest`, {
+  return new Request(`http://sign.test/v1/documents/${id}/attest`, {
     method: "POST",
     headers: {
       authorization: `Bearer ${key}`,
@@ -255,13 +255,13 @@ afterEach(() => {
   resetDeps();
 });
 
-describe("POST /v1/envelopes/:id/attest", () => {
+describe("POST /v1/documents/:id/attest", () => {
   it("agent key attests current agent party", { timeout: 60_000 }, async () => {
     const { db, sent, userFor } = await boot();
     const { cookie } = await asPro(db, userFor);
     const agent = await createNamedAgent(cookie, "grok-legal", "Grok Legal");
     const live = await mintLive(cookie);
-    const id = await sendEnvelope(live, [
+    const id = await sendDocument(live, [
       {
         name: "Grok Legal",
         email: "shop@example.com",
@@ -280,7 +280,7 @@ describe("POST /v1/envelopes/:id/attest", () => {
     const rows = await db
       .select()
       .from(signersTable)
-      .where(eq(signersTable.envelopeId, id));
+      .where(eq(signersTable.documentId, id));
     rows.sort((a, b) => a.signingOrder - b.signingOrder);
     expect(rows[0]!.kind).toBe("agent");
     expect(rows[0]!.attestedAt).not.toBeNull();
@@ -293,11 +293,11 @@ describe("POST /v1/envelopes/:id/attest", () => {
     expect(rows[1]!.tokenHash).toBeTruthy();
     expect(rows[1]!.sentAt).not.toBeNull();
 
-    const [env] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    const [env] = await db.select().from(documents).where(eq(documents.id, id));
     expect(env!.status).toBe("pending");
 
-    const status = await getEnvelope(
-      new Request(`http://sign.test/v1/envelopes/${id}`, {
+    const status = await getDocument(
+      new Request(`http://sign.test/v1/documents/${id}`, {
         headers: { authorization: `Bearer ${live}` },
       }),
       envCtx(id),
@@ -315,7 +315,7 @@ describe("POST /v1/envelopes/:id/attest", () => {
     const audit = await db
       .select()
       .from(auditEvents)
-      .where(eq(auditEvents.envelopeId, id));
+      .where(eq(auditEvents.documentId, id));
     expect(audit.some((a) => a.event === "attested")).toBe(true);
 
     const afterMail = sent.slice(beforeMail);
@@ -327,7 +327,7 @@ describe("POST /v1/envelopes/:id/attest", () => {
     const { cookie } = await asPro(db, userFor);
     await createNamedAgent(cookie, "grok-legal", "Grok Legal");
     const live = await mintLive(cookie);
-    const id = await sendEnvelope(live, [
+    const id = await sendDocument(live, [
       {
         name: "Grok Legal",
         email: "shop@example.com",
@@ -346,7 +346,7 @@ describe("POST /v1/envelopes/:id/attest", () => {
     const [row] = await db
       .select()
       .from(signersTable)
-      .where(eq(signersTable.envelopeId, id));
+      .where(eq(signersTable.documentId, id));
     expect(row!.attestedAt).toBeNull();
 
     const named = await postAttest(
@@ -364,7 +364,7 @@ describe("POST /v1/envelopes/:id/attest", () => {
     const first = await createNamedAgent(cookie, "grok-legal", "Grok Legal");
     const second = await createNamedAgent(cookie, "grok-ops", "Grok Ops");
     const live = await mintLive(cookie);
-    const id = await sendEnvelope(live, [
+    const id = await sendDocument(live, [
       {
         name: "Grok Legal",
         email: "shop@example.com",
@@ -388,16 +388,16 @@ describe("POST /v1/envelopes/:id/attest", () => {
     expect(json.code).toBe("human_required");
     expect(json.error).toBeTruthy();
 
-    const [env] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    const [env] = await db.select().from(documents).where(eq(documents.id, id));
     expect(env!.status).toBe("pending");
-    const docs = await db.select().from(documents).where(eq(documents.envelopeId, id));
+    const docs = await db.select().from(files).where(eq(files.documentId, id));
     expect(docs.some((d) => d.kind === "sealed")).toBe(false);
     expect(await store.get(`${id}/sealed.pdf`)).toBeNull();
 
     const rows = await db
       .select()
       .from(signersTable)
-      .where(eq(signersTable.envelopeId, id));
+      .where(eq(signersTable.documentId, id));
     rows.sort((a, b) => a.signingOrder - b.signingOrder);
     expect(rows[0]!.attestedAt).not.toBeNull();
     expect(rows[1]!.attestedAt).not.toBeNull();
@@ -413,7 +413,7 @@ describe("POST /v1/envelopes/:id/attest", () => {
     const first = await createNamedAgent(cookie, "grok-legal", "Grok Legal");
     const second = await createNamedAgent(cookie, "grok-ops", "Grok Ops");
     const live = await mintLive(cookie);
-    const id = await sendEnvelope(live, [
+    const id = await sendDocument(live, [
       {
         name: "Grok Legal",
         email: "shop@example.com",
@@ -435,11 +435,11 @@ describe("POST /v1/envelopes/:id/attest", () => {
     expect(json.status).toBe("completed");
     expect(json.sha256).toBeTruthy();
 
-    const [env] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    const [env] = await db.select().from(documents).where(eq(documents.id, id));
     expect(env!.status).toBe("completed");
     expect(env!.sha256).toBe(json.sha256);
     expect(await store.get(`${id}/sealed.pdf`)).not.toBeNull();
-    const docs = await db.select().from(documents).where(eq(documents.envelopeId, id));
+    const docs = await db.select().from(files).where(eq(files.documentId, id));
     expect(docs.some((d) => d.kind === "sealed")).toBe(true);
     const sealed = await store.get(`${id}/sealed.pdf`);
     const cert = await store.get(`${id}/certificate.pdf`);
@@ -455,7 +455,7 @@ describe("POST /v1/envelopes/:id/attest", () => {
     const { cookie } = await asPro(db, userFor);
     const agent = await createNamedAgent(cookie, "grok-legal", "Grok Legal");
     const live = await mintLive(cookie);
-    const id = await sendEnvelope(live, [
+    const id = await sendDocument(live, [
       {
         name: "Grok Legal",
         email: "shop@example.com",
@@ -475,7 +475,7 @@ describe("POST /v1/envelopes/:id/attest", () => {
     const rows = await db
       .select()
       .from(signersTable)
-      .where(eq(signersTable.envelopeId, id));
+      .where(eq(signersTable.documentId, id));
     rows.sort((x, y) => x.signingOrder - y.signingOrder);
     expect(rows[0]!.attestedAt).not.toBeNull();
   });
@@ -485,7 +485,7 @@ describe("POST /v1/envelopes/:id/attest", () => {
     const { cookie } = await asPro(db, userFor);
     const agent = await createNamedAgent(cookie, "grok-legal", "Grok Legal");
     const live = await mintLive(cookie);
-    const id = await sendEnvelope(live, [
+    const id = await sendDocument(live, [
       {
         name: "Grok Legal",
         email: "shop@example.com",
@@ -521,7 +521,7 @@ describe("POST /v1/envelopes/:id/attest", () => {
     expect(json.status).toBe("completed");
     expect(json.sha256).toBeTruthy();
 
-    const [env] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    const [env] = await db.select().from(documents).where(eq(documents.id, id));
     expect(env!.status).toBe("completed");
     expect(await store.get(`${id}/sealed.pdf`)).not.toBeNull();
   });
@@ -533,7 +533,7 @@ describe("POST /v1/envelopes/:id/attest", () => {
     const { cookie } = await asPro(db, userFor);
     const agent = await createNamedAgent(cookie, "grok-legal", "Grok Legal");
     const live = await mintLive(cookie);
-    const id = await sendEnvelope(live, [
+    const id = await sendDocument(live, [
       {
         name: "Grok Legal",
         email: "shop@example.com",
@@ -575,25 +575,25 @@ describe("POST /v1/envelopes/:id/attest", () => {
     expect(finish.status).toBe(200);
     expect(attest.status).toBe(409);
 
-    const [env] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    const [env] = await db.select().from(documents).where(eq(documents.id, id));
     expect(env!.status).toBe("completed");
     expect(await store.get(`${id}/sealed.pdf`)).not.toBeNull();
 
     const parties = await db
       .select()
       .from(signersTable)
-      .where(eq(signersTable.envelopeId, id));
+      .where(eq(signersTable.documentId, id));
     parties.sort((a, b) => a.signingOrder - b.signingOrder);
     expect(parties[0]!.attestedAt).not.toBeNull();
     expect(parties[1]!.signedAt).not.toBeNull();
   });
 
-  it("agent key reject declines the envelope", { timeout: 60_000 }, async () => {
+  it("agent key reject declines the document", { timeout: 60_000 }, async () => {
     const { db, userFor } = await boot();
     const { cookie } = await asPro(db, userFor);
     const agent = await createNamedAgent(cookie, "grok-legal", "Grok Legal");
     const live = await mintLive(cookie);
-    const id = await sendEnvelope(live, [
+    const id = await sendDocument(live, [
       {
         name: "Grok Legal",
         email: "shop@example.com",
@@ -604,7 +604,7 @@ describe("POST /v1/envelopes/:id/attest", () => {
     ]);
 
     const res = await postReject(
-      new Request(`http://sign.test/v1/envelopes/${id}/reject`, {
+      new Request(`http://sign.test/v1/documents/${id}/reject`, {
         method: "POST",
         headers: { authorization: `Bearer ${agent.key}` },
       }),
@@ -613,12 +613,12 @@ describe("POST /v1/envelopes/:id/attest", () => {
     expect(res.status).toBe(200);
     expect((await res.json()) as { status: string }).toEqual({ status: "declined" });
 
-    const [env] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    const [env] = await db.select().from(documents).where(eq(documents.id, id));
     expect(env!.status).toBe("declined");
     const rows = await db
       .select()
       .from(signersTable)
-      .where(eq(signersTable.envelopeId, id));
+      .where(eq(signersTable.documentId, id));
     rows.sort((a, b) => a.signingOrder - b.signingOrder);
     expect(rows[0]!.kind).toBe("agent");
     expect(rows[0]!.rejectedAt).not.toBeNull();
@@ -626,7 +626,7 @@ describe("POST /v1/envelopes/:id/attest", () => {
     const audit = await db
       .select()
       .from(auditEvents)
-      .where(eq(auditEvents.envelopeId, id));
+      .where(eq(auditEvents.documentId, id));
     expect(audit.some((a) => a.event === "rejected")).toBe(true);
   });
 
@@ -637,7 +637,7 @@ describe("POST /v1/envelopes/:id/attest", () => {
     const { cookie } = await asPro(db, userFor);
     const agent = await createNamedAgent(cookie, "grok-legal", "Grok Legal");
     const live = await mintLive(cookie);
-    const id = await sendEnvelope(live, [
+    const id = await sendDocument(live, [
       {
         name: "Grok Legal",
         email: "shop@example.com",
@@ -663,7 +663,7 @@ describe("POST /v1/envelopes/:id/attest", () => {
     const rows = await db
       .select()
       .from(signersTable)
-      .where(eq(signersTable.envelopeId, id));
+      .where(eq(signersTable.documentId, id));
     rows.sort((a, b) => a.signingOrder - b.signingOrder);
     expect(rows[0]!.attestedAt).toBeNull();
     expect(rows[1]!.sentAt).toBeNull();
@@ -671,11 +671,11 @@ describe("POST /v1/envelopes/:id/attest", () => {
     const audit = await db
       .select()
       .from(auditEvents)
-      .where(eq(auditEvents.envelopeId, id));
+      .where(eq(auditEvents.documentId, id));
     expect(audit.some((a) => a.event === "attested")).toBe(false);
   });
 
-  it("agent party.ready HMAC verifies and envelope.completed still fires", {
+  it("agent party.ready HMAC verifies and document.completed still fires", {
     timeout: 60_000,
   }, async () => {
     const frozen = new Date("2026-08-20T12:00:00Z");
@@ -711,11 +711,11 @@ describe("POST /v1/envelopes/:id/attest", () => {
     );
     expect(agent.webhook_secret).toBeTruthy();
     const live = await mintLive(cookie);
-    const createRes = await postEnvelope(
-      new Request("http://sign.test/v1/envelopes", {
+    const createRes = await postDocument(
+      new Request("http://sign.test/v1/documents", {
         method: "POST",
         headers: { authorization: `Bearer ${live}` },
-        body: await envelopeBody(
+        body: await documentBody(
           [
             {
               name: "Grok Legal",
@@ -787,14 +787,14 @@ describe("POST /v1/envelopes/:id/attest", () => {
     const agentDone = posts.filter(
       (p) =>
         p.url === "https://example.com/agent-hook" &&
-        String(p.init.body).includes("envelope.completed"),
+        String(p.init.body).includes("document.completed"),
     );
     expect(agentDone).toHaveLength(1);
     const agentDonePayload = JSON.parse(String(agentDone[0]!.init.body)) as Record<
       string,
       unknown
     >;
-    expect(agentDonePayload.event).toBe("envelope.completed");
+    expect(agentDonePayload.event).toBe("document.completed");
     expect(agentDonePayload.id).toBe(created.id);
     expect(agentDonePayload.agent).toBe("grok-legal");
     expect(agentDonePayload.status).toBe("completed");
@@ -804,7 +804,7 @@ describe("POST /v1/envelopes/:id/attest", () => {
     const envDone = posts.filter((p) => p.url === "https://example.com/env-hook");
     expect(envDone).toHaveLength(1);
     const envPayload = JSON.parse(String(envDone[0]!.init.body)) as Record<string, unknown>;
-    expect(envPayload.event).toBe("envelope.completed");
+    expect(envPayload.event).toBe("document.completed");
     expect(envPayload.id).toBe(created.id);
     expect(envPayload.status).toBe("completed");
     expect(envPayload.sha256).toBeTruthy();
@@ -816,14 +816,14 @@ describe("POST /v1/envelopes/:id/attest", () => {
     expect(envSig).toBe(`sha256=${envExpected}`);
   });
 
-  it("inviteNextHumanIfNeeded does not email when envelope is not pending", {
+  it("inviteNextHumanIfNeeded does not email when document is not pending", {
     timeout: 60_000,
   }, async () => {
     const { db, sent, userFor } = await boot();
     const { cookie } = await asPro(db, userFor);
     await createNamedAgent(cookie, "grok-legal", "Grok Legal");
     const live = await mintLive(cookie);
-    const id = await sendEnvelope(live, [
+    const id = await sendDocument(live, [
       {
         name: "Grok Legal",
         email: "shop@example.com",
@@ -835,17 +835,17 @@ describe("POST /v1/envelopes/:id/attest", () => {
     const allSigners = await db
       .select()
       .from(signersTable)
-      .where(eq(signersTable.envelopeId, id));
+      .where(eq(signersTable.documentId, id));
     allSigners.sort((a, b) => a.signingOrder - b.signingOrder);
-    const [envelope] = await db.select().from(envelopes).where(eq(envelopes.id, id));
+    const [document] = await db.select().from(documents).where(eq(documents.id, id));
     await db
-      .update(envelopes)
+      .update(documents)
       .set({ status: "deleted" })
-      .where(eq(envelopes.id, id));
+      .where(eq(documents.id, id));
     const before = sent.length;
     const fail = await inviteNextHumanIfNeeded(
       db,
-      envelope!,
+      document!,
       allSigners,
       allSigners[0]!,
       new Date(),

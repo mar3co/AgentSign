@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it, afterEach } from "vitest";
-import { accounts, cabinetMembers, packets, packetRoles } from "../db/schema.js";
+import { accounts, teamMembers, templates, templateRoles } from "../db/schema.js";
 import { resetEnvCache } from "../env.js";
-import { cabinetForUser } from "../lib/cabinet.js";
-import { isEntitled, TEAM_CAP, PACKET_CAP, AGENT_CAP } from "../lib/entitlement.js";
+import { teamForUser } from "../lib/team.js";
+import { isEntitled, TEAM_CAP, TEMPLATE_CAP, AGENT_CAP } from "../lib/entitlement.js";
 import { createTestDb } from "./db.js";
 
 afterEach(() => {
@@ -25,8 +25,8 @@ describe("isEntitled", () => {
   });
 });
 
-describe("cabinetForUser", () => {
-  it("solo user is their own cabinet", async () => {
+describe("teamForUser", () => {
+  it("solo user is their own team", async () => {
     const db = await createTestDb();
     const userId = randomUUID();
     await db.insert(accounts).values({
@@ -35,14 +35,14 @@ describe("cabinetForUser", () => {
       plan: "pro",
       displayName: "Shop Co",
     });
-    const c = await cabinetForUser(db, userId);
+    const c = await teamForUser(db, userId);
     expect(c.ownerUserId).toBe(userId);
     expect(c.entitled).toBe(true);
     expect(c.displayName).toBe("Shop Co");
     expect(c.memberUserIds).toEqual([userId]);
   });
 
-  it("active member uses the owner's cabinet", async () => {
+  it("active member uses the owner team", async () => {
     const db = await createTestDb();
     const ownerId = randomUUID();
     const memberId = randomUUID();
@@ -50,7 +50,7 @@ describe("cabinetForUser", () => {
       { userId: ownerId, email: "owner@example.com", plan: "pro", displayName: "Acme" },
       { userId: memberId, email: "tech@example.com", plan: "free" },
     ]);
-    await db.insert(cabinetMembers).values({
+    await db.insert(teamMembers).values({
       ownerUserId: ownerId,
       email: "tech@example.com",
       userId: memberId,
@@ -59,7 +59,7 @@ describe("cabinetForUser", () => {
       invitedAt: new Date(),
       acceptedAt: new Date(),
     });
-    const c = await cabinetForUser(db, memberId);
+    const c = await teamForUser(db, memberId);
     expect(c.ownerUserId).toBe(ownerId);
     expect(c.entitled).toBe(true);
     expect(c.displayName).toBe("Acme");
@@ -68,9 +68,9 @@ describe("cabinetForUser", () => {
 });
 
 describe("caps", () => {
-  it("exposes team 10 and packets 50", () => {
+  it("exposes team 10 and templates 50", () => {
     expect(TEAM_CAP).toBe(10);
-    expect(PACKET_CAP).toBe(50);
+    expect(TEMPLATE_CAP).toBe(50);
     expect(AGENT_CAP).toBe(10);
   });
 });

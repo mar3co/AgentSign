@@ -16,5 +16,5 @@ curl -F title=Repair\ authorization \
      -F sender_email=shop@example.com \
      -F signers='[{"name":"Jane","email":"jane@example.com"}]' \
      -F file=@form.pdf \
-     http://localhost:3000/v1/envelopes
+     http://localhost:3000/v1/documents
 CURL

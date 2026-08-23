@@ -8,7 +8,7 @@ export type VerifyResult = {
   valid: boolean;
   code?: string;
   sha256?: string;
-  envelope_id?: string;
+  document_id?: string;
   human_signatures?: number;
   agent_attestations?: number;
   parties?: Array<{
@@ -23,8 +23,8 @@ const AGENT_RE =
   /^Attested by .+ for (\S+) at (\d{4}-\d{2}-\d{2}T[^\s]+)\. Not an electronic signature\.$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ISO_RE = /^\d{4}-\d{2}-\d{2}T[\d:.+-]+Z$/;
-const ENVELOPE_RE =
-  /^Envelope id: ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+const DOCUMENT_RE =
+  /^Document id: ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 const HUMAN_COUNT_RE = /^human_signatures: (\d+)$/;
 const AGENT_COUNT_RE = /^agent_attestations: (\d+)$/;
 const MESSAGE_DIGEST_OID = "1.2.840.113549.1.9.4";
@@ -250,7 +250,7 @@ function pdfStrings(bytes: Uint8Array): string[] {
 }
 
 function parseDrawnText(bytes: Uint8Array): {
-  envelope_id?: string;
+  document_id?: string;
   human_signatures?: number;
   agent_attestations?: number;
   parties: VerifyResult["parties"];
@@ -258,25 +258,25 @@ function parseDrawnText(bytes: Uint8Array): {
   const strings = pdfStrings(bytes);
   let lastId: string | undefined;
   for (const raw of strings) {
-    const found = ENVELOPE_RE.exec(raw);
+    const found = DOCUMENT_RE.exec(raw);
     if (found) lastId = found[1];
   }
   const start =
     lastId === undefined
       ? 0
-      : strings.findIndex((raw) => ENVELOPE_RE.exec(raw)?.[1] === lastId);
+      : strings.findIndex((raw) => DOCUMENT_RE.exec(raw)?.[1] === lastId);
   const scoped = start >= 0 ? strings.slice(start) : strings;
 
   const parties: NonNullable<VerifyResult["parties"]> = [];
-  let envelope_id: string | undefined;
+  let document_id: string | undefined;
   let human_signatures: number | undefined;
   let agent_attestations: number | undefined;
 
   for (let i = 0; i < scoped.length; i++) {
     const s = scoped[i]!;
-    const env = ENVELOPE_RE.exec(s);
+    const env = DOCUMENT_RE.exec(s);
     if (env) {
-      envelope_id = env[1]!;
+      document_id = env[1]!;
       continue;
     }
     const hc = HUMAN_COUNT_RE.exec(s);
@@ -317,7 +317,7 @@ function parseDrawnText(bytes: Uint8Array): {
   }
   const deduped = [...unique.values()];
   return {
-    envelope_id,
+    document_id,
     human_signatures: human_signatures ?? deduped.filter((p) => p.kind === "human").length,
     agent_attestations:
       agent_attestations ?? deduped.filter((p) => p.kind === "agent").length,
@@ -331,7 +331,7 @@ export async function verifySealedPdf(bytes: Uint8Array): Promise<VerifyResult> 
   return {
     valid: true,
     sha256: sha256Hex(bytes),
-    envelope_id: drawn.envelope_id,
+    document_id: drawn.document_id,
     human_signatures: drawn.human_signatures,
     agent_attestations: drawn.agent_attestations,
     parties: drawn.parties,

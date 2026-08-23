@@ -31,7 +31,7 @@ export function TeamAccept({
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Join the cabinet</CardTitle>
+          <CardTitle>Join the team</CardTitle>
           <CardDescription>
             Log in with the invited email to accept.
           </CardDescription>
@@ -109,7 +109,7 @@ function TeamAcceptSession({ token }: { token: string }) {
       <Card>
         <CardHeader>
           <CardTitle>Joined</CardTitle>
-          <CardDescription>You are on this cabinet.</CardDescription>
+          <CardDescription>You are on this team.</CardDescription>
         </CardHeader>
         <CardContent>
           <LinkButton href="/team" className="h-11 w-full text-base">

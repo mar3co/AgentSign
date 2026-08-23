@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { GET as getStats } from "../../app/v1/stats/route.js";
-import { auditEvents, envelopes, signers } from "../db/schema.js";
+import { auditEvents, documents, signers } from "../db/schema.js";
 import type { AuthAdapter, AuthUser } from "../lib/auth/supabase.js";
 import { resetDeps, setDeps } from "../lib/deps.js";
 import { createTestDb, type TestDb } from "./db.js";
@@ -30,13 +30,13 @@ function authFor(user: AuthUser): AuthAdapter {
   };
 }
 
-async function seedEnvelope(
+async function seedDocument(
   db: TestDb,
   userId: string,
   input: { title: string; status: string; createdAt: Date; shredAt?: Date },
 ): Promise<string> {
   const [env] = await db
-    .insert(envelopes)
+    .insert(documents)
     .values({
       userId,
       status: input.status as "pending",
@@ -64,13 +64,13 @@ describe("GET /v1/stats", () => {
     const twoDaysAgo = new Date(now.getTime() - 2 * DAY_MS);
 
     // Completed, human-only, signed a day after sending.
-    const done = await seedEnvelope(db, me.id, {
+    const done = await seedDocument(db, me.id, {
       title: "Signed deal",
       status: "completed",
       createdAt: twoDaysAgo,
     });
     await db.insert(signers).values({
-      envelopeId: done,
+      documentId: done,
       name: "Jane Porter",
       email: "jane@example.com",
       signingOrder: 1,
@@ -79,14 +79,14 @@ describe("GET /v1/stats", () => {
     });
 
     // Pending with an agent party, shredding soon.
-    const withAgent = await seedEnvelope(db, me.id, {
+    const withAgent = await seedDocument(db, me.id, {
       title: "Agent deal",
       status: "pending",
       createdAt: now,
       shredAt: new Date(now.getTime() + 2 * DAY_MS),
     });
     await db.insert(signers).values({
-      envelopeId: withAgent,
+      documentId: withAgent,
       name: "ops-bot",
       email: "bot@example.com",
       signingOrder: 1,
@@ -94,13 +94,13 @@ describe("GET /v1/stats", () => {
     });
 
     await db.insert(auditEvents).values([
-      { envelopeId: done, event: "webhook_sent", createdAt: now },
-      { envelopeId: done, event: "webhook_failed", createdAt: now },
-      { envelopeId: done, event: "webhook_sent", createdAt: now },
+      { documentId: done, event: "webhook_sent", createdAt: now },
+      { documentId: done, event: "webhook_failed", createdAt: now },
+      { documentId: done, event: "webhook_sent", createdAt: now },
     ]);
 
-    // Someone else's envelope stays out of every number.
-    await seedEnvelope(db, randomUUID(), {
+    // Someone else's document stays out of every number.
+    await seedDocument(db, randomUUID(), {
       title: "Not mine",
       status: "pending",
       createdAt: now,

@@ -4,14 +4,14 @@ import { getDb } from "../db/client.js";
 import {
   accounts,
   agents,
+  files,
   documents,
-  envelopes,
   signers as signersTable,
 } from "../db/schema.js";
 import { getEnv } from "../env.js";
 import { logEvent, type AuditDb } from "../lib/audit.js";
 import { loadBrand, parseLogo } from "../lib/branding.js";
-import { cabinetForUser } from "../lib/cabinet.js";
+import { teamForUser } from "../lib/team.js";
 import { getDeps, storeUnavailableResponse } from "../lib/deps.js";
 import {
   brandMailAttachments,
@@ -23,7 +23,7 @@ import {
   type Mailer,
 } from "../lib/email.js";
 import { sha256Hex } from "../lib/hash.js";
-import { completeEnvelopePdf } from "../lib/pdf/complete.js";
+import { completeDocumentPdf } from "../lib/pdf/complete.js";
 import { loadSigningP12 } from "../lib/pdf/devP12.js";
 import type { SignatureAppearance } from "../lib/pdf/appendSignaturePage.js";
 import { appearanceKey, objectKey, type BlobStore } from "../lib/storage.js";
@@ -31,7 +31,7 @@ import { hashSigningToken, newSigningToken } from "../lib/tokens.js";
 import {
   fireAgentPartyReady,
   fireAgentPartyWebhooks,
-  fireEnvelopeCompleted,
+  fireDocumentCompleted,
   sealWebhookSecret,
   webhookEncryptionReady,
 } from "../lib/webhooks.js";
@@ -86,7 +86,7 @@ function signingP12(): { p12: Buffer; passphrase: string } {
 }
 
 export type SignerRow = typeof signersTable.$inferSelect;
-export type EnvelopeRow = typeof envelopes.$inferSelect;
+export type DocumentRow = typeof documents.$inferSelect;
 
 /** A party has acted if they signed, attested, declined, or rejected. */
 export function partyDone(
@@ -96,7 +96,7 @@ export function partyDone(
 }
 
 type Loaded =
-  | { ok: true; db: AuditDb; signer: SignerRow; envelope: EnvelopeRow }
+  | { ok: true; db: AuditDb; signer: SignerRow; document: DocumentRow }
   | { ok: false; error: Response };
 
 async function loadSigner(token: string): Promise<Loaded> {
@@ -107,12 +107,12 @@ async function loadSigner(token: string): Promise<Loaded> {
     .from(signersTable)
     .where(eq(signersTable.tokenHash, hashSigningToken(token)));
   if (!signer) return { ok: false, error: jsonError(404, "Not found", "not_found") };
-  const [envelope] = await db
+  const [document] = await db
     .select()
-    .from(envelopes)
-    .where(eq(envelopes.id, signer.envelopeId));
-  if (!envelope) return { ok: false, error: jsonError(404, "Not found", "not_found") };
-  return { ok: true, db, signer, envelope };
+    .from(documents)
+    .where(eq(documents.id, signer.documentId));
+  if (!document) return { ok: false, error: jsonError(404, "Not found", "not_found") };
+  return { ok: true, db, signer, document };
 }
 
 async function sequentialWait(
@@ -125,7 +125,7 @@ async function sequentialWait(
     .from(signersTable)
     .where(
       and(
-        eq(signersTable.envelopeId, signer.envelopeId),
+        eq(signersTable.documentId, signer.documentId),
         eq(signersTable.signingOrder, signer.signingOrder - 1),
       ),
     );
@@ -137,7 +137,7 @@ async function sequentialWait(
 
 export async function buildCompleteAppearances(
   store: BlobStore,
-  envelopeId: string,
+  documentId: string,
   allSigners: SignerRow[],
   currentId: string,
   at: Date,
@@ -174,7 +174,7 @@ export async function buildCompleteAppearances(
       continue;
     }
     if (!s.signedAt) continue;
-    const prior = await store.get(appearanceKey(envelopeId, s.id));
+    const prior = await store.get(appearanceKey(documentId, s.id));
     if (!prior) {
       return {
         ok: false,
@@ -194,9 +194,9 @@ export async function buildCompleteAppearances(
 
 type CompleteClaim = "sign" | "attest";
 
-export async function commitCompletedEnvelope(opts: {
+export async function commitCompletedDocument(opts: {
   db: AuditDb;
-  envelope: EnvelopeRow;
+  document: DocumentRow;
   signer: SignerRow;
   allSigners: SignerRow[];
   at: Date;
@@ -209,7 +209,7 @@ export async function commitCompletedEnvelope(opts: {
 }): Promise<Response> {
   const {
     db,
-    envelope,
+    document,
     signer,
     allSigners,
     at,
@@ -223,7 +223,7 @@ export async function commitCompletedEnvelope(opts: {
   const store = requireStore();
   if (!store) return storeUnavailableResponse();
 
-  const original = await store.get(objectKey(envelope.id, "original"));
+  const original = await store.get(objectKey(document.id, "original"));
   if (!original) {
     return jsonError(500, "Original document missing", "missing_original");
   }
@@ -231,9 +231,9 @@ export async function commitCompletedEnvelope(opts: {
   let keepDays = Number(getEnv().FREE_KEEP_DAYS);
   const proDays = Number(getEnv().PRO_KEEP_DAYS);
   let footer: string | undefined = "Sent with AgentSign";
-  if (envelope.userId) {
-    const cabinet = await cabinetForUser(db, envelope.userId);
-    if (cabinet.entitled) {
+  if (document.userId) {
+    const team = await teamForUser(db, document.userId);
+    if (team.entitled) {
       keepDays = proDays;
       footer = undefined;
     }
@@ -264,18 +264,18 @@ export async function commitCompletedEnvelope(opts: {
 
   const pages = appearances.map((a) => (footer ? { ...a, footer } : a));
 
-  let result: Awaited<ReturnType<typeof completeEnvelopePdf>>;
+  let result: Awaited<ReturnType<typeof completeDocumentPdf>>;
   try {
     const { p12, passphrase } = signingP12();
-    result = await completeEnvelopePdf({
+    result = await completeDocumentPdf({
       original,
       appearances: pages,
       p12,
       passphrase,
       meta: {
-        envelopeId: envelope.id,
-        title: envelope.title,
-        senderEmail: envelope.senderEmail,
+        documentId: document.id,
+        title: document.title,
+        senderEmail: document.senderEmail,
         consentText: CONSENT_TEXT,
         signers: allSigners.map((s) => ({
           name: s.name,
@@ -300,11 +300,11 @@ export async function commitCompletedEnvelope(opts: {
       },
     });
   } catch {
-    return jsonError(500, "Failed to complete envelope", "complete_failed");
+    return jsonError(500, "Failed to complete document", "complete_failed");
   }
   const shredAt = new Date(at.getTime() + keepDays * 86_400_000);
-  const sealedPath = objectKey(envelope.id, "sealed");
-  const certPath = objectKey(envelope.id, "certificate");
+  const sealedPath = objectKey(document.id, "sealed");
+  const certPath = objectKey(document.id, "certificate");
 
   try {
     await db.transaction(async (tx) => {
@@ -339,47 +339,47 @@ export async function commitCompletedEnvelope(opts: {
               .returning();
       if (!claimed) throw new Error("complete_conflict");
       const [updated] = await tx
-        .update(envelopes)
+        .update(documents)
         .set({ status: "completed", sha256: result.sha256, shredAt })
-        .where(and(eq(envelopes.id, envelope.id), eq(envelopes.status, "pending")))
+        .where(and(eq(documents.id, document.id), eq(documents.status, "pending")))
         .returning();
       if (!updated) throw new Error("complete_conflict");
-      await tx.insert(documents).values([
+      await tx.insert(files).values([
         {
-          envelopeId: envelope.id,
+          documentId: document.id,
           kind: "sealed",
           storagePath: sealedPath,
-          documentHash: result.sha256,
+          fileHash: result.sha256,
         },
         {
-          envelopeId: envelope.id,
+          documentId: document.id,
           kind: "certificate",
           storagePath: certPath,
-          documentHash: sha256Hex(result.certificate),
+          fileHash: sha256Hex(result.certificate),
         },
       ]);
     });
   } catch {
-    return jsonError(409, "Envelope is not awaiting signature", "invalid_state");
+    return jsonError(409, "Document is not awaiting signature", "invalid_state");
   }
   try {
     await store.put(sealedPath, result.sealed);
     await store.put(certPath, result.certificate);
   } catch {
     await db
-      .update(envelopes)
+      .update(documents)
       .set({
         status: "pending",
         sha256: null,
-        shredAt: envelope.shredAt,
+        shredAt: document.shredAt,
       })
-      .where(eq(envelopes.id, envelope.id));
+      .where(eq(documents.id, document.id));
     await db
-      .delete(documents)
+      .delete(files)
       .where(
         and(
-          eq(documents.envelopeId, envelope.id),
-          inArray(documents.kind, ["sealed", "certificate"]),
+          eq(files.documentId, document.id),
+          inArray(files.kind, ["sealed", "certificate"]),
         ),
       );
     if (claim === "sign") {
@@ -393,38 +393,38 @@ export async function commitCompletedEnvelope(opts: {
         .set({ attestedAt: null, attestMethod: null, attestLabel: null })
         .where(eq(signersTable.id, signer.id));
     }
-    return jsonError(500, "Failed to complete envelope", "complete_failed");
+    return jsonError(500, "Failed to complete document", "complete_failed");
   }
   await logEvent(db, {
-    envelopeId: envelope.id,
+    documentId: document.id,
     signerId: signer.id,
     event: claim === "sign" ? "signed" : "attested",
     ip: claim === "sign" ? ip ?? undefined : undefined,
     ua: claim === "sign" ? ua ?? undefined : undefined,
   });
   try {
-    await syncTmpKeyExpiry(db, envelope.id, shredAt);
+    await syncTmpKeyExpiry(db, document.id, shredAt);
   } catch {
-    // envelope is already completed
+    // document is already completed
   }
 
   const mailer = requireMailer();
   const docs = completionAttachments(result.sealed, result.certificate);
-  const brand = await loadBrand(db, envelope.userId, store);
+  const brand = await loadBrand(db, document.userId, store);
   const logo = brandMailAttachments(brand.logoBytes);
   const attachments = [...(docs ?? []), ...(logo ?? [])];
   const recipients = new Set<string>([
-    envelope.senderEmail,
+    document.senderEmail,
     ...allSigners.map((s) => s.email),
   ]);
   for (const to of recipients) {
     try {
       const body = completionEmail({
         to,
-        title: envelope.title,
+        title: document.title,
         shredAt,
         includeAttachments: Boolean(docs),
-        senderEmail: envelope.senderEmail,
+        senderEmail: document.senderEmail,
         brand: {
           displayName: brand.displayName,
           hasLogo: Boolean(brand.logoBytes),
@@ -438,13 +438,13 @@ export async function commitCompletedEnvelope(opts: {
         attachments: attachments.length ? attachments : undefined,
       });
       await logEvent(db, {
-        envelopeId: envelope.id,
+        documentId: document.id,
         event: "emailed",
         payload: { to, kind: "completion" },
       });
     } catch (err) {
       await logEvent(db, {
-        envelopeId: envelope.id,
+        documentId: document.id,
         event: "emailed_failed",
         payload: {
           to,
@@ -455,28 +455,28 @@ export async function commitCompletedEnvelope(opts: {
   }
 
   try {
-    await fireEnvelopeCompleted(db, envelope, {
-      event: "envelope.completed",
-      id: envelope.id,
+    await fireDocumentCompleted(db, document, {
+      event: "document.completed",
+      id: document.id,
       status: "completed",
       sha256: result.sha256,
       shred_at: shredAt,
     });
   } catch (err) {
     await logEvent(db, {
-      envelopeId: envelope.id,
+      documentId: document.id,
       event: "webhook_failed",
       payload: { error: err instanceof Error ? err.message : "webhook_failed" },
     });
   }
   try {
-    await fireAgentPartyWebhooks(db, envelope.id, {
-      event: "envelope.completed",
+    await fireAgentPartyWebhooks(db, document.id, {
+      event: "document.completed",
       status: "completed",
     });
   } catch (err) {
     await logEvent(db, {
-      envelopeId: envelope.id,
+      documentId: document.id,
       event: "webhook_failed",
       payload: { error: err instanceof Error ? err.message : "webhook_failed" },
     });
@@ -490,7 +490,7 @@ export async function commitCompletedEnvelope(opts: {
 
 export async function inviteNextHumanIfNeeded(
   db: AuditDb,
-  envelope: EnvelopeRow,
+  document: DocumentRow,
   allSigners: SignerRow[],
   current: SignerRow,
   at: Date,
@@ -500,14 +500,14 @@ export async function inviteNextHumanIfNeeded(
   if (!next || partyDone(next) || next.sentAt) return null;
   const [live] = await db
     .select()
-    .from(envelopes)
-    .where(eq(envelopes.id, envelope.id));
+    .from(documents)
+    .where(eq(documents.id, document.id));
   if (!live || live.status !== "pending") {
     await rollbackCurrent();
-    return jsonError(409, "Envelope is not awaiting signature", "invalid_state");
+    return jsonError(409, "Document is not awaiting signature", "invalid_state");
   }
   if (next.kind === "agent") {
-    await fireAgentPartyReady(db, envelope, next);
+    await fireAgentPartyReady(db, document, next);
     return null;
   }
   if (!webhookEncryptionReady()) {
@@ -529,12 +529,12 @@ export async function inviteNextHumanIfNeeded(
     .where(and(eq(signersTable.id, next.id), isNull(signersTable.sentAt)))
     .returning();
   if (!slot) return null;
-  const brand = await loadBrand(db, envelope.userId, store);
+  const brand = await loadBrand(db, document.userId, store);
   const invite = inviteEmail({
     signUrl,
-    senderEmail: envelope.senderEmail,
-    title: envelope.title,
-    expiresAt: envelope.expiresAt,
+    senderEmail: document.senderEmail,
+    title: document.title,
+    expiresAt: document.expiresAt,
     brand: {
       displayName: brand.displayName,
       hasLogo: Boolean(brand.logoBytes),
@@ -551,19 +551,19 @@ export async function inviteNextHumanIfNeeded(
       .set({ sentAt: at })
       .where(eq(signersTable.id, next.id));
     await logEvent(db, {
-      envelopeId: envelope.id,
+      documentId: document.id,
       signerId: next.id,
       event: "sent",
     });
     await logEvent(db, {
-      envelopeId: envelope.id,
+      documentId: document.id,
       signerId: next.id,
       event: "emailed",
     });
   } catch (err) {
     await rollbackCurrent();
     await logEvent(db, {
-      envelopeId: envelope.id,
+      documentId: document.id,
       signerId: next.id,
       event: "emailed_failed",
       payload: { error: err instanceof Error ? err.message : "mail_failed" },
@@ -579,14 +579,14 @@ export async function getSigningState(
 ): Promise<Response> {
   const loaded = await loadSigner(token);
   if (!loaded.ok) return loaded.error;
-  const { db, signer, envelope } = loaded;
+  const { db, signer, document } = loaded;
   const at = now();
 
-  if (envelope.status === "deleted") {
+  if (document.status === "deleted") {
     return jsonError(410, "This link has expired", "deleted");
   }
 
-  if (!signer.signedAt && envelope.expiresAt.getTime() <= at.getTime()) {
+  if (!signer.signedAt && document.expiresAt.getTime() <= at.getTime()) {
     return jsonError(410, "This link has expired", "expired");
   }
 
@@ -599,7 +599,7 @@ export async function getSigningState(
       .set({ openedAt: at })
       .where(eq(signersTable.id, signer.id));
     await logEvent(db, {
-      envelopeId: envelope.id,
+      documentId: document.id,
       signerId: signer.id,
       event: "opened",
       ip: req ? clientIp(req) : undefined,
@@ -609,16 +609,16 @@ export async function getSigningState(
 
   let display_name: string | null = null;
   let has_logo = false;
-  if (envelope.userId) {
-    const cabinet = await cabinetForUser(db, envelope.userId);
-    display_name = cabinet.displayName;
-    has_logo = Boolean(cabinet.logoPath);
+  if (document.userId) {
+    const team = await teamForUser(db, document.userId);
+    display_name = team.displayName;
+    has_logo = Boolean(team.logoPath);
   }
 
   const parties = await db
     .select()
     .from(signersTable)
-    .where(eq(signersTable.envelopeId, envelope.id));
+    .where(eq(signersTable.documentId, document.id));
   parties.sort((a, b) => a.signingOrder - b.signingOrder);
   const earlierAgents = parties.filter(
     (s) =>
@@ -647,15 +647,15 @@ export async function getSigningState(
     .filter((row): row is { slug: string; email: string } => Boolean(row));
 
   return Response.json({
-    title: envelope.title,
+    title: document.title,
     signerName: signer.name,
     signerEmail: signer.email,
     sequentialWait: false,
-    expiresAt: envelope.expiresAt.toISOString(),
-    shredAt: envelope.shredAt.toISOString(),
+    expiresAt: document.expiresAt.toISOString(),
+    shredAt: document.shredAt.toISOString(),
     signed: Boolean(signer.signedAt),
     declined: Boolean(signer.declinedAt),
-    status: envelope.status,
+    status: document.status,
     display_name,
     has_logo,
     attested,
@@ -668,23 +668,23 @@ export async function getCeremonyLogo(
 ): Promise<Response> {
   const loaded = await loadSigner(token);
   if (!loaded.ok) return loaded.error;
-  const { db, signer, envelope } = loaded;
-  if (envelope.status === "deleted") {
+  const { db, signer, document } = loaded;
+  if (document.status === "deleted") {
     return jsonError(410, "This link has expired", "deleted");
   }
-  if (!signer.signedAt && envelope.expiresAt.getTime() <= now().getTime()) {
+  if (!signer.signedAt && document.expiresAt.getTime() <= now().getTime()) {
     return jsonError(410, "This link has expired", "expired");
   }
-  if (!envelope.userId) {
+  if (!document.userId) {
     return jsonError(404, "Not found", "not_found");
   }
-  const cabinet = await cabinetForUser(db, envelope.userId);
-  if (!cabinet.logoPath) {
+  const team = await teamForUser(db, document.userId);
+  if (!team.logoPath) {
     return jsonError(404, "Not found", "not_found");
   }
   const store = requireStore();
   if (!store) return storeUnavailableResponse();
-  const bytes = await store.get(cabinet.logoPath);
+  const bytes = await store.get(team.logoPath);
   if (!bytes) {
     return jsonError(404, "Not found", "not_found");
   }
@@ -704,14 +704,14 @@ export async function postConsent(
 ): Promise<Response> {
   const loaded = await loadSigner(token);
   if (!loaded.ok) return loaded.error;
-  const { db, signer, envelope } = loaded;
+  const { db, signer, document } = loaded;
   const at = now();
 
-  if (envelope.expiresAt.getTime() <= at.getTime()) {
+  if (document.expiresAt.getTime() <= at.getTime()) {
     return jsonError(410, "This link has expired", "expired");
   }
-  if (envelope.status !== "pending" || signer.declinedAt || signer.signedAt) {
-    return jsonError(409, "Envelope is not awaiting signature", "invalid_state");
+  if (document.status !== "pending" || signer.declinedAt || signer.signedAt) {
+    return jsonError(409, "Document is not awaiting signature", "invalid_state");
   }
   const wait = await sequentialWait(db, signer);
   if (wait) return wait;
@@ -729,7 +729,7 @@ export async function postConsent(
     .set({ consentedAt: at, consentUa: ua, ip })
     .where(eq(signersTable.id, signer.id));
   await logEvent(db, {
-    envelopeId: envelope.id,
+    documentId: document.id,
     signerId: signer.id,
     event: "consented",
     ip: ip ?? undefined,
@@ -741,16 +741,16 @@ export async function postConsent(
 export async function postSign(req: Request, token: string): Promise<Response> {
   const loaded = await loadSigner(token);
   if (!loaded.ok) return loaded.error;
-  const { db, signer, envelope } = loaded;
+  const { db, signer, document } = loaded;
   const at = now();
   const store = requireStore();
   if (!store) return storeUnavailableResponse();
 
-  if (envelope.expiresAt.getTime() <= at.getTime() && envelope.status === "pending") {
+  if (document.expiresAt.getTime() <= at.getTime() && document.status === "pending") {
     return jsonError(410, "This link has expired", "expired");
   }
-  if (envelope.status !== "pending" || signer.declinedAt || signer.signedAt) {
-    return jsonError(409, "Envelope is not awaiting signature", "invalid_state");
+  if (document.status !== "pending" || signer.declinedAt || signer.signedAt) {
+    return jsonError(409, "Document is not awaiting signature", "invalid_state");
   }
   const wait = await sequentialWait(db, signer);
   if (wait) return wait;
@@ -779,24 +779,24 @@ export async function postSign(req: Request, token: string): Promise<Response> {
   const allSigners = await db
     .select()
     .from(signersTable)
-    .where(eq(signersTable.envelopeId, envelope.id));
+    .where(eq(signersTable.documentId, document.id));
   allSigners.sort((a, b) => a.signingOrder - b.signingOrder);
   const last = allSigners.every((s) => s.id === signer.id || partyDone(s));
 
   if (last) {
     const built = await buildCompleteAppearances(
       store,
-      envelope.id,
+      document.id,
       allSigners,
       signer.id,
       at,
       png,
     );
     if (!built.ok) return built.error;
-    await store.put(appearanceKey(envelope.id, signer.id), png);
-    return commitCompletedEnvelope({
+    await store.put(appearanceKey(document.id, signer.id), png);
+    return commitCompletedDocument({
       db,
-      envelope,
+      document,
       signer,
       allSigners,
       at,
@@ -807,7 +807,7 @@ export async function postSign(req: Request, token: string): Promise<Response> {
     });
   }
 
-  await store.put(appearanceKey(envelope.id, signer.id), png);
+  await store.put(appearanceKey(document.id, signer.id), png);
 
   const [claimed] = await db
     .update(signersTable)
@@ -821,12 +821,12 @@ export async function postSign(req: Request, token: string): Promise<Response> {
     )
     .returning();
   if (!claimed) {
-    return jsonError(409, "Envelope is not awaiting signature", "invalid_state");
+    return jsonError(409, "Document is not awaiting signature", "invalid_state");
   }
 
   const inviteFail = await inviteNextHumanIfNeeded(
     db,
-    envelope,
+    document,
     allSigners,
     signer,
     at,
@@ -840,7 +840,7 @@ export async function postSign(req: Request, token: string): Promise<Response> {
   if (inviteFail) return inviteFail;
 
   await logEvent(db, {
-    envelopeId: envelope.id,
+    documentId: document.id,
     signerId: signer.id,
     event: "signed",
     ip: ip ?? undefined,
@@ -853,15 +853,15 @@ export async function postSign(req: Request, token: string): Promise<Response> {
 export async function getCeremonyPdf(req: Request, token: string): Promise<Response> {
   const loaded = await loadSigner(token);
   if (!loaded.ok) return loaded.error;
-  const { signer, envelope } = loaded;
-  if (envelope.status === "deleted") {
-    return jsonError(410, "Envelope has been deleted", "deleted");
+  const { signer, document } = loaded;
+  if (document.status === "deleted") {
+    return jsonError(410, "Document has been deleted", "deleted");
   }
   if (!signer.signedAt && !signer.declinedAt) {
-    return jsonError(409, "Envelope is not completed", "not_completed");
+    return jsonError(409, "Document is not completed", "not_completed");
   }
-  if (envelope.status !== "completed") {
-    return jsonError(409, "Envelope is not completed", "not_completed");
+  if (document.status !== "completed") {
+    return jsonError(409, "Document is not completed", "not_completed");
   }
   const store = requireStore();
   if (!store) return storeUnavailableResponse();
@@ -869,12 +869,12 @@ export async function getCeremonyPdf(req: Request, token: string): Promise<Respo
     new URL(req.url).searchParams.get("kind") === "certificate"
       ? "certificate"
       : "sealed";
-  const bytes = await store.get(objectKey(envelope.id, kind));
+  const bytes = await store.get(objectKey(document.id, kind));
   if (!bytes) {
-    return jsonError(410, "Envelope has been deleted", "deleted");
+    return jsonError(410, "Document has been deleted", "deleted");
   }
   const filename =
-    kind === "certificate" ? `${envelope.id}-certificate.pdf` : `${envelope.id}.pdf`;
+    kind === "certificate" ? `${document.id}-certificate.pdf` : `${document.id}.pdf`;
   return new Response(Buffer.from(bytes), {
     status: 200,
     headers: {
@@ -890,18 +890,18 @@ export async function postDecline(
 ): Promise<Response> {
   const loaded = await loadSigner(token);
   if (!loaded.ok) return loaded.error;
-  const { db, signer, envelope } = loaded;
+  const { db, signer, document } = loaded;
   const at = now();
   const mailer = requireMailer();
 
-  if (envelope.expiresAt.getTime() <= at.getTime() && envelope.status === "pending") {
+  if (document.expiresAt.getTime() <= at.getTime() && document.status === "pending") {
     return jsonError(410, "This link has expired", "expired");
   }
   if (signer.signedAt) {
     return jsonError(409, "Already signed", "invalid_state");
   }
-  if (envelope.status !== "pending") {
-    return jsonError(409, "Envelope is not awaiting signature", "invalid_state");
+  if (document.status !== "pending") {
+    return jsonError(409, "Document is not awaiting signature", "invalid_state");
   }
   const wait = await sequentialWait(db, signer);
   if (wait) return wait;
@@ -938,47 +938,47 @@ export async function postDecline(
         .returning();
       if (!row) throw new Error("decline_conflict");
       const [envRow] = await tx
-        .update(envelopes)
+        .update(documents)
         .set({ status: "declined" })
-        .where(and(eq(envelopes.id, envelope.id), eq(envelopes.status, "pending")))
+        .where(and(eq(documents.id, document.id), eq(documents.status, "pending")))
         .returning();
       if (!envRow) throw new Error("decline_conflict");
     });
   } catch {
-    return jsonError(409, "Envelope is not awaiting signature", "invalid_state");
+    return jsonError(409, "Document is not awaiting signature", "invalid_state");
   }
   await logEvent(db, {
-    envelopeId: envelope.id,
+    documentId: document.id,
     signerId: signer.id,
     event: "declined",
     ip,
     ua,
     payload: reason ? { reason } : undefined,
   });
-  await fireAgentPartyWebhooks(db, envelope.id, {
-    event: "envelope.declined",
+  await fireAgentPartyWebhooks(db, document.id, {
+    event: "document.declined",
     status: "declined",
   });
   try {
-    const brand = await loadBrand(db, envelope.userId, requireStore());
+    const brand = await loadBrand(db, document.userId, requireStore());
     const body = declineEmail({
       signerName: signer.name,
-      title: envelope.title,
+      title: document.title,
       reason,
-      senderEmail: envelope.senderEmail,
+      senderEmail: document.senderEmail,
       brand: {
         displayName: brand.displayName,
         hasLogo: Boolean(brand.logoBytes),
       },
     });
     await mailer.sendMail({
-      to: envelope.senderEmail,
+      to: document.senderEmail,
       ...body,
       attachments: brandMailAttachments(brand.logoBytes),
     });
   } catch (err) {
     await logEvent(db, {
-      envelopeId: envelope.id,
+      documentId: document.id,
       signerId: signer.id,
       event: "emailed_failed",
       payload: { error: err instanceof Error ? err.message : "mail_failed" },

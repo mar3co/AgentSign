@@ -16,10 +16,10 @@ const SEND_BLOCK = `$ curl -F title='Repair authorization' \\
        -F signers='[{"name":"Jane",
          "email":"jane@example.com"}]' \\
        -F file=@form.pdf \\
-       https://agentsign.co/v1/envelopes
-{ "id": "env_kx3q9", "status": "sent" }`;
+       https://agentsign.co/v1/documents
+{ "id": "doc_kx3q9", "status": "sent" }`;
 
-const STATUS_BLOCK = `$ curl https://agentsign.co/v1/envelopes/env_kx3q9 \\
+const STATUS_BLOCK = `$ curl https://agentsign.co/v1/documents/doc_kx3q9 \\
        -H 'authorization: Bearer sign_live_...'
 { "status": "completed", "signers": [ … ], "audit": [ … ] }`;
 
@@ -40,7 +40,7 @@ export default function DocsPage() {
             <p className="max-w-prose text-base leading-relaxed text-muted-foreground">
               Everything here speaks plain HTTP. Send a PDF with one request.
               No key needed: we email you a one-time code and hand back a
-              throwaway key for that envelope. Log in to mint live keys.
+              throwaway key for that document. Log in to mint live keys.
             </p>
             <div className="flex flex-wrap items-center gap-3">
               <a
@@ -62,7 +62,7 @@ export default function DocsPage() {
           </>
         }
         machine={
-          <TerminalPanel eyebrow="Send" address="POST /v1/envelopes">
+          <TerminalPanel eyebrow="Send" address="POST /v1/documents">
             <pre className="overflow-x-auto whitespace-pre text-ledger">
               {SEND_BLOCK}
             </pre>
@@ -87,7 +87,7 @@ export default function DocsPage() {
                 <code className="font-mono text-sm text-foreground">
                   sign_tmp_
                 </code>{" "}
-                follows one envelope: status and download only. It cannot
+                follows one document: status and download only. It cannot
                 send. You get one when you send without logging in.
               </p>
               <p>
@@ -102,7 +102,7 @@ export default function DocsPage() {
           </>
         }
         machine={
-          <TerminalPanel eyebrow="Status" address="GET /v1/envelopes/{id}">
+          <TerminalPanel eyebrow="Status" address="GET /v1/documents/{id}">
             <pre className="overflow-x-auto whitespace-pre text-ledger">
               {STATUS_BLOCK}
             </pre>

@@ -39,7 +39,7 @@ export async function loadAgent(
   return row ?? null;
 }
 
-/** Active (unrevoked) named agent for a cabinet owner + slug. */
+/** Active (unrevoked) named agent for a team owner + slug. */
 export async function loadActiveAgentBySlug(
   db: AuditDb,
   ownerUserId: string,

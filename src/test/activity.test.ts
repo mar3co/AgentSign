@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { GET as getActivity } from "../../app/v1/activity/route.js";
-import { auditEvents, envelopes, signers } from "../db/schema.js";
+import { auditEvents, documents, signers } from "../db/schema.js";
 import type { AuthAdapter, AuthUser } from "../lib/auth/supabase.js";
 import { resetDeps, setDeps } from "../lib/deps.js";
 import { createTestDb, type TestDb } from "./db.js";
@@ -29,14 +29,14 @@ function authFor(user: AuthUser): AuthAdapter {
   };
 }
 
-async function seedEnvelope(
+async function seedDocument(
   db: TestDb,
   userId: string,
   title: string,
 ): Promise<string> {
   const at = new Date();
   const [env] = await db
-    .insert(envelopes)
+    .insert(documents)
     .values({
       userId,
       status: "pending",
@@ -54,16 +54,16 @@ describe("GET /v1/activity", () => {
     resetDeps();
   });
 
-  it("returns notable events for the cabinet, newest first, plumbing filtered", async () => {
+  it("returns notable events for the team, newest first, plumbing filtered", async () => {
     const db = await createTestDb();
     const me: AuthUser = { id: randomUUID(), email: "shop@example.com" };
     setDeps({ db, auth: authFor(me) });
 
-    const mine = await seedEnvelope(db, me.id, "Equipment rental agreement");
+    const mine = await seedDocument(db, me.id, "Equipment rental agreement");
     const [jane] = await db
       .insert(signers)
       .values({
-        envelopeId: mine,
+        documentId: mine,
         name: "Jane Porter",
         email: "jane@example.com",
         signingOrder: 1,
@@ -75,17 +75,17 @@ describe("GET /v1/activity", () => {
     const t1 = new Date("2026-08-20T11:00:00Z");
     const t2 = new Date("2026-08-20T12:00:00Z");
     await db.insert(auditEvents).values([
-      { envelopeId: mine, event: "sent", createdAt: t0 },
+      { documentId: mine, event: "sent", createdAt: t0 },
       // Plumbing: never surfaces in the feed.
-      { envelopeId: mine, event: "otp_sent", createdAt: t1 },
-      { envelopeId: mine, signerId: jane!.id, event: "signed", createdAt: t2 },
+      { documentId: mine, event: "otp_sent", createdAt: t1 },
+      { documentId: mine, signerId: jane!.id, event: "signed", createdAt: t2 },
     ]);
 
-    // Someone else's envelope must stay invisible.
-    const theirs = await seedEnvelope(db, randomUUID(), "Not my envelope");
+    // Someone else's document must stay invisible.
+    const theirs = await seedDocument(db, randomUUID(), "Not my document");
     await db
       .insert(auditEvents)
-      .values({ envelopeId: theirs, event: "sent", createdAt: t2 });
+      .values({ documentId: theirs, event: "sent", createdAt: t2 });
 
     const res = await getActivity(
       new Request("http://sign.test/v1/activity", {
@@ -108,7 +108,7 @@ describe("GET /v1/activity", () => {
       actor_kind: "human",
     });
     expect(json.events[1]!.actor).toBeNull();
-    expect(json.events.some((e) => e.title === "Not my envelope")).toBe(false);
+    expect(json.events.some((e) => e.title === "Not my document")).toBe(false);
   });
 
   it("rejects requests without a session cookie", async () => {

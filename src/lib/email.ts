@@ -210,7 +210,7 @@ export function completionEmail(input: {
 }): Pick<MailMessage, "subject" | "text" | "html"> {
   const shred = input.shredAt.toISOString();
   const login = absoluteUrl(
-    `/login?email=${encodeURIComponent(input.to)}&next=/envelopes`,
+    `/login?email=${encodeURIComponent(input.to)}&next=/documents`,
   );
   const lines = [
     `"${input.title}" is complete.`,
@@ -223,12 +223,12 @@ export function completionEmail(input: {
   if (!input.includeAttachments) {
     lines.push(
       ``,
-      `Attachments were too large to email (over 10MB combined). Download from your cabinet.`,
+      `Attachments were too large to email (over 10MB combined). Download from your documents.`,
     );
   }
   lines.push(
     ``,
-    `Keep it in a cabinet: ${login}`,
+    `Keep it in your documents: ${login}`,
     ``,
     `Keep this a year: ${absoluteUrl("/upgrade")}`,
   );
@@ -244,9 +244,9 @@ export function teamInviteEmail(input: {
   acceptUrl: string;
 }): Pick<MailMessage, "subject" | "text"> {
   return {
-    subject: "Join the AgentSign cabinet",
+    subject: "Join your team on AgentSign",
     text: [
-      "You were invited to an AgentSign cabinet.",
+      "You were invited to join a team on AgentSign.",
       "",
       `Accept here: ${absoluteUrl(input.acceptUrl)}`,
       "",

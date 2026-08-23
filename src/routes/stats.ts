@@ -1,9 +1,9 @@
 import { and, gte, inArray, ne } from "drizzle-orm";
 import { getDb } from "../db/client.js";
-import { auditEvents, envelopes, signers } from "../db/schema.js";
+import { auditEvents, documents, signers } from "../db/schema.js";
 import type { AuditDb } from "../lib/audit.js";
 import { getAuth } from "../lib/auth/supabase.js";
-import { cabinetForUser } from "../lib/cabinet.js";
+import { teamForUser } from "../lib/team.js";
 import { getDeps } from "../lib/deps.js";
 
 const DAY_MS = 86_400_000;
@@ -41,7 +41,7 @@ function median(values: number[]): number | null {
 }
 
 /**
- * GET /v1/stats — dashboard aggregates for the cabinet's envelopes.
+ * GET /v1/stats — dashboard aggregates for the team's documents.
  * Cookie session only: this feeds the portal dashboard, not the public API.
  */
 export async function getStats(req: Request): Promise<Response> {
@@ -52,37 +52,37 @@ export async function getStats(req: Request): Promise<Response> {
 
   const db = requireDb();
   const at = now();
-  const cabinet = await cabinetForUser(db, user.id);
+  const team = await teamForUser(db, user.id);
   const senderIds =
-    cabinet.memberUserIds.length > 0 ? cabinet.memberUserIds : [user.id];
+    team.memberUserIds.length > 0 ? team.memberUserIds : [user.id];
 
-  const envs = await db
+  const docs = await db
     .select()
-    .from(envelopes)
+    .from(documents)
     .where(
-      and(inArray(envelopes.userId, senderIds), ne(envelopes.status, "deleted")),
+      and(inArray(documents.userId, senderIds), ne(documents.status, "deleted")),
     );
 
-  const envIds = envs.map((e) => e.id);
+  const docIds = docs.map((e) => e.id);
   const signerRows =
-    envIds.length === 0
+    docIds.length === 0
       ? []
       : await db
           .select()
           .from(signers)
-          .where(inArray(signers.envelopeId, envIds));
+          .where(inArray(signers.documentId, docIds));
 
-  const agentEnvIds = new Set(
-    signerRows.filter((s) => s.kind === "agent").map((s) => s.envelopeId),
+  const agentDocIds = new Set(
+    signerRows.filter((s) => s.kind === "agent").map((s) => s.documentId),
   );
 
-  // An envelope completes with its last signature or sign-off.
+  // An document completes with its last signature or sign-off.
   const completedAtById = new Map<string, Date>();
   for (const s of signerRows) {
     const t = s.signedAt ?? s.attestedAt;
     if (!t) continue;
-    const prev = completedAtById.get(s.envelopeId);
-    if (!prev || t > prev) completedAtById.set(s.envelopeId, t);
+    const prev = completedAtById.get(s.documentId);
+    if (!prev || t > prev) completedAtById.set(s.documentId, t);
   }
 
   const thisMonth = startOfMonth(at);
@@ -92,12 +92,12 @@ export async function getStats(req: Request): Promise<Response> {
   const inWindow = (d: Date | undefined, from: Date, to: Date) =>
     d !== undefined && d >= from && d < to;
 
-  const completedDates = envs
+  const completedDates = docs
     .filter((e) => e.status === "completed")
     .map((e) => completedAtById.get(e.id));
 
   // Trailing daily counts: sends split by whether an agent is on the
-  // envelope, plus completions.
+  // document, plus completions.
   const daily = new Map<
     string,
     { human: number; agent: number; completed: number }
@@ -109,10 +109,10 @@ export async function getStats(req: Request): Promise<Response> {
       completed: 0,
     });
   }
-  for (const e of envs) {
+  for (const e of docs) {
     const bucket = daily.get(dayKey(e.createdAt));
     if (bucket) {
-      if (agentEnvIds.has(e.id)) bucket.agent += 1;
+      if (agentDocIds.has(e.id)) bucket.agent += 1;
       else bucket.human += 1;
     }
     if (e.status === "completed") {
@@ -123,7 +123,7 @@ export async function getStats(req: Request): Promise<Response> {
   }
 
   const signingHours: number[] = [];
-  for (const e of envs) {
+  for (const e of docs) {
     if (e.status !== "completed") continue;
     const done = completedAtById.get(e.id);
     if (!done) continue;
@@ -132,34 +132,34 @@ export async function getStats(req: Request): Promise<Response> {
   }
 
   const byStatus: Record<string, number> = {};
-  for (const e of envs) byStatus[e.status] = (byStatus[e.status] ?? 0) + 1;
+  for (const e of docs) byStatus[e.status] = (byStatus[e.status] ?? 0) + 1;
 
   const shredSoonCutoff = new Date(at.getTime() + SHRED_SOON_DAYS * DAY_MS);
-  const shreddingSoon = envs.filter((e) => e.shredAt <= shredSoonCutoff).length;
+  const shreddingSoon = docs.filter((e) => e.shredAt <= shredSoonCutoff).length;
 
   const webhookSince = new Date(at.getTime() - WEBHOOK_WINDOW_DAYS * DAY_MS);
   const webhookRows =
-    envIds.length === 0
+    docIds.length === 0
       ? []
       : await db
           .select({ event: auditEvents.event })
           .from(auditEvents)
           .where(
             and(
-              inArray(auditEvents.envelopeId, envIds),
+              inArray(auditEvents.documentId, docIds),
               inArray(auditEvents.event, ["webhook_sent", "webhook_failed"]),
               gte(auditEvents.createdAt, webhookSince),
             ),
           );
 
   return Response.json({
-    total: envs.length,
+    total: docs.length,
     by_status: byStatus,
     sent: {
-      this_month: envs.filter((e) => inWindow(e.createdAt, thisMonth, at)).length,
-      last_month: envs.filter((e) => inWindow(e.createdAt, lastMonth, thisMonth))
+      this_month: docs.filter((e) => inWindow(e.createdAt, thisMonth, at)).length,
+      last_month: docs.filter((e) => inWindow(e.createdAt, lastMonth, thisMonth))
         .length,
-      agent_share: envs.length === 0 ? 0 : agentEnvIds.size / envs.length,
+      agent_share: docs.length === 0 ? 0 : agentDocIds.size / docs.length,
     },
     completed: {
       this_month: completedDates.filter((d) => inWindow(d, thisMonth, at)).length,

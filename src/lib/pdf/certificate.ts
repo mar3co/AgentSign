@@ -33,7 +33,7 @@ export type CertificateSigner = {
 };
 
 export type CertificateInfo = {
-  envelopeId: string;
+  documentId: string;
   title: string;
   senderEmail: string;
   sha256: string;
@@ -116,7 +116,7 @@ export async function buildCertificate(
   const lines: string[] = [
     "Certificate of completion",
     "",
-    `Envelope id: ${info.envelopeId}`,
+    `Document id: ${info.documentId}`,
     `Title: ${info.title}`,
     `Sender: ${info.senderEmail}`,
     "",

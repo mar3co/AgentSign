@@ -1,7 +1,7 @@
 import { getEnv } from "../env.js";
 
 export const TEAM_CAP = 10;
-export const PACKET_CAP = 50;
+export const TEMPLATE_CAP = 50;
 export const AGENT_CAP = 10;
 export const LOGO_MAX_BYTES = 256 * 1024;
 

@@ -3,11 +3,11 @@
 import { useEffect, useState } from "react";
 import { Archive, Clock, Flame, Webhook } from "lucide-react";
 import {
-  EnvelopeMiniTable,
+  DocumentMiniTable,
   StatusBadge,
-  type CabinetEnvelope,
-} from "@/app/envelopes/cabinet-list";
-import { EnvelopesFigure } from "@/components/envelopes-figure";
+  type DocumentListItem,
+} from "@/app/documents/documents-list";
+import { DocumentsFigure } from "@/components/documents-figure";
 import { LinkButton } from "@/components/link-button";
 import { LoadingList } from "@/components/loading-list";
 import { StatCardFigure } from "@/components/shadcn-studio/blocks/stat-card-figure";
@@ -65,7 +65,7 @@ const COMPLETED_SERIES = [
 
 export function DashboardClient() {
   const [stats, setStats] = useState<Stats | null>(null);
-  const [envelopes, setEnvelopes] = useState<CabinetEnvelope[] | null>(null);
+  const [documents, setDocuments] = useState<DocumentListItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { items: activity } = useActivity();
 
@@ -75,7 +75,7 @@ export function DashboardClient() {
       try {
         const [statsRes, envRes] = await Promise.all([
           fetch("/v1/stats", { credentials: "include" }),
-          fetch("/v1/envelopes", { credentials: "include" }),
+          fetch("/v1/documents", { credentials: "include" }),
         ]);
         if (statsRes.status === 401 || envRes.status === 401) {
           window.location.href = `/login?next=${encodeURIComponent("/dashboard")}`;
@@ -86,13 +86,13 @@ export function DashboardClient() {
           return;
         }
         const statsJson = (await statsRes.json()) as Stats;
-        const envJson = (await envRes.json()) as {
-          envelopes: Array<CabinetEnvelope & { created_at?: string }>;
+        const docJson = (await envRes.json()) as {
+          documents: Array<DocumentListItem & { created_at?: string }>;
         };
         if (!cancelled) {
           setStats(statsJson);
-          setEnvelopes(
-            envJson.envelopes.map((e) => ({
+          setDocuments(
+            docJson.documents.map((e) => ({
               ...e,
               createdAt: e.created_at,
               signers: e.signers ?? [],
@@ -116,11 +116,11 @@ export function DashboardClient() {
     );
   }
 
-  if (stats === null || envelopes === null) {
+  if (stats === null || documents === null) {
     return <LoadingList />;
   }
 
-  const recent = [...envelopes].sort((a, b) =>
+  const recent = [...documents].sort((a, b) =>
     (b.createdAt ?? "").localeCompare(a.createdAt ?? ""),
   );
   const byStatus = Object.entries(stats.by_status).sort((a, b) => b[1] - a[1]);
@@ -179,29 +179,29 @@ export function DashboardClient() {
         className="col-span-2 max-lg:col-span-full"
       />
       <StatCardFigure
-        title="All envelopes"
+        title="All documents"
         badgeContent="All time"
         value={String(stats.total)}
         changePercentage={totalDelta}
-        figure={<EnvelopesFigure />}
+        figure={<DocumentsFigure />}
         className="col-span-2 max-lg:col-span-full"
       />
 
       <Card className="col-span-full gap-0 py-0 xl:col-span-4">
         <div className="flex items-center justify-between gap-4 p-4 md:px-6">
           <CardTitle className="text-base">Recent documents</CardTitle>
-          <LinkButton href="/envelopes" variant="outline" size="sm">
+          <LinkButton href="/documents" variant="outline" size="sm">
             <Archive className="size-3.5" />
-            Open cabinet
+            Open Documents
           </LinkButton>
         </div>
         {recent.length === 0 ? (
           <p className="text-muted-foreground border-t px-6 py-10 text-center text-sm">
-            Nothing sent yet. Your latest envelopes land here.
+            Nothing sent yet. Your latest documents land here.
           </p>
         ) : (
           <div className="border-t">
-            <EnvelopeMiniTable envelopes={recent} limit={5} />
+            <DocumentMiniTable documents={recent} limit={5} />
           </div>
         )}
       </Card>
@@ -209,7 +209,7 @@ export function DashboardClient() {
       <div className="col-span-full flex flex-col gap-4 md:gap-6 xl:col-span-2">
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Where envelopes stand</CardTitle>
+            <CardTitle className="text-base">Where documents stand</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
             {byStatus.length === 0 ? (
@@ -265,7 +265,7 @@ export function DashboardClient() {
               <p className="text-muted-foreground text-sm">Loading…</p>
             ) : activity.length === 0 ? (
               <p className="text-muted-foreground text-sm">
-                Activity on your envelopes shows up here.
+                Activity on your documents shows up here.
               </p>
             ) : (
               activity.slice(0, 4).map((item, i) => (
