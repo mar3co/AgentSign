@@ -39,6 +39,12 @@ let cached: Env | undefined;
 export function getEnv(): Env {
   if (!cached) {
     cached = envSchema.parse(process.env);
+    // Vercel + Supabase integration sets POSTGRES_URL (transaction pooler),
+    // not DATABASE_URL. Accept it so production does not need a duplicate secret.
+    if (!cached.DATABASE_URL) {
+      const pooled = process.env.POSTGRES_URL?.trim() ?? "";
+      if (pooled) cached = { ...cached, DATABASE_URL: pooled };
+    }
   }
   return cached;
 }

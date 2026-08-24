@@ -21,7 +21,12 @@ export function getDb(): Db {
       }
       throw new Error("DATABASE_URL is required for getDb()");
     }
-    const client = postgres(DATABASE_URL);
+    const client = postgres(DATABASE_URL, {
+      // Transaction-mode pooler (Supabase :6543 / POSTGRES_URL) cannot use
+      // prepared statements. Harmless on a direct connection.
+      prepare: false,
+      max: process.env.VERCEL ? 1 : 10,
+    });
     db = drizzle(client, { schema });
   }
   return db;
