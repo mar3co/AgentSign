@@ -96,7 +96,7 @@ export default function UpgradePage() {
               </p>
             }
           >
-            <pre className="overflow-x-auto whitespace-pre text-ledger">
+            <pre className="overflow-x-auto whitespace-pre">
               {PRICING_BLOCK}
             </pre>
           </TerminalPanel>

@@ -49,6 +49,9 @@ describe("public chrome", () => {
     expect(screen.getByRole("link", { name: "Pricing" }).getAttribute("href")).toBe(
       "/upgrade",
     );
+    expect(screen.getByRole("link", { name: "Pricing" }).className).toContain(
+      "sm:inline",
+    );
     expect(screen.getByRole("link", { name: "/llms.txt" }).getAttribute("href")).toBe(
       "/llms.txt",
     );
@@ -57,10 +60,11 @@ describe("public chrome", () => {
     );
   });
 
-  it("public header keeps the wordmark on font-heading", () => {
+  it("public header lockup is the mark plus a font-heading wordmark", () => {
     render(createElement(SiteHeader, { variant: "public" }));
-    const wordmark = screen.getByRole("link", { name: "AgentSign" });
-    expect(wordmark.className).toContain("font-heading");
+    const lockup = screen.getByRole("link", { name: "AgentSign" });
+    expect(lockup.querySelector("svg")).toBeTruthy();
+    expect(lockup.querySelector(".font-heading")?.textContent).toBe("AgentSign");
   });
 
   it("auth header still offers Send a PDF", () => {

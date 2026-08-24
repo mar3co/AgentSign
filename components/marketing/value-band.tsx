@@ -20,36 +20,37 @@ const ITEMS = [
 ] as const;
 
 export function ValueBand({
-  expanded = true,
+  stacked = false,
   className,
 }: {
-  expanded?: boolean;
+  /** Left-column hero: stacked rows, titles on all sizes, one-liners from xl. */
+  stacked?: boolean;
   className?: string;
 }) {
   return (
     <div
       className={cn(
-        "grid gap-x-6 gap-y-4 border-t border-border pt-5 sm:grid-cols-3",
+        "grid border-t border-border",
+        stacked
+          ? "grid-cols-1 gap-y-1.5 pt-2 lg:gap-y-3 lg:pt-3"
+          : "gap-x-6 gap-y-4 pt-5 sm:grid-cols-3",
         className,
       )}
     >
       {ITEMS.map((item) => (
-        <div key={item.title} className="flex flex-col gap-1.5">
+        <div key={item.title} className="flex min-w-0 flex-col gap-1">
           <div className="flex items-center gap-2.5">
-            <item.icon aria-hidden className="size-4 text-tint" />
+            <item.icon aria-hidden className="size-4 shrink-0 text-tint" />
             <p className="text-[15px] font-semibold">{item.title}</p>
           </div>
-          {/* Bodies stay in the DOM when compact so the band can expand without a layout jump. */}
-          <div
+          <p
             className={cn(
-              "grid transition-[grid-template-rows,opacity] duration-500 ease-out",
-              expanded ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
+              "pl-[26px] text-[13px] leading-relaxed text-muted-foreground",
+              stacked && "hidden xl:block",
             )}
           >
-            <p className="overflow-hidden pl-[26px] text-[13px] leading-relaxed text-muted-foreground">
-              {item.body}
-            </p>
-          </div>
+            {item.body}
+          </p>
         </div>
       ))}
     </div>

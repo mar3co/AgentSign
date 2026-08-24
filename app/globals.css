@@ -88,6 +88,11 @@
     --seal: var(--brand-wax);
     /* Brand accent: Sealing Wax (see Brand.md). AA on white at 4.77:1. */
     --brand-wax: #cc4416;
+    /* Measured on the public header and send bar; JS overwrites with live heights. */
+    --public-header-h: 81px;
+    /* 0 until the hero drop zone is scrolled past and the compact bar pins. */
+    --send-bar-h: 0px;
+    --story-chrome-h: calc(var(--public-header-h) + var(--send-bar-h));
     --chart-1: oklch(0.646 0.222 41.116);
     --chart-2: oklch(0.6 0.118 184.704);
     --chart-3: oklch(0.398 0.07 227.392);
@@ -212,10 +217,66 @@
 [data-surface="public"] .font-heading.font-semibold {
   font-weight: 600;
 }
+/* First home section fills the remaining viewport below the public header.
+   100svh is the visible viewport (URL bar showing), so the next section
+   does not peek. --public-header-h is set in :root and updated by JS. */
+[data-hero] {
+  min-height: calc(100svh - var(--public-header-h));
+}
+/* Hero drop zone hands off to the compact bar: it slides up into the
+   header as the sticky strip arrives. Layout is kept so the page does not jump. */
+[data-drop-zone] {
+  transition:
+    opacity 200ms cubic-bezier(0.2, 0, 0, 1),
+    transform 200ms cubic-bezier(0.2, 0, 0, 1);
+}
+html:has([data-send-bar][data-stuck]) [data-drop-zone] {
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-12px);
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-drop-zone] {
+    transition: none;
+  }
+}
+/* Snap and hash targets sit below the sticky header + send bar, so chapter
+   eyebrows are not sliced by the bar. */
+html:has([data-scroll-story]) {
+  scroll-padding-top: var(--story-chrome-h);
+}
+/* Each chapter fills the remaining viewport so the next snap cannot overlap
+   the heading. Comma-bearing Tailwind arbitrary values were dropped by the
+   compiler, so this lives in CSS. */
+@media (min-width: 1024px) {
+  @media (prefers-reduced-motion: no-preference) {
+    [data-chapter] {
+      min-height: calc(100svh - var(--story-chrome-h));
+    }
+    /* Fill the remaining viewport below sticky chrome so the panel sits
+       beside the left-column cue and value rows. */
+    [data-story-terminal] {
+      height: calc(100svh - var(--story-chrome-h));
+    }
+  }
+}
 /* Home scroll story: gentle snap on the root scroller, only while the story is
    on the page and only for people who have not asked for reduced motion. */
 @media (prefers-reduced-motion: no-preference) {
   html:has([data-scroll-story]) {
     scroll-snap-type: y proximity;
+    scroll-behavior: smooth;
+  }
+  @keyframes scroll-cue {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(5px);
+    }
+  }
+  [data-scroll-cue] {
+    animation: scroll-cue 1.8s ease-in-out infinite;
   }
 }

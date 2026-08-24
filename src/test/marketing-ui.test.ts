@@ -2,7 +2,11 @@
 import { createElement } from "react";
 import { afterEach, describe, it, expect } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
-import { TerminalPanel } from "../../components/marketing/terminal-panel.js";
+import {
+  TerminalCode,
+  TerminalFooter,
+  TerminalPanel,
+} from "../../components/marketing/terminal-panel.js";
 import { TwoReader } from "../../components/marketing/two-reader.js";
 import { ValueBand } from "../../components/marketing/value-band.js";
 
@@ -22,6 +26,26 @@ describe("TerminalPanel", () => {
     expect(screen.getByText("POST /v1/documents")).toBeTruthy();
     expect(screen.getByText("curl")).toBeTruthy();
     expect(screen.getByText("footer-line")).toBeTruthy();
+  });
+
+  it("colors comments apart from commands", () => {
+    const { container } = render(
+      createElement(TerminalCode, {
+        code: "# try this\n$ curl https://agentsign.co/v1/documents",
+      }),
+    );
+    const spans = container.querySelectorAll("pre span");
+    expect(spans[0]?.className).toContain("text-[#9bb6f0]");
+    expect(spans[1]?.className).toContain("text-[#eef3fc]");
+  });
+
+  it("renders caller-supplied footer copy", () => {
+    render(
+      createElement(TerminalFooter, {
+        children: createElement("p", null, "Schema for this send."),
+      }),
+    );
+    expect(screen.getByText("Schema for this send.")).toBeTruthy();
   });
 });
 
@@ -45,5 +69,14 @@ describe("ValueBand", () => {
     expect(screen.getByText("Always free, open source")).toBeTruthy();
     expect(screen.getByText("Team plans, no per-seat pricing")).toBeTruthy();
     expect(screen.getByText("For humans and agents alike")).toBeTruthy();
+    expect(screen.getByText(/Apache-2.0/)).toBeTruthy();
+  });
+
+  it("stacks in the left column and keeps one-liners until xl", () => {
+    const { container } = render(createElement(ValueBand, { stacked: true }));
+    const body = screen.getByText(/Apache-2.0/);
+    expect(body.className).toContain("hidden");
+    expect(body.className).toContain("xl:block");
+    expect(container.firstElementChild?.className).toContain("grid-cols-1");
   });
 });

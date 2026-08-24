@@ -15,15 +15,23 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageShell } from "@/components/page-shell";
 import { ScrollStory } from "@/components/marketing/scroll-story";
-import { TerminalPanel } from "@/components/marketing/terminal-panel";
-import { TwoReader } from "@/components/marketing/two-reader";
+import {
+  TERMINAL_FOOTER_LINK,
+  TerminalCode,
+  TerminalFooter,
+  TerminalPanel,
+} from "@/components/marketing/terminal-panel";
 import { cn } from "@/lib/utils";
 
 const EYEBROW = "font-mono text-[11px] uppercase tracking-[0.22em] text-tint";
 
-const AGENT_BLOCK = `# your agent can sign off too, with its own
-# named key. it gets a cryptographic
-# receipt, not a pretend signature
+const SEND_NOTE = `# no key needed to try this. we email a
+# code and hand back a throwaway
+# sign_tmp_ key for this document.`;
+
+const AGENT_BLOCK = `# your agent can sign off too, with its
+# own named key. it gets a cryptographic
+# receipt, not a pretend signature.
 $ curl -X POST \\
     https://agentsign.co/v1/documents/doc_kx3q9/attest \\
     -H 'authorization: Bearer sign_agent_...'
@@ -143,8 +151,9 @@ export default function Home() {
   const sender = (
     <form className="flex flex-col gap-4" onSubmit={onSubmit}>
       <div
+        data-drop-zone
         className={cn(
-          "flex flex-wrap items-center justify-between gap-4 rounded-[8px] border-[1.5px] border-dashed px-5 py-5 shadow-[0_1px_0_#e6e3da,0_12px_28px_rgba(28,39,51,0.06)]",
+          "flex flex-col items-stretch gap-4 rounded-[8px] border-[1.5px] border-dashed px-5 py-5 shadow-[0_1px_0_#e6e3da,0_12px_28px_rgba(28,39,51,0.06)] sm:flex-row sm:flex-wrap sm:items-center sm:justify-between",
           over ? "border-tint bg-tint/5" : "border-[#9faec9] bg-card",
         )}
       >
@@ -196,7 +205,7 @@ export default function Home() {
         </label>
         <Button
           type="button"
-          className="h-11 bg-seal px-6 text-[15px] font-semibold text-bond hover:bg-seal/90"
+          className="h-11 w-full bg-seal px-6 text-[15px] font-semibold text-bond hover:bg-seal/90 sm:w-auto"
           onClick={() => {
             setExpanded(true);
             fileRef.current?.click();
@@ -351,78 +360,71 @@ export default function Home() {
   }
 
   const hero = (
-    <TwoReader
-      human={
-          <>
-            <p className={EYEBROW}>For humans</p>
-            <h1 className="font-heading text-4xl leading-[1.14] tracking-[-0.02em] text-pretty md:text-5xl">
-              Easy signing for everything, by people and their{" "}
-              <em>AI agents</em>
-              <span className="text-seal">.</span>
-            </h1>
-            <p className="max-w-prose text-base leading-relaxed text-muted-foreground">
-              Drop a PDF or POST it. Your signer gets a link, and you get back a
-              sealed file with an audit trail. No account to send and none to
-              sign. We shred it after 7 days unless you keep it.
-            </p>
-            {done ? sealed : sent ? otp : sender}
-            <div className="flex flex-wrap items-center gap-3">
-              <a
-                className="text-sm font-medium text-tint underline-offset-4 hover:underline"
-                href="/llms.txt"
-              >
-                Connect your AI agent &rarr;
-              </a>
-              <span aria-hidden className="text-input">
-                &middot;
-              </span>
-              <a
-                className="text-sm font-medium text-tint underline-offset-4 hover:underline"
-                href="/upgrade"
-              >
-                Bring your team &rarr;
-              </a>
-            </div>
-          </>
-        }
-        machine={
-          <TerminalPanel
-            eyebrow="For agents & developers"
-            address="POST /v1/documents"
-            footer={
-              <>
-                <p className="text-[#7e97d8]">
-                  Signing inside your own product, not ours.
-                </p>
-                <p className="flex flex-wrap gap-x-4 gap-y-1 text-[11.5px] text-[#55688f]">
-                  <span>REST + OpenAPI</span>
-                  <span>
-                    MCP: <code>send · status · attest · verify</code>
-                  </span>
-                  <span>self-host: SELF_HOST=1</span>
-                </p>
-              </>
-            }
-          >
-            <pre className="overflow-x-auto whitespace-pre text-ledger">
-              {curlFor({ title, senderEmail, signerName, signerEmail, fileName })}
-            </pre>
-            {documentId ? (
-              <p className="text-[#7e97d8]">&gt; sent · id {documentId}</p>
-            ) : null}
-            <div className="h-px bg-[#22304a]" />
-            <pre className="overflow-x-auto whitespace-pre text-ledger">
-              {AGENT_BLOCK}
-            </pre>
-          </TerminalPanel>
-        }
+    <>
+      <p className={EYEBROW}>For humans</p>
+      <h1 className="font-heading text-4xl leading-[1.14] tracking-[-0.02em] text-pretty md:text-5xl">
+        Easy signing for everything, by people and their{" "}
+        <em>AI agents</em>
+        <span className="text-seal">.</span>
+      </h1>
+      <p className="max-w-prose text-base leading-relaxed text-muted-foreground">
+        Drop a PDF or POST it. Your signer gets a link, and you get back a
+        sealed file with an audit trail. No account to send and none to sign. We
+        shred it after 7 days unless you keep it.
+      </p>
+      {done ? sealed : sent ? otp : sender}
+      <div className="flex flex-wrap items-center gap-3">
+        <a
+          className="text-sm font-medium text-tint underline-offset-4 hover:underline"
+          href="/llms.txt"
+        >
+          Connect your AI agent &rarr;
+        </a>
+        <span aria-hidden className="text-input">
+          &middot;
+        </span>
+        <a
+          className="text-sm font-medium text-tint underline-offset-4 hover:underline"
+          href="/upgrade"
+        >
+          Bring your team &rarr;
+        </a>
+      </div>
+    </>
+  );
+
+  const terminal = (
+    <TerminalPanel
+      eyebrow="For agents & developers"
+      address="POST /v1/documents"
+      footer={
+        <TerminalFooter>
+          <p>
+            Schema:{" "}
+            <a className={TERMINAL_FOOTER_LINK} href="/openapi.json">
+              /openapi.json
+            </a>
+          </p>
+        </TerminalFooter>
+      }
+    >
+      <TerminalCode
+        code={`${SEND_NOTE}
+${curlFor({ title, senderEmail, signerName, signerEmail, fileName })}`}
       />
+      {documentId ? (
+        <p className="text-[#9bb6f0]">&gt; sent · id {documentId}</p>
+      ) : null}
+      <div className="h-px shrink-0 bg-[#33476a]" />
+      <TerminalCode code={AGENT_BLOCK} />
+    </TerminalPanel>
   );
 
   return (
-    <PageShell variant="public" width="full" showFooter={false}>
+    <PageShell variant="public" width="full" showFooter={false} flush>
       <ScrollStory
         hero={hero}
+        terminal={terminal}
         onChooseFile={() => {
           setExpanded(true);
           fileRef.current?.click();

@@ -1,4 +1,4 @@
-import { WaxStop } from "@/components/brand-mark";
+import { AgentSignMark } from "@/components/brand-mark";
 import { cn } from "@/lib/utils";
 
 export type SiteHeaderVariant = "public" | "ceremony" | "auth";
@@ -20,15 +20,21 @@ export function SiteHeader({
     >
       <a
         href="/"
-        className={cn(
-          "font-heading leading-none text-foreground",
-          isPublicChrome
-            ? "text-2xl font-semibold tracking-[0.01em]"
-            : "text-xl tracking-tight",
-        )}
+        className="inline-flex items-center gap-2.5 text-foreground"
       >
-        AgentSign
-        <WaxStop />
+        <AgentSignMark
+          className={isPublicChrome ? "size-5 sm:size-6" : "size-5"}
+        />
+        <span
+          className={cn(
+            "font-heading leading-none",
+            isPublicChrome
+              ? "text-2xl font-semibold tracking-[0.01em]"
+              : "text-xl tracking-tight",
+          )}
+        >
+          AgentSign
+        </span>
       </a>
       {variant === "public" ? (
         <nav aria-label="Account" className="flex items-center gap-4 sm:gap-8">
@@ -39,7 +45,7 @@ export function SiteHeader({
             Docs
           </a>
           <a
-            className="text-sm text-foreground transition-colors hover:text-tint"
+            className="hidden text-sm text-foreground transition-colors hover:text-tint sm:inline"
             href="/upgrade"
           >
             Pricing
@@ -51,7 +57,7 @@ export function SiteHeader({
             /llms.txt
           </a>
           <a
-            className="rounded-md border border-input px-4 py-2 text-sm transition-colors hover:bg-accent"
+            className="shrink-0 whitespace-nowrap rounded-md border border-input px-4 py-2 text-sm transition-colors hover:bg-accent"
             href="/login"
           >
             Log in
