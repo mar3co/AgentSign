@@ -94,4 +94,52 @@ export const devOfflineAuth: AuthAdapter = {
   async exchangeCode() {
     return null;
   },
+  async startPasskeyAuthentication() {
+    return {
+      ok: false as const,
+      error:
+        "Passkeys need Supabase. In offline dev, log in with any email and password.",
+      code: "passkey_disabled",
+    };
+  },
+  async verifyPasskeyAuthentication() {
+    return {
+      ok: false as const,
+      error:
+        "Passkeys need Supabase. In offline dev, log in with any email and password.",
+      code: "passkey_disabled",
+    };
+  },
+  async startPasskeyRegistration() {
+    return {
+      ok: false as const,
+      error:
+        "Passkeys need Supabase. In offline dev, log in with any email and password.",
+      code: "passkey_disabled",
+    };
+  },
+  async verifyPasskeyRegistration() {
+    return {
+      ok: false as const,
+      error:
+        "Passkeys need Supabase. In offline dev, log in with any email and password.",
+      code: "passkey_disabled",
+    };
+  },
+  async listPasskeys() {
+    return {
+      ok: false as const,
+      error:
+        "Passkeys need Supabase. In offline dev, log in with any email and password.",
+      code: "passkey_disabled",
+    };
+  },
+  async deletePasskey() {
+    return {
+      ok: false as const,
+      error:
+        "Passkeys need Supabase. In offline dev, log in with any email and password.",
+      code: "passkey_disabled",
+    };
+  },
 };

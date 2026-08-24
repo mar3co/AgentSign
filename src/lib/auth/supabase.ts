@@ -5,6 +5,20 @@ import { devOfflineAuth } from "./dev-offline.js";
 
 export type AuthUser = { id: string; email: string };
 
+export type PasskeyFail = { ok: false; error: string; code: string };
+
+export type PasskeyChallenge = {
+  challengeId: string;
+  options: Record<string, unknown>;
+};
+
+export type PasskeyItem = {
+  id: string;
+  friendlyName: string | null;
+  createdAt: string;
+  lastUsedAt: string | null;
+};
+
 export type AuthAdapter = {
   sendMagicLink(input: {
     email: string;
@@ -30,6 +44,28 @@ export type AuthAdapter = {
     code: string,
     cookieHeader?: string | null,
   ): Promise<{ user: AuthUser; cookie: string } | null>;
+  startPasskeyAuthentication?(): Promise<
+    { ok: true; challenge: PasskeyChallenge } | PasskeyFail
+  >;
+  verifyPasskeyAuthentication?(input: {
+    challengeId: string;
+    credential: unknown;
+  }): Promise<{ ok: true; user: AuthUser; cookie: string } | PasskeyFail>;
+  startPasskeyRegistration?(
+    cookieHeader: string | null,
+  ): Promise<{ ok: true; challenge: PasskeyChallenge } | PasskeyFail>;
+  verifyPasskeyRegistration?(input: {
+    cookieHeader: string | null;
+    challengeId: string;
+    credential: unknown;
+  }): Promise<{ ok: true; passkey: PasskeyItem } | PasskeyFail>;
+  listPasskeys?(
+    cookieHeader: string | null,
+  ): Promise<{ ok: true; passkeys: PasskeyItem[] } | PasskeyFail>;
+  deletePasskey?(input: {
+    cookieHeader: string | null;
+    passkeyId: string;
+  }): Promise<{ ok: true } | PasskeyFail>;
 };
 
 const ACCESS_COOKIE = "sb-access-token";
@@ -54,6 +90,89 @@ function parseCookie(header: string | null, name: string): string | null {
 
 function sessionCookie(accessToken: string): string {
   return `${ACCESS_COOKIE}=${accessToken}; ${sessionCookieAttrs()}`;
+}
+
+const PASSKEY_OFF: PasskeyFail = {
+  ok: false,
+  error: "Passkeys are not available",
+  code: "passkey_disabled",
+};
+
+function asPasskey(raw: unknown): PasskeyItem {
+  const o = (raw ?? {}) as Record<string, unknown>;
+  return {
+    id: String(o.id ?? ""),
+    friendlyName: o.friendly_name == null ? null : String(o.friendly_name),
+    createdAt: String(o.created_at ?? ""),
+    lastUsedAt: o.last_used_at == null ? null : String(o.last_used_at),
+  };
+}
+
+function passkeysFrom(data: unknown): PasskeyItem[] {
+  if (Array.isArray(data)) return data.map(asPasskey);
+  if (data && typeof data === "object") {
+    const o = data as Record<string, unknown>;
+    if (Array.isArray(o.passkeys)) return o.passkeys.map(asPasskey);
+    if (Array.isArray(o.data)) return o.data.map(asPasskey);
+  }
+  return [];
+}
+
+function challengeFrom(
+  data: unknown,
+): PasskeyChallenge | null {
+  const o = (data ?? {}) as Record<string, unknown>;
+  const challengeId = String(o.challenge_id ?? "");
+  const options =
+    o.options && typeof o.options === "object"
+      ? (o.options as Record<string, unknown>)
+      : null;
+  if (!challengeId || !options) return null;
+  return { challengeId, options };
+}
+
+function sessionUserFrom(
+  data: unknown,
+): { accessToken: string; user: AuthUser } | null {
+  const o = (data ?? {}) as Record<string, unknown>;
+  const session = (
+    o.session && typeof o.session === "object" ? o.session : o
+  ) as Record<string, unknown>;
+  const userRaw = (o.user ?? session.user) as Record<string, unknown> | undefined;
+  const accessToken = String(session.access_token ?? "");
+  const email = typeof userRaw?.email === "string" ? userRaw.email : "";
+  const id = typeof userRaw?.id === "string" ? userRaw.id : "";
+  if (!accessToken || !email || !id) return null;
+  return { accessToken, user: { id, email } };
+}
+
+async function gotrue<T>(
+  path: string,
+  init: { method?: string; jwt?: string; body?: unknown } = {},
+): Promise<{ data: T; error: null } | { data: null; error: PasskeyFail }> {
+  const env = getEnv();
+  const res = await fetch(`${env.SUPABASE_URL.replace(/\/+$/, "")}/auth/v1${path}`, {
+    method: init.method ?? "GET",
+    headers: {
+      apikey: env.SUPABASE_ANON_KEY,
+      authorization: `Bearer ${init.jwt ?? env.SUPABASE_ANON_KEY}`,
+      "content-type": "application/json",
+    },
+    body: init.body === undefined ? undefined : JSON.stringify(init.body),
+  });
+  if (res.status === 204) return { data: undefined as T, error: null };
+  const json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!res.ok) {
+    return {
+      data: null,
+      error: {
+        ok: false,
+        error: String(json?.msg ?? json?.message ?? json?.error ?? "Request failed"),
+        code: String(json?.error_code ?? json?.code ?? "passkey_failed"),
+      },
+    };
+  }
+  return { data: json as T, error: null };
 }
 
 /** Expired copies of every auth cookie we set, for logout. */
@@ -118,6 +237,24 @@ const unconfigured: AuthAdapter = {
   },
   async exchangeCode() {
     return null;
+  },
+  async startPasskeyAuthentication() {
+    return PASSKEY_OFF;
+  },
+  async verifyPasskeyAuthentication() {
+    return PASSKEY_OFF;
+  },
+  async startPasskeyRegistration() {
+    return PASSKEY_OFF;
+  },
+  async verifyPasskeyRegistration() {
+    return PASSKEY_OFF;
+  },
+  async listPasskeys() {
+    return PASSKEY_OFF;
+  },
+  async deletePasskey() {
+    return PASSKEY_OFF;
   },
 };
 
@@ -203,6 +340,93 @@ export function createSupabaseAuth(): AuthAdapter {
         user: { id: data.user.id, email: data.user.email },
         cookie: sessionCookie(data.session.access_token),
       };
+    },
+    async startPasskeyAuthentication() {
+      const result = await gotrue<unknown>("/passkeys/authentication/options", {
+        method: "POST",
+        body: {},
+      });
+      if (result.error) return result.error;
+      const challenge = challengeFrom(result.data);
+      if (!challenge) {
+        return { ok: false, error: "Could not start passkey sign-in", code: "passkey_failed" };
+      }
+      return { ok: true, challenge };
+    },
+    async verifyPasskeyAuthentication({ challengeId, credential }) {
+      const result = await gotrue<unknown>("/passkeys/authentication/verify", {
+        method: "POST",
+        body: { challenge_id: challengeId, credential },
+      });
+      if (result.error) return result.error;
+      const session = sessionUserFrom(result.data);
+      if (!session) {
+        return {
+          ok: false,
+          error: "Could not verify passkey",
+          code: "webauthn_verification_failed",
+        };
+      }
+      return {
+        ok: true,
+        user: session.user,
+        cookie: sessionCookie(session.accessToken),
+      };
+    },
+    async startPasskeyRegistration(cookieHeader) {
+      const jwt = parseCookie(cookieHeader, ACCESS_COOKIE);
+      if (!jwt) return { ok: false, error: "Unauthorized", code: "unauthorized" };
+      const result = await gotrue<unknown>("/passkeys/registration/options", {
+        method: "POST",
+        jwt,
+        body: {},
+      });
+      if (result.error) return result.error;
+      const challenge = challengeFrom(result.data);
+      if (!challenge) {
+        return {
+          ok: false,
+          error: "Could not start passkey registration",
+          code: "passkey_failed",
+        };
+      }
+      return { ok: true, challenge };
+    },
+    async verifyPasskeyRegistration({ cookieHeader, challengeId, credential }) {
+      const jwt = parseCookie(cookieHeader, ACCESS_COOKIE);
+      if (!jwt) return { ok: false, error: "Unauthorized", code: "unauthorized" };
+      const result = await gotrue<unknown>("/passkeys/registration/verify", {
+        method: "POST",
+        jwt,
+        body: { challenge_id: challengeId, credential },
+      });
+      if (result.error) return result.error;
+      const passkey = asPasskey(result.data);
+      if (!passkey.id) {
+        return {
+          ok: false,
+          error: "Could not save passkey",
+          code: "webauthn_verification_failed",
+        };
+      }
+      return { ok: true, passkey };
+    },
+    async listPasskeys(cookieHeader) {
+      const jwt = parseCookie(cookieHeader, ACCESS_COOKIE);
+      if (!jwt) return { ok: false, error: "Unauthorized", code: "unauthorized" };
+      const result = await gotrue<unknown>("/passkeys", { jwt });
+      if (result.error) return result.error;
+      return { ok: true, passkeys: passkeysFrom(result.data) };
+    },
+    async deletePasskey({ cookieHeader, passkeyId }) {
+      const jwt = parseCookie(cookieHeader, ACCESS_COOKIE);
+      if (!jwt) return { ok: false, error: "Unauthorized", code: "unauthorized" };
+      const result = await gotrue<unknown>(`/passkeys/${encodeURIComponent(passkeyId)}`, {
+        method: "DELETE",
+        jwt,
+      });
+      if (result.error) return result.error;
+      return { ok: true };
     },
   };
 }
