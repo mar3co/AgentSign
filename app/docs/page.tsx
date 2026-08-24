@@ -63,7 +63,7 @@ export default function DocsPage() {
         }
         machine={
           <TerminalPanel eyebrow="Send" address="POST /v1/documents">
-            <pre className="overflow-x-auto whitespace-pre text-ledger">
+            <pre className="overflow-x-auto whitespace-pre">
               {SEND_BLOCK}
             </pre>
           </TerminalPanel>
@@ -103,7 +103,7 @@ export default function DocsPage() {
         }
         machine={
           <TerminalPanel eyebrow="Status" address="GET /v1/documents/{id}">
-            <pre className="overflow-x-auto whitespace-pre text-ledger">
+            <pre className="overflow-x-auto whitespace-pre">
               {STATUS_BLOCK}
             </pre>
           </TerminalPanel>
@@ -125,7 +125,7 @@ export default function DocsPage() {
         }
         machine={
           <TerminalPanel eyebrow="Verify" address="POST /v1/verify">
-            <pre className="overflow-x-auto whitespace-pre text-ledger">
+            <pre className="overflow-x-auto whitespace-pre">
               {VERIFY_BLOCK}
             </pre>
           </TerminalPanel>

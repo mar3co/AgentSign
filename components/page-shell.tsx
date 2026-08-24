@@ -30,6 +30,7 @@ export function PageShell({
   sealed = false,
   showRange = true,
   showFooter = true,
+  flush = false,
   children,
 }: {
   variant: SiteHeaderVariant | "app";
@@ -37,6 +38,8 @@ export function PageShell({
   sealed?: boolean;
   showRange?: boolean;
   showFooter?: boolean;
+  /** Drop main padding so a child can fill the remaining viewport. */
+  flush?: boolean;
   children: ReactNode;
 }) {
   if (variant === "app") {
@@ -60,7 +63,8 @@ export function PageShell({
         <div className={cn(PUBLIC_GUTTER, "flex min-w-0 flex-1 flex-col")}>
           <main
             className={cn(
-              "mx-auto flex w-full min-w-0 flex-1 flex-col gap-10 py-8",
+              "mx-auto flex w-full min-w-0 flex-1 flex-col gap-10",
+              flush ? "py-0" : "py-8",
               WIDTH[width],
             )}
           >
