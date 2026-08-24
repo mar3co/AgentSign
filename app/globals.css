@@ -279,4 +279,32 @@ html:has([data-scroll-story]) {
   [data-scroll-cue] {
     animation: scroll-cue 1.8s ease-in-out infinite;
   }
+  /* One machine pane: unmount the old call, fade the next in along the
+     scroll direction. Reduced motion skips this via the parent query. */
+  @keyframes terminal-in-down {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes terminal-in-up {
+    from {
+      opacity: 0;
+      transform: translateY(-6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  [data-terminal-swap="down"] {
+    animation: terminal-in-down 150ms cubic-bezier(0.2, 0, 0, 1) both;
+  }
+  [data-terminal-swap="up"] {
+    animation: terminal-in-up 150ms cubic-bezier(0.2, 0, 0, 1) both;
+  }
 }

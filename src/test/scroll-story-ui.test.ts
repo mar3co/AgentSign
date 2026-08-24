@@ -29,6 +29,12 @@ describe("home scroll story", () => {
     const { container } = render(createElement(Home));
     const hero = container.querySelector("[data-hero]");
     expect(hero).toBeTruthy();
+    const inner = hero?.firstElementChild;
+    expect(inner?.className).toContain("justify-start");
+    expect(inner?.className).toMatch(/\bpt-4\b/);
+    expect(inner?.className).toContain("lg:pt-[calc(2rem+1.25rem+2px)]");
+    expect(inner?.className).toContain("xl:pt-[calc(2rem+1.5rem+2px)]");
+    expect(inner?.className).not.toContain("justify-center");
     expect(hero?.querySelector("[data-value-band]")).toBeTruthy();
     expect(hero?.textContent).toContain("Always free, open source");
     expect(
@@ -90,6 +96,22 @@ describe("home scroll story", () => {
     expect(hero?.textContent).not.toContain("SELF_HOST=1");
   });
 
+  it("shows MCP hosts on the hero and the agent chapter", () => {
+    const { container } = render(createElement(Home));
+    const hero = container.querySelector("[data-hero]");
+    const agent = container.querySelector("[data-chapter='1']");
+    expect(hero?.querySelector("[data-mcp-clients='compact']")).toBeTruthy();
+    expect(
+      hero?.querySelector("[data-mcp-clients='compact']")?.className,
+    ).toContain("max-sm:hidden");
+    expect(agent?.querySelector("[data-mcp-clients]")).toBeTruthy();
+    expect(agent?.textContent).toContain("Works over MCP");
+    for (const name of ["Claude", "ChatGPT", "Grok", "Cursor", "Copilot", "Gemini"]) {
+      expect(hero?.textContent).toContain(name);
+      expect(agent?.textContent).toContain(name);
+    }
+  });
+
   it("gives each chapter its own primary CTA", () => {
     render(createElement(Home));
     // Chapter 1's CTA is the send action itself; 2 and 3 are links.
@@ -106,42 +128,40 @@ describe("home scroll story", () => {
     ).toBe("/upgrade");
   });
 
-  it("pins the hero terminal through the chapters at the same size", () => {
+  it("pins one terminal shell and mounts the hero call first", () => {
     const { container } = render(createElement(Home));
     const col = container.querySelector("[data-story-terminal]");
     expect(col).toBeTruthy();
     expect(col?.className).toContain("sticky");
+    const shell = col?.querySelector("[data-terminal-shell]");
+    expect(shell).toBeTruthy();
+    expect(shell?.className).toContain("h-full");
     const heroWrap = col?.querySelector("[data-hero-terminal]");
-    expect(heroWrap?.className).toContain("[&>*]:h-full");
-    const chapterPanels = col?.querySelectorAll("[data-chapter-terminal]");
-    expect(chapterPanels?.length).toBe(3);
-    for (const panel of chapterPanels ?? []) {
-      expect(panel.firstElementChild?.className).toContain("h-full");
-    }
+    expect(heroWrap).toBeTruthy();
+    expect(heroWrap?.getAttribute("data-terminal-swap")).toBeNull();
+    expect(col?.querySelectorAll("[data-chapter-terminal]").length).toBe(0);
     expect(col?.textContent).toMatch(/for agents & developers/i);
-    const chapter1 = col?.querySelector("[data-chapter-terminal='0']");
-    const chapter2 = col?.querySelector("[data-chapter-terminal='1']");
-    const chapter3 = col?.querySelector("[data-chapter-terminal='2']");
-    expect(chapter1?.textContent).toMatch(/tmp key from send/i);
-    expect(chapter2?.querySelector("a[href='/llms.txt']")).toBeTruthy();
-    expect(chapter3?.querySelector("a[href='/docs']")).toBeTruthy();
+    expect(col?.textContent).toMatch(/post \/v1\/documents/i);
+    expect(col?.textContent).not.toMatch(/your agent's turn/i);
     expect(col?.innerHTML).not.toContain("--hero-south-h");
+    expect(col?.innerHTML).not.toContain("duration-500");
   });
 
-  it("shows a real call per chapter, twice (pinned panel and stacked fallback)", () => {
+  it("shows a real call per chapter in the stacked fallback", () => {
     render(createElement(Home));
     for (const address of [
       "GET /v1/documents/{id}",
       "POST /v1/documents/{id}/attest",
       "POST /v1/verify",
     ]) {
-      // One copy in the pinned terminal stack, one in the disclosure fallback.
-      expect(screen.getAllByText(address)).toHaveLength(2);
+      expect(screen.getAllByText(address).length).toBeGreaterThanOrEqual(1);
     }
-    expect(screen.getAllByText(/anyone can run this\. no key\./i).length).toBe(2);
+    expect(
+      screen.getAllByText(/anyone can run this\. no key\./i).length,
+    ).toBeGreaterThanOrEqual(1);
     expect(
       screen.getAllByText(/kept 7 days unless you keep it/i).length,
-    ).toBe(2);
+    ).toBeGreaterThanOrEqual(1);
   });
 
   it("ends with one footer and keeps the value strip in the hero", () => {
@@ -156,12 +176,12 @@ describe("home scroll story", () => {
     const heroBand = container.querySelector("[data-hero] [data-value-band]");
     expect(heroBand?.firstElementChild?.className).toContain("grid-cols-1");
     expect(heroBand?.textContent).toContain("Always free, open source");
-    expect(heroBand?.textContent).toContain("Team plans, no per-seat pricing");
+    expect(heroBand?.textContent).toContain("No per-seat pricing");
     expect(heroBand?.textContent).toContain("For humans and agents alike");
-    expect(heroBand?.textContent).toContain("Apache-2.0");
-    // End of page repeats the one-liners for small screens only.
+    expect(heroBand?.textContent).not.toContain("Apache-2.0");
     const endBand = container.querySelector("[data-story-end]");
-    expect(endBand?.textContent).toContain("Apache-2.0");
+    expect(endBand?.textContent).not.toContain("Apache-2.0");
+    expect(endBand?.textContent).not.toContain("Always free, open source");
   });
 
   it("holds the voice rules", () => {

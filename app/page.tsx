@@ -14,7 +14,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageShell } from "@/components/page-shell";
-import { ScrollStory } from "@/components/marketing/scroll-story";
+import {
+  MACHINE_EYEBROW,
+  ScrollStory,
+} from "@/components/marketing/scroll-story";
+import { McpClients } from "@/components/marketing/mcp-clients";
 import {
   TERMINAL_FOOTER_LINK,
   TerminalCode,
@@ -23,7 +27,8 @@ import {
 } from "@/components/marketing/terminal-panel";
 import { cn } from "@/lib/utils";
 
-const EYEBROW = "font-mono text-[11px] uppercase tracking-[0.22em] text-tint";
+const EYEBROW =
+  "font-mono text-[11px] leading-[1.65] uppercase tracking-[0.22em] text-tint xl:leading-[1.7]";
 
 const SEND_NOTE = `# no key needed to try this. we email a
 # code and hand back a throwaway
@@ -368,34 +373,37 @@ export default function Home() {
         <span className="text-seal">.</span>
       </h1>
       <p className="max-w-prose text-base leading-relaxed text-muted-foreground">
-        Drop a PDF or POST it. Your signer gets a link, and you get back a
-        sealed file with an audit trail. No account to send and none to sign. We
-        shred it after 7 days unless you keep it.
+        Drop a PDF, or let your agent send it. Your signer gets a link, and you
+        get back a sealed file with an audit trail. No account to send and none
+        to sign. We shred it after 7 days unless you keep it.
       </p>
       {done ? sealed : sent ? otp : sender}
-      <div className="flex flex-wrap items-center gap-3">
-        <a
-          className="text-sm font-medium text-tint underline-offset-4 hover:underline"
-          href="/llms.txt"
-        >
-          Connect your AI agent &rarr;
-        </a>
-        <span aria-hidden className="text-input">
-          &middot;
-        </span>
-        <a
-          className="text-sm font-medium text-tint underline-offset-4 hover:underline"
-          href="/upgrade"
-        >
-          Bring your team &rarr;
-        </a>
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <a
+            className="text-sm font-medium text-tint underline-offset-4 hover:underline"
+            href="/llms.txt"
+          >
+            Connect your AI agent &rarr;
+          </a>
+          <span aria-hidden className="text-input">
+            &middot;
+          </span>
+          <a
+            className="text-sm font-medium text-tint underline-offset-4 hover:underline"
+            href="/upgrade"
+          >
+            Bring your team &rarr;
+          </a>
+        </div>
+        <McpClients compact className="max-sm:hidden" />
       </div>
     </>
   );
 
   const terminal = (
     <TerminalPanel
-      eyebrow="For agents & developers"
+      eyebrow={MACHINE_EYEBROW}
       address="POST /v1/documents"
       footer={
         <TerminalFooter>

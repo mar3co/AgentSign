@@ -27,4 +27,12 @@ describe("home hero", () => {
     const { container } = render(createElement(Home));
     expect(container.textContent?.toLowerCase()).not.toContain("a human signs");
   });
+
+  it("lets the agent send without claiming it signs", () => {
+    const { container } = render(createElement(Home));
+    const hero = container.querySelector("[data-hero]");
+    expect(hero?.textContent).toMatch(/let your agent send it/i);
+    expect(hero?.textContent).not.toMatch(/handle signing/i);
+    expect(hero?.textContent).not.toMatch(/agents? sign the/i);
+  });
 });

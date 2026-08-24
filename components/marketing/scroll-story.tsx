@@ -1,10 +1,12 @@
 "use client";
 
 import {
+  cloneElement,
   useEffect,
   useRef,
   useState,
   type DragEvent,
+  type ReactElement,
   type ReactNode,
 } from "react";
 import {
@@ -22,10 +24,12 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { SiteFooter } from "@/components/site-footer";
 import {
   TERMINAL_FOOTER_LINK,
+  TERMINAL_SHELL_CLASS,
   TerminalCode,
   TerminalFooter,
   TerminalPanel,
 } from "@/components/marketing/terminal-panel";
+import { McpClients } from "@/components/marketing/mcp-clients";
 import { ValueBand } from "@/components/marketing/value-band";
 import { cn } from "@/lib/utils";
 
@@ -38,6 +42,9 @@ const HEADER_H = "var(--public-header-h,81px)";
 
 /** Compact "Drop a PDF" strip under the header after the hero drop zone. */
 export const PIN_SEND_BAR = false;
+
+/** Sticky machine-column identity. The address is what changes per chapter. */
+export const MACHINE_EYEBROW = "For agents & developers";
 
 const STATUS_CALL = `# they signed. this is the trail: who,
 # when, and every step we recorded.
@@ -77,8 +84,9 @@ type Chapter = {
   // action. The sticky bar stays secondary; each chapter carries its own CTA.
   cta: { label: string; href?: string };
   links?: readonly { href: string; label: string }[];
+  /** MCP host marks under the agent/developer rows. */
+  clients?: boolean;
   terminal: {
-    eyebrow: string;
     address: string;
     call: string;
     note: string;
@@ -111,7 +119,6 @@ const CHAPTERS: readonly Chapter[] = [
     ],
     cta: { label: "Choose a PDF" },
     terminal: {
-      eyebrow: "Status",
       address: "GET /v1/documents/{id}",
       call: STATUS_CALL,
       note: "> completed 14:09:41 UTC · kept 7 days unless you keep it",
@@ -145,8 +152,8 @@ const CHAPTERS: readonly Chapter[] = [
     ],
     cta: { label: "Connect your AI agent", href: "/llms.txt" },
     links: [{ href: "/docs", label: "MCP tools →" }],
+    clients: true,
     terminal: {
-      eyebrow: "Your agent's turn",
       address: "POST /v1/documents/{id}/attest",
       call: AGENT_CALL,
       note: "> receipt 4c19…9e2f · recorded 14:02:59 UTC",
@@ -193,7 +200,6 @@ const CHAPTERS: readonly Chapter[] = [
     cta: { label: "See pricing", href: "/upgrade" },
     links: [{ href: "/docs", label: "Read the docs →" }],
     terminal: {
-      eyebrow: "Verify",
       address: "POST /v1/verify",
       call: VERIFY_CALL,
       note: "> anyone can run this. no key.",
@@ -213,16 +219,19 @@ const CHAPTERS: readonly Chapter[] = [
 function ChapterTerminal({
   chapter,
   className,
+  plain,
 }: {
   chapter: Chapter;
   className?: string;
+  plain?: boolean;
 }) {
   return (
     <TerminalPanel
       className={className}
-      eyebrow={chapter.terminal.eyebrow}
+      eyebrow={MACHINE_EYEBROW}
       address={chapter.terminal.address}
       footer={chapter.terminal.footer}
+      plain={plain}
     >
       <TerminalCode code={chapter.terminal.call} />
       <p className="shrink-0 text-[#9bb6f0]">{chapter.terminal.note}</p>
@@ -263,12 +272,25 @@ export function ScrollStory({
   onDropFiles,
 }: {
   hero: ReactNode;
-  terminal: ReactNode;
+  terminal: ReactElement<{ plain?: boolean; className?: string }>;
   onChooseFile?: () => void;
   onDropFiles?: (files: FileList) => void;
 }) {
   // -1 is the hero terminal; 0..n are chapter terminals.
   const [active, setActive] = useState(-1);
+  const prevActive = useRef(active);
+  // 1 = next chapter (enter from below); -1 = previous (enter from above).
+  const swapDir = useRef<0 | 1 | -1>(0);
+  if (prevActive.current !== active) {
+    swapDir.current = active > prevActive.current ? 1 : -1;
+    prevActive.current = active;
+  }
+  const swap =
+    swapDir.current === 1
+      ? "down"
+      : swapDir.current === -1
+        ? "up"
+        : undefined;
   const [barOver, setBarOver] = useState(false);
   // Compact bar stays off until the hero drop zone reaches the header, then
   // it takes over as the sticky send affordance.
@@ -455,7 +477,7 @@ export function ScrollStory({
       <div className={STORY_GRID}>
         <div className="flex min-w-0 flex-col">
           <div data-hero className="flex flex-col">
-            <div className="flex flex-1 flex-col justify-center gap-5 py-4 sm:py-8">
+            <div className="flex flex-1 flex-col justify-start gap-5 pt-4 sm:pt-8 lg:pt-[calc(2rem+1.25rem+2px)] xl:pt-[calc(2rem+1.5rem+2px)]">
               {hero}
               <details className="min-w-0 lg:motion-safe:hidden">
                 <summary className="cursor-pointer font-mono text-xs uppercase tracking-[0.2em] text-tint">
@@ -467,7 +489,7 @@ export function ScrollStory({
             <div data-hero-south>
               <ScrollCue className="lg:motion-safe:hidden" />
               <div data-value-band>
-                <ValueBand stacked className="pb-2 sm:pb-5" />
+                <ValueBand className="pb-2 sm:pb-5" />
               </div>
             </div>
           </div>
@@ -517,6 +539,7 @@ export function ScrollStory({
                     </div>
                   ))}
                 </div>
+                {chapter.clients ? <McpClients /> : null}
                 {chapter.closing ? (
                   <p className="max-w-prose text-[15px] leading-relaxed text-muted-foreground">
                     {chapter.closing}
@@ -573,32 +596,36 @@ export function ScrollStory({
             style={{ top: "var(--story-chrome-h)" }}
           >
             <div className="flex min-h-0 flex-1 flex-col pt-4 sm:pt-8">
-              <div className="grid min-h-0 flex-1 [&>*]:h-full [&>*]:[grid-area:1/1]">
-                <div
-                  data-hero-terminal
-                  className={cn(
-                    "min-h-0 min-w-0 [&>*]:h-full transition-opacity duration-500",
-                    active === -1
-                      ? "opacity-100"
-                      : "pointer-events-none opacity-0",
-                  )}
-                >
-                  {terminal}
-                </div>
-                {CHAPTERS.map((chapter, index) => (
+              <div
+                data-terminal-shell
+                className={cn(TERMINAL_SHELL_CLASS, "h-full min-h-0 flex-1")}
+              >
+                {active === -1 ? (
                   <div
-                    key={chapter.eyebrow}
-                    data-chapter-terminal={index}
-                    className={cn(
-                      "flex min-h-0 min-w-0 flex-col transition-opacity duration-500",
-                      active === index
-                        ? "opacity-100"
-                        : "pointer-events-none opacity-0",
-                    )}
+                    key="hero"
+                    data-hero-terminal
+                    data-terminal-swap={swap}
+                    className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
                   >
-                    <ChapterTerminal chapter={chapter} className="h-full" />
+                    {cloneElement(terminal, {
+                      plain: true,
+                      className: "h-full",
+                    })}
                   </div>
-                ))}
+                ) : (
+                  <div
+                    key={active}
+                    data-chapter-terminal={active}
+                    data-terminal-swap={swap}
+                    className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
+                  >
+                    <ChapterTerminal
+                      chapter={CHAPTERS[active]!}
+                      plain
+                      className="h-full"
+                    />
+                  </div>
+                )}
               </div>
             </div>
             <div
@@ -612,10 +639,7 @@ export function ScrollStory({
         </div>
       </div>
 
-      {/* Footer, plus the one-liners on small screens where the hero strip
-          only showed titles. */}
       <div data-story-end>
-        <ValueBand className="lg:hidden pb-3" />
         <SiteFooter className="px-0" />
       </div>
     </section>

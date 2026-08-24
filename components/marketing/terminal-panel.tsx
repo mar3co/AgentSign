@@ -33,26 +33,27 @@ export function TerminalFooter({ children }: { children: ReactNode }) {
   );
 }
 
+export const TERMINAL_SHELL_CLASS =
+  "flex min-h-0 min-w-0 flex-col overflow-y-auto rounded-lg bg-terminal p-5 font-mono text-[13px] leading-[1.65] text-[#eef3fc] xl:p-6 xl:text-[14px] xl:leading-[1.7]";
+
 export function TerminalPanel({
   eyebrow,
   address,
   footer,
   className,
   children,
+  plain,
 }: {
   eyebrow: string;
   address?: string;
   footer?: ReactNode;
   className?: string;
   children: ReactNode;
+  /** Skip the dark chrome; the home sticky column owns one shared shell. */
+  plain?: boolean;
 }) {
-  return (
-    <div
-      className={cn(
-        "flex min-h-0 min-w-0 flex-col gap-4 overflow-y-auto rounded-lg bg-terminal p-5 font-mono text-[13px] leading-[1.65] text-[#eef3fc] xl:gap-5 xl:p-6 xl:text-[14px] xl:leading-[1.7]",
-        className,
-      )}
-    >
+  const inner = (
+    <>
       <div className="flex shrink-0 flex-wrap items-baseline justify-between gap-2">
         <p className="text-[11px] uppercase tracking-[0.22em] text-[#9bb6f0]">
           {eyebrow}
@@ -68,6 +69,25 @@ export function TerminalPanel({
           {footer}
         </div>
       ) : null}
+    </>
+  );
+
+  if (plain) {
+    return (
+      <div
+        className={cn(
+          "flex min-h-0 min-w-0 flex-1 flex-col gap-4 xl:gap-5",
+          className,
+        )}
+      >
+        {inner}
+      </div>
+    );
+  }
+
+  return (
+    <div className={cn(TERMINAL_SHELL_CLASS, "gap-4 xl:gap-5", className)}>
+      {inner}
     </div>
   );
 }

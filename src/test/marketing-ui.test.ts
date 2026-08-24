@@ -8,6 +8,10 @@ import {
   TerminalPanel,
 } from "../../components/marketing/terminal-panel.js";
 import { TwoReader } from "../../components/marketing/two-reader.js";
+import {
+  MCP_CLIENT_NAMES,
+  McpClients,
+} from "../../components/marketing/mcp-clients.js";
 import { ValueBand } from "../../components/marketing/value-band.js";
 
 afterEach(() => cleanup());
@@ -63,20 +67,52 @@ describe("TwoReader", () => {
   });
 });
 
+describe("McpClients", () => {
+  it("names the popular MCP hosts without claiming a partnership", () => {
+    const { container } = render(createElement(McpClients));
+    expect(screen.getByText("Works over MCP")).toBeTruthy();
+    expect(screen.getByLabelText("Works over MCP")).toBeTruthy();
+    for (const name of MCP_CLIENT_NAMES) {
+      expect(screen.getByText(name)).toBeTruthy();
+    }
+    expect(MCP_CLIENT_NAMES).toEqual([
+      "Claude",
+      "ChatGPT",
+      "Grok",
+      "Cursor",
+      "Copilot",
+      "Gemini",
+    ]);
+    expect(container.textContent).not.toMatch(/partner|official integration/i);
+    expect(container.textContent).not.toContain("—");
+  });
+
+  it("drops the eyebrow when compact", () => {
+    const { container } = render(createElement(McpClients, { compact: true }));
+    expect(container.querySelector("[data-mcp-clients]")?.getAttribute("data-mcp-clients")).toBe(
+      "compact",
+    );
+    expect(screen.queryByText("Works over MCP")).toBeNull();
+    expect(screen.getByLabelText("Works over MCP")).toBeTruthy();
+    expect(screen.getByText("Claude")).toBeTruthy();
+  });
+});
+
 describe("ValueBand", () => {
   it("renders the three locked value props", () => {
     render(createElement(ValueBand));
     expect(screen.getByText("Always free, open source")).toBeTruthy();
-    expect(screen.getByText("Team plans, no per-seat pricing")).toBeTruthy();
+    expect(screen.getByText("No per-seat pricing")).toBeTruthy();
     expect(screen.getByText("For humans and agents alike")).toBeTruthy();
-    expect(screen.getByText(/Apache-2.0/)).toBeTruthy();
+    expect(screen.queryByText(/Apache-2.0/)).toBeNull();
+    expect(screen.queryByText(/self-host/i)).toBeNull();
+    expect(screen.queryByText(/one pro price/i)).toBeNull();
+    expect(screen.queryByText(/people sign by hand/i)).toBeNull();
   });
 
-  it("stacks in the left column and keeps one-liners until xl", () => {
-    const { container } = render(createElement(ValueBand, { stacked: true }));
-    const body = screen.getByText(/Apache-2.0/);
-    expect(body.className).toContain("hidden");
-    expect(body.className).toContain("xl:block");
+  it("is three titles, stacked, with no second lines", () => {
+    const { container } = render(createElement(ValueBand));
     expect(container.firstElementChild?.className).toContain("grid-cols-1");
+    expect(container.querySelectorAll("p").length).toBe(3);
   });
 });
