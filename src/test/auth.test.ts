@@ -210,6 +210,7 @@ describe("login", () => {
     expect(html).toContain("next=");
     expect(html).toContain("/login/github");
     expect(html).toMatch(/Email me a link/i);
+    expect(html).toMatch(/Sign in with passkey/i);
     expect(html).toMatch(/<h1[^>]*>Log in</);
   });
 

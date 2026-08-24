@@ -39,6 +39,7 @@ import { cn } from "@/lib/utils";
 const EXTRA_TITLES: Array<[prefix: string, title: string]> = [
   ["/team/accept", "Team"],
   ["/oauth", "Authorize"],
+  ["/settings/passkeys", "Passkeys"],
 ];
 
 function isActive(pathname: string, href: string): boolean {

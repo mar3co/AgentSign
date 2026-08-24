@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronsUpDown, LogIn, LogOut } from "lucide-react";
+import { ChevronsUpDown, KeyRound, LogIn, LogOut } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -119,6 +119,10 @@ export function NavUser() {
               </DropdownMenuLabel>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
+            <DropdownMenuItem render={<a href="/settings/passkeys" />}>
+              <KeyRound />
+              Passkeys
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={() => void logOut()}>
               <LogOut />
               Log out

@@ -105,6 +105,146 @@ export async function getLoginOAuth(
   return new Response(null, { status: 302, headers });
 }
 
+function passkeyUnavailable(): Response {
+  return jsonError(400, "Passkeys are not available", "passkey_disabled");
+}
+
+function jsonPasskey(item: {
+  id: string;
+  friendlyName: string | null;
+  createdAt: string;
+  lastUsedAt: string | null;
+}) {
+  return {
+    id: item.id,
+    friendly_name: item.friendlyName,
+    created_at: item.createdAt,
+    last_used_at: item.lastUsedAt,
+  };
+}
+
+export async function postPasskeyOptions(): Promise<Response> {
+  const start = getAuth().startPasskeyAuthentication;
+  if (!start) return passkeyUnavailable();
+  const result = await start();
+  if (!result.ok) return jsonError(400, result.error, result.code);
+  return Response.json({
+    challenge_id: result.challenge.challengeId,
+    options: result.challenge.options,
+  });
+}
+
+export async function postPasskeySession(req: Request): Promise<Response> {
+  let body: { challenge_id?: string; credential?: unknown; next?: string };
+  try {
+    body = await req.json();
+  } catch {
+    return jsonError(400, "Invalid JSON", "invalid_request");
+  }
+  const challengeId = String(body.challenge_id ?? "").trim();
+  if (!challengeId || body.credential == null) {
+    return jsonError(400, "Passkey response is required", "invalid_request");
+  }
+  const verify = getAuth().verifyPasskeyAuthentication;
+  if (!verify) return passkeyUnavailable();
+  const result = await verify({
+    challengeId,
+    credential: body.credential,
+  });
+  if (!result.ok) {
+    const status = result.code === "unauthorized" ? 401 : 400;
+    return jsonError(status, result.error, result.code);
+  }
+  const db = requireDb();
+  await ensureAccount(db, result.user);
+  await claimSends(db, result.user.id, result.user.email);
+  return new Response(JSON.stringify({ ok: true, next: safeNext(body.next) }), {
+    status: 200,
+    headers: {
+      "content-type": "application/json",
+      "set-cookie": result.cookie,
+    },
+  });
+}
+
+export async function postPasskeyRegisterOptions(req: Request): Promise<Response> {
+  const auth = getAuth();
+  const cookie = req.headers.get("cookie");
+  const user = await auth.userFromCookie(cookie);
+  if (!user) return jsonError(401, "Unauthorized", "unauthorized");
+  if (!auth.startPasskeyRegistration) return passkeyUnavailable();
+  const result = await auth.startPasskeyRegistration(cookie);
+  if (!result.ok) {
+    const status = result.code === "unauthorized" ? 401 : 400;
+    return jsonError(status, result.error, result.code);
+  }
+  return Response.json({
+    challenge_id: result.challenge.challengeId,
+    options: result.challenge.options,
+  });
+}
+
+export async function postPasskeyRegister(req: Request): Promise<Response> {
+  let body: { challenge_id?: string; credential?: unknown };
+  try {
+    body = await req.json();
+  } catch {
+    return jsonError(400, "Invalid JSON", "invalid_request");
+  }
+  const challengeId = String(body.challenge_id ?? "").trim();
+  if (!challengeId || body.credential == null) {
+    return jsonError(400, "Passkey response is required", "invalid_request");
+  }
+  const auth = getAuth();
+  const cookie = req.headers.get("cookie");
+  const user = await auth.userFromCookie(cookie);
+  if (!user) return jsonError(401, "Unauthorized", "unauthorized");
+  if (!auth.verifyPasskeyRegistration) return passkeyUnavailable();
+  const result = await auth.verifyPasskeyRegistration({
+    cookieHeader: cookie,
+    challengeId,
+    credential: body.credential,
+  });
+  if (!result.ok) {
+    const status = result.code === "unauthorized" ? 401 : 400;
+    return jsonError(status, result.error, result.code);
+  }
+  return Response.json({ ok: true, passkey: jsonPasskey(result.passkey) });
+}
+
+export async function getPasskeys(req: Request): Promise<Response> {
+  const auth = getAuth();
+  const cookie = req.headers.get("cookie");
+  const user = await auth.userFromCookie(cookie);
+  if (!user) return jsonError(401, "Unauthorized", "unauthorized");
+  if (!auth.listPasskeys) return passkeyUnavailable();
+  const result = await auth.listPasskeys(cookie);
+  if (!result.ok) {
+    const status = result.code === "unauthorized" ? 401 : 400;
+    return jsonError(status, result.error, result.code);
+  }
+  return Response.json({ passkeys: result.passkeys.map(jsonPasskey) });
+}
+
+export async function deletePasskey(
+  req: Request,
+  passkeyId: string,
+): Promise<Response> {
+  const id = passkeyId.trim();
+  if (!id) return jsonError(400, "Passkey is required", "invalid_request");
+  const auth = getAuth();
+  const cookie = req.headers.get("cookie");
+  const user = await auth.userFromCookie(cookie);
+  if (!user) return jsonError(401, "Unauthorized", "unauthorized");
+  if (!auth.deletePasskey) return passkeyUnavailable();
+  const result = await auth.deletePasskey({ cookieHeader: cookie, passkeyId: id });
+  if (!result.ok) {
+    const status = result.code === "unauthorized" ? 401 : 400;
+    return jsonError(status, result.error, result.code);
+  }
+  return Response.json({ ok: true });
+}
+
 export async function getAuthCallback(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const code = url.searchParams.get("code");

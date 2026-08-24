@@ -1,6 +1,12 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import {
+  createPasskey,
+  getPasskey,
+  isWebAuthnCancel,
+  supportsWebAuthn,
+} from "@/src/lib/auth/webauthn";
 import { LinkButton } from "@/components/link-button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -13,6 +19,7 @@ export function LoginForm({ email, next }: { email: string; next: string }) {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [passkeyOffer, setPasskeyOffer] = useState<string | null>(null);
 
   const oauthNext = next ? `?next=${encodeURIComponent(next)}` : "";
 
@@ -36,7 +43,11 @@ export function LoginForm({ email, next }: { email: string; next: string }) {
       }
       if (after === "magic") setMessage("Check your email for a link.");
       else if (after === "signup") setMessage("Confirm your email, then log in.");
-      else window.location.href = json?.next || "/";
+      else if (supportsWebAuthn()) {
+        setPasskeyOffer(json?.next || "/");
+      } else {
+        window.location.href = json?.next || "/";
+      }
     } catch {
       setError("Could not continue.");
     } finally {
@@ -66,6 +77,118 @@ export function LoginForm({ email, next }: { email: string; next: string }) {
     } else {
       void post("/login/session", { email: value, next }, "magic");
     }
+  }
+
+  async function signInPasskey() {
+    if (!supportsWebAuthn()) {
+      setError("This browser does not support passkeys.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const start = await fetch("/login/passkey/options", { method: "POST" });
+      const startJson = (await start.json().catch(() => null)) as {
+        error?: string;
+        challenge_id?: string;
+        options?: Record<string, unknown>;
+      } | null;
+      if (!start.ok || !startJson?.challenge_id || !startJson.options) {
+        setError(startJson?.error ?? "Could not continue.");
+        return;
+      }
+      const credential = await getPasskey(startJson.options);
+      const res = await fetch("/login/passkey/session", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          challenge_id: startJson.challenge_id,
+          credential,
+          next,
+        }),
+      });
+      const json = (await res.json().catch(() => null)) as {
+        error?: string;
+        next?: string;
+      } | null;
+      if (!res.ok) {
+        setError(json?.error ?? "Could not continue.");
+        return;
+      }
+      window.location.href = json?.next || "/";
+    } catch (e) {
+      if (!isWebAuthnCancel(e)) setError("Could not continue.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function enrollThenGo(nextUrl: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      const start = await fetch("/auth/passkeys/options", { method: "POST" });
+      if (start.ok) {
+        const startJson = (await start.json()) as {
+          challenge_id: string;
+          options: Record<string, unknown>;
+        };
+        const credential = await createPasskey(startJson.options);
+        await fetch("/auth/passkeys", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            challenge_id: startJson.challenge_id,
+            credential,
+          }),
+        });
+      }
+    } catch {
+      // Cancel or failure should not block getting into the app.
+    } finally {
+      window.location.href = nextUrl;
+    }
+  }
+
+  if (passkeyOffer) {
+    return (
+      <Card>
+        <CardContent className="flex flex-col gap-4">
+          {error ? (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          ) : (
+            <Alert>
+              <AlertDescription>
+                Save a passkey so the next sign-in can use Face ID, Touch ID, or a
+                security key.
+              </AlertDescription>
+            </Alert>
+          )}
+          <Button
+            className="h-11 w-full text-base"
+            type="button"
+            disabled={busy}
+            onClick={() => void enrollThenGo(passkeyOffer)}
+          >
+            Save a passkey
+          </Button>
+          <Button
+            className="h-11 w-full text-base"
+            type="button"
+            variant="ghost"
+            disabled={busy}
+            onClick={() => {
+              window.location.href = passkeyOffer;
+            }}
+          >
+            Not now
+          </Button>
+        </CardContent>
+      </Card>
+    );
   }
 
   return (
@@ -137,6 +260,15 @@ export function LoginForm({ email, next }: { email: string; next: string }) {
           <p className="text-center font-mono text-[0.7rem] uppercase tracking-[0.2em] text-muted-foreground">
             or
           </p>
+          <Button
+            className="h-11 w-full text-base"
+            type="button"
+            variant="outline"
+            disabled={busy}
+            onClick={() => void signInPasskey()}
+          >
+            Sign in with passkey
+          </Button>
           <LinkButton
             href={`/login/google${oauthNext}`}
             variant="outline"
