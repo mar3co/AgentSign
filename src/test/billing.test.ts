@@ -6,6 +6,10 @@ import { eq } from "drizzle-orm";
 import UpgradePage from "../../app/upgrade/page.js";
 import { POST as postUpgrade } from "../../app/upgrade/checkout/route.js";
 import { POST as postStripe } from "../../app/internal/stripe/route.js";
+import { GET as getBilling } from "../../app/v1/billing/route.js";
+import { POST as postPortal } from "../../app/v1/billing/portal/route.js";
+import { PUT as putDomain } from "../../app/v1/billing/domain/route.js";
+import { POST as postVerifyDomain } from "../../app/v1/billing/domain/verify/route.js";
 import { POST as postLogin } from "../../app/login/session/route.js";
 import { GET as getAuthCallback } from "../../app/auth/callback/route.js";
 import { accounts, documents, signers as signersTable } from "../db/schema.js";
@@ -365,6 +369,191 @@ describe("Stripe Checkout Pro", () => {
         }),
       );
       expect(res.status).toBe(200);
+    });
+  });
+});
+
+const PORTAL_URL = "https://billing.stripe.com/p/session/test";
+
+describe("billing usage, portal, and domain", () => {
+  it("GET /v1/billing reports send usage against the free cap", async () => {
+    await withStripeEnv(async () => {
+      const db = await createTestDb();
+      const fake = createFakeAuth();
+      const now = new Date("2026-08-15T00:00:00Z");
+      setDeps({
+        db,
+        auth: fake.adapter,
+        now: () => now,
+        stripe: {
+          createCheckout: async () => ({ url: CHECKOUT_URL }),
+          constructEvent: () => ({ type: "unknown", data: { object: {} } }),
+        },
+      });
+      const cookie = await magicCookie("shop@example.com");
+      const userId = fake.userFor("shop@example.com").id;
+      await db.insert(documents).values({
+        title: "One",
+        senderEmail: "shop@example.com",
+        userId,
+        status: "pending",
+        expiresAt: now,
+        shredAt: now,
+        createdAt: now,
+      });
+      const res = await getBilling(
+        new Request("http://sign.test/v1/billing", { headers: { cookie } }),
+      );
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as {
+        plan: string;
+        entitled: boolean;
+        usage: {
+          sends: { used: number; limit: number | null; window_days: number };
+          seats: { used: number; limit: number };
+        };
+        payment_method: unknown;
+        domain: { hostname: string | null; verified: boolean; cname_target: string };
+      };
+      expect(json.plan).toBe("free");
+      expect(json.entitled).toBe(false);
+      expect(json.usage.sends.used).toBe(1);
+      expect(json.usage.sends.limit).toBe(20);
+      expect(json.usage.sends.window_days).toBe(30);
+      expect(json.usage.seats.used).toBe(1);
+      expect(json.payment_method).toBeNull();
+      expect(json.domain.hostname).toBeNull();
+      expect(json.domain.verified).toBe(false);
+      expect(json.domain.cname_target).toBeTruthy();
+    });
+  });
+
+  it("Pro portal redirects to Stripe Billing Portal", async () => {
+    await withStripeEnv(async () => {
+      const db = await createTestDb();
+      const fake = createFakeAuth();
+      let portalCustomer: string | undefined;
+      setDeps({
+        db,
+        auth: fake.adapter,
+        stripe: {
+          createCheckout: async () => ({ url: CHECKOUT_URL }),
+          constructEvent: () => ({ type: "unknown", data: { object: {} } }),
+          createBillingPortal: async (params: { customer: string }) => {
+            portalCustomer = params.customer;
+            return { url: PORTAL_URL };
+          },
+          getDefaultPaymentMethod: async () => ({ brand: "visa", last4: "4242" }),
+        },
+      });
+      const cookie = await magicCookie("shop@example.com");
+      const userId = fake.userFor("shop@example.com").id;
+      await db
+        .update(accounts)
+        .set({ plan: "pro", stripeCustomerId: "cus_test_123" })
+        .where(eq(accounts.userId, userId));
+      const res = await postPortal(
+        new Request("http://sign.test/v1/billing/portal", {
+          method: "POST",
+          headers: { cookie },
+        }),
+      );
+      expect(res.status).toBe(303);
+      expect(res.headers.get("location")).toBe(PORTAL_URL);
+      expect(portalCustomer).toBe("cus_test_123");
+    });
+  });
+
+  it("free owner cannot open the portal or set a domain", async () => {
+    await withStripeEnv(async () => {
+      const db = await createTestDb();
+      const fake = createFakeAuth();
+      setDeps({
+        db,
+        auth: fake.adapter,
+        stripe: {
+          createCheckout: async () => ({ url: CHECKOUT_URL }),
+          constructEvent: () => ({ type: "unknown", data: { object: {} } }),
+        },
+      });
+      const cookie = await magicCookie("shop@example.com");
+      const portal = await postPortal(
+        new Request("http://sign.test/v1/billing/portal", {
+          method: "POST",
+          headers: { cookie },
+        }),
+      );
+      expect(portal.status).toBe(403);
+      const domain = await putDomain(
+        new Request("http://sign.test/v1/billing/domain", {
+          method: "PUT",
+          headers: { cookie, "content-type": "application/json" },
+          body: JSON.stringify({ hostname: "sign.acme.com" }),
+        }),
+      );
+      expect(domain.status).toBe(403);
+    });
+  });
+
+  it("Pro owner saves a pending domain and verifies on matching CNAME", async () => {
+    await withStripeEnv(async () => {
+      const db = await createTestDb();
+      const fake = createFakeAuth();
+      const prevApp = process.env.APP_URL;
+      process.env.APP_URL = "https://agentsign.co";
+      resetEnvCache();
+      setDeps({
+        db,
+        auth: fake.adapter,
+        stripe: {
+          createCheckout: async () => ({ url: CHECKOUT_URL }),
+          constructEvent: () => ({ type: "unknown", data: { object: {} } }),
+        },
+        resolveCname: async () => ["agentsign.co"],
+      });
+      try {
+        const cookie = await magicCookie("shop@example.com");
+        const userId = fake.userFor("shop@example.com").id;
+        await db
+          .update(accounts)
+          .set({ plan: "pro" })
+          .where(eq(accounts.userId, userId));
+        const put = await putDomain(
+          new Request("http://sign.test/v1/billing/domain", {
+            method: "PUT",
+            headers: { cookie, "content-type": "application/json" },
+            body: JSON.stringify({ hostname: "sign.acme.com" }),
+          }),
+        );
+        expect(put.status).toBe(200);
+        const pending = (await put.json()) as {
+          hostname: string;
+          verified: boolean;
+          cname_target: string;
+        };
+        expect(pending.hostname).toBe("sign.acme.com");
+        expect(pending.verified).toBe(false);
+        expect(pending.cname_target).toBe("agentsign.co");
+        const verify = await postVerifyDomain(
+          new Request("http://sign.test/v1/billing/domain/verify", {
+            method: "POST",
+            headers: { cookie },
+          }),
+        );
+        expect(verify.status).toBe(200);
+        const done = (await verify.json()) as { verified: boolean };
+        expect(done.verified).toBe(true);
+        const [row] = await db
+          .select()
+          .from(accounts)
+          .where(eq(accounts.userId, userId));
+        expect(row?.customDomain).toBe("sign.acme.com");
+        expect(row?.customDomainVerifiedAt).toBeTruthy();
+      } finally {
+        if (prevApp === undefined) delete process.env.APP_URL;
+        else process.env.APP_URL = prevApp;
+        resetEnvCache();
+      }
     });
   });
 });

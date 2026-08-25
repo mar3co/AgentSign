@@ -48,7 +48,8 @@ describe("AppShell", () => {
     expect(href(/^send$/i)).toBe("/send");
     expect(href(/^documents$/i)).toBe("/documents");
     expect(href(/^templates$/i)).toBe("/templates");
-    expect(href(/^branding$/i)).toBe("/settings/branding");
+    expect(href(/^settings$/i)).toBe("/settings");
+    expect(screen.queryByRole("link", { name: /^branding$/i })).toBeNull();
     expect(href(/^team$/i)).toBe("/team");
     expect(href(/^agents$/i)).toBe("/agents");
     expect(href(/^docs$/i)).toBe("/docs");
@@ -64,6 +65,25 @@ describe("AppShell", () => {
         .getAllByRole("link", { name: /^templates$/i })[0]
         ?.hasAttribute("data-active"),
     ).toBe(false);
+  });
+
+  it("sidebar mark sits on a wax tile with a one-color glyph", () => {
+    render(createElement(AppShell, null, "content"));
+    const lockup = screen.getByRole("link", { name: /^agentsign$/i });
+    const mark = lockup.querySelector("svg");
+    expect(mark?.parentElement?.className).toContain("bg-brand-wax");
+    expect(mark?.querySelector("rect[fill='var(--brand-wax)']")).toBeNull();
+  });
+
+  it("has no color band; Send a PDF is the wax CTA on a quiet canvas", () => {
+    const { container } = render(createElement(AppShell, null, "content"));
+    expect(container.querySelector(".app-band")).toBeNull();
+    expect(container.querySelector("header")?.className).not.toContain(
+      "text-primary-foreground",
+    );
+    expect(
+      screen.getByRole("link", { name: /send a pdf/i }).className,
+    ).toContain("bg-brand-wax");
   });
 });
 

@@ -19,6 +19,7 @@ import { teamForUser } from "../lib/team.js";
 import { getDeps, storeUnavailableResponse } from "../lib/deps.js";
 import { flagOn } from "../lib/flags.js";
 import { loadBrand } from "../lib/branding.js";
+import { loadSigningHost, publicSignUrl } from "../lib/signing-url.js";
 import {
   brandMailAttachments,
   createMailer,
@@ -221,11 +222,12 @@ async function inviteFirstSigner(
     .set({ tokenHash: token.hash, tokenEnc: sealWebhookSecret(token.raw) })
     .where(eq(signersTable.id, first.id));
   const brand = await loadBrand(db, document.userId, requireStore());
+  const host = await loadSigningHost(db, document.userId);
   try {
     await mailer.sendMail({
       to: first.email,
       ...inviteEmail({
-        signUrl,
+        signUrl: publicSignUrl(token.raw, host),
         senderEmail: document.senderEmail,
         title: document.title,
         expiresAt: document.expiresAt,

@@ -39,7 +39,6 @@ import { cn } from "@/lib/utils";
 const EXTRA_TITLES: Array<[prefix: string, title: string]> = [
   ["/team/accept", "Team"],
   ["/oauth", "Authorize"],
-  ["/settings/passkeys", "Passkeys"],
 ];
 
 function isActive(pathname: string, href: string): boolean {
@@ -58,18 +57,11 @@ function pageTitle(pathname: string): string {
   return currentNav(pathname)?.label ?? "Documents";
 }
 
-/* The header sits on the primary band, so the trigger inverts: primary-
-   foreground surface, primary glyph. */
-function BandSidebarTrigger() {
+function AppSidebarTrigger() {
   const { open, isMobile, openMobile, toggleSidebar } = useSidebar();
   const isOpen = isMobile ? openMobile : open;
   return (
-    <Button
-      variant="outline"
-      size="icon-lg"
-      onClick={toggleSidebar}
-      className="border-primary-foreground bg-primary-foreground text-primary shadow-none hover:bg-primary-foreground/90 hover:text-primary"
-    >
+    <Button variant="ghost" size="icon-lg" onClick={toggleSidebar}>
       {isOpen ? <PanelLeftClose /> : <PanelRightClose />}
       <span className="sr-only">Toggle sidebar</span>
     </Button>
@@ -87,11 +79,9 @@ export function AppShell({
   const subtitle = currentNav(pathname)?.subtitle;
   return (
     <div data-surface="app" className="contents">
-      {/* shadcn studio application-shell-05: an indigo band across the top,
-         a floating card sidebar, and content surfaces overlapping the band on
-         a muted canvas. The band is part of the shell's background (.app-band
-         in globals.css) — see the comment there for why. */}
-      <div className="app-band relative flex min-h-dvh w-full bg-muted">
+      {/* Floating sidebar and content cards on one muted canvas. No color
+         band: wax stays on the mark tile and the Send CTA. */}
+      <div className="relative flex min-h-dvh w-full bg-muted">
         <SidebarProvider
           className="bg-transparent"
           style={
@@ -110,8 +100,8 @@ export function AppShell({
                     className="gap-2.5"
                     render={<a href="/dashboard" />}
                   >
-                    <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-                      <AgentSignMark className="size-4" />
+                    <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand-wax text-primary-foreground">
+                      <AgentSignMark className="size-4" mono />
                     </div>
                     {/* Lockup: the mark carries the wax pixel, so no full-stop. */}
                     <span className="font-sans text-xl font-semibold">
@@ -163,16 +153,16 @@ export function AppShell({
             <SidebarRail />
           </Sidebar>
           <div className="z-1 flex min-w-0 flex-1 flex-col py-6">
-            <header className="text-primary-foreground">
+            <header>
               <div className="flex items-center justify-between gap-6 px-4 sm:px-6">
                 <div className="flex min-w-0 items-center gap-4">
-                  <BandSidebarTrigger />
+                  <AppSidebarTrigger />
                   <div className="min-w-0">
                     <h1 className="truncate text-lg font-semibold">
                       {pageTitle(pathname)}
                     </h1>
                     {subtitle ? (
-                      <p className="hidden truncate text-sm text-primary-foreground/60 sm:block">
+                      <p className="hidden truncate text-sm text-muted-foreground sm:block">
                         {subtitle}
                       </p>
                     ) : null}
@@ -182,10 +172,13 @@ export function AppShell({
                   className="hidden w-full max-w-72 xl:block"
                   hotkey
                   trigger={
-                    <Button className="w-full justify-start bg-primary-foreground/15 font-normal text-primary-foreground/80 shadow-none hover:bg-primary-foreground/25">
+                    <Button
+                      variant="outline"
+                      className="w-full justify-start font-normal text-muted-foreground shadow-none"
+                    >
                       <Search className="size-4" />
                       <span>Type to search...</span>
-                      <kbd className="ml-auto rounded border border-primary-foreground/25 px-1.5 font-sans text-xs text-primary-foreground/60">
+                      <kbd className="ml-auto rounded border border-border px-1.5 font-sans text-xs text-muted-foreground">
                         ⌘K
                       </kbd>
                     </Button>
@@ -195,7 +188,7 @@ export function AppShell({
                   <SearchDialog
                     className="block xl:hidden"
                     trigger={
-                      <Button variant="ghost" size="icon-lg" className="hover:bg-primary-foreground/15 hover:text-primary-foreground">
+                      <Button variant="ghost" size="icon-lg">
                         <Search />
                         <span className="sr-only">Search</span>
                       </Button>
@@ -203,7 +196,11 @@ export function AppShell({
                   />
                   <ActivityDialog
                     trigger={
-                      <Button variant="ghost" size="icon-lg" className="hover:bg-primary-foreground/15 hover:text-primary-foreground max-sm:hidden">
+                      <Button
+                        variant="ghost"
+                        size="icon-lg"
+                        className="max-sm:hidden"
+                      >
                         <Activity />
                         <span className="sr-only">Activity</span>
                       </Button>
@@ -211,7 +208,11 @@ export function AppShell({
                   />
                   <NotificationDropdown
                     trigger={(unread) => (
-                      <Button variant="ghost" size="icon-lg" className="relative hover:bg-primary-foreground/15 hover:text-primary-foreground">
+                      <Button
+                        variant="ghost"
+                        size="icon-lg"
+                        className="relative"
+                      >
                         <Bell />
                         {unread > 0 ? (
                           <span className="bg-destructive absolute top-[14%] right-[23%] size-2 rounded-full" />
@@ -224,7 +225,7 @@ export function AppShell({
                     <LinkButton
                       href="/send"
                       size="sm"
-                      className="ml-1.5 border-primary-foreground bg-primary-foreground text-primary shadow-none hover:bg-primary-foreground/90 hover:text-primary"
+                      className="ml-1.5 border-transparent bg-brand-wax text-primary-foreground shadow-none hover:bg-brand-wax/90 hover:text-primary-foreground"
                     >
                       <Send className="size-3.5" />
                       <span className="max-sm:sr-only">Send a PDF</span>

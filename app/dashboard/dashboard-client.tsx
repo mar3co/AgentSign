@@ -66,6 +66,7 @@ const COMPLETED_SERIES = [
 export function DashboardClient() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [documents, setDocuments] = useState<DocumentListItem[] | null>(null);
+  const [timeZone, setTimeZone] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { items: activity } = useActivity();
 
@@ -73,9 +74,10 @@ export function DashboardClient() {
     let cancelled = false;
     (async () => {
       try {
-        const [statsRes, envRes] = await Promise.all([
+        const [statsRes, envRes, wsRes] = await Promise.all([
           fetch("/v1/stats", { credentials: "include" }),
           fetch("/v1/documents", { credentials: "include" }),
+          fetch("/v1/workspace", { credentials: "include" }),
         ]);
         if (statsRes.status === 401 || envRes.status === 401) {
           window.location.href = `/login?next=${encodeURIComponent("/dashboard")}`;
@@ -98,6 +100,10 @@ export function DashboardClient() {
               signers: e.signers ?? [],
             })),
           );
+          if (wsRes.ok) {
+            const ws = (await wsRes.json()) as { timezone?: string | null };
+            if (ws.timezone) setTimeZone(ws.timezone);
+          }
         }
       } catch {
         if (!cancelled) setError("Could not load the dashboard.");
@@ -201,7 +207,7 @@ export function DashboardClient() {
           </p>
         ) : (
           <div className="border-t">
-            <DocumentMiniTable documents={recent} limit={5} />
+            <DocumentMiniTable documents={recent} limit={5} timeZone={timeZone} />
           </div>
         )}
       </Card>

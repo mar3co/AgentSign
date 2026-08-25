@@ -1,12 +1,7 @@
-import { PageShell } from "@/components/page-shell";
-import { PasskeysClient } from "./passkeys-client";
+import { redirect } from "next/navigation";
 
 export const runtime = "nodejs";
 
-export default function PasskeysSettingsPage() {
-  return (
-    <PageShell variant="app">
-      <PasskeysClient />
-    </PageShell>
-  );
+export default function PasskeysSettingsRedirect() {
+  redirect("/settings/security");
 }

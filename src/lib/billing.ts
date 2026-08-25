@@ -15,9 +15,18 @@ export type StripeEvent = {
   data: { object: Record<string, unknown> };
 };
 
+export type BillingPortalParams = {
+  customer: string;
+  return_url: string;
+};
+
+export type CardOnFile = { brand: string; last4: string };
+
 export type StripeAdapter = {
   createCheckout(params: CheckoutCreateParams): Promise<{ url: string }>;
   constructEvent(payload: string, header: string, secret: string): StripeEvent;
+  createBillingPortal?(params: BillingPortalParams): Promise<{ url: string }>;
+  getDefaultPaymentMethod?(customerId: string): Promise<CardOnFile | null>;
 };
 
 let live: StripeAdapter | undefined;
@@ -44,6 +53,20 @@ function createLiveStripe(): StripeAdapter {
         type: event.type,
         data: { object: event.data.object as unknown as Record<string, unknown> },
       };
+    },
+    async createBillingPortal(params) {
+      const session = await client.billingPortal.sessions.create(params);
+      return { url: session.url ?? "" };
+    },
+    async getDefaultPaymentMethod(customerId) {
+      const methods = await client.paymentMethods.list({
+        customer: customerId,
+        type: "card",
+        limit: 1,
+      });
+      const card = methods.data[0]?.card;
+      if (!card?.last4) return null;
+      return { brand: card.brand, last4: card.last4 };
     },
   };
 }

@@ -2,7 +2,18 @@
 import { createElement } from "react";
 import { afterEach, describe, it, expect } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
-import { DocumentsList } from "../../app/documents/documents-list.js";
+import {
+  DocumentsList,
+  formatSentDate,
+} from "../../app/documents/documents-list.js";
+
+describe("formatSentDate", () => {
+  it("uses the workspace timezone when given one", () => {
+    const iso = "2026-01-15T02:00:00.000Z";
+    expect(formatSentDate(iso, "UTC")).toMatch(/Jan 15/);
+    expect(formatSentDate(iso, "America/Los_Angeles")).toMatch(/Jan 14/);
+  });
+});
 
 describe("DocumentsList", () => {
   afterEach(() => {

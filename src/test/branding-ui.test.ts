@@ -4,11 +4,7 @@ import { afterEach, describe, it, expect, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { BrandingClient } from "../../app/settings/branding/branding-client.js";
 import { BrandingForm } from "../../app/settings/branding/branding-form.js";
-import { AppShell } from "../../components/app-shell.js";
-
-vi.mock("next/navigation", () => ({
-  usePathname: () => "",
-}));
+import { SettingsShell } from "../../components/settings-shell.js";
 
 describe("BrandingForm", () => {
   afterEach(() => {
@@ -50,16 +46,21 @@ describe("BrandingForm", () => {
   });
 });
 
-describe("sidebar Branding link", () => {
+describe("settings Branding tab", () => {
   afterEach(() => {
     cleanup();
   });
 
-  it("links Branding to /settings/branding", () => {
-    render(createElement(AppShell, null, "content"));
+  it("links Branding to /settings/branding inside Settings, not the sidebar", () => {
+    render(
+      createElement(SettingsShell, { current: "branding" }, "content"),
+    );
     expect(
-      screen.getAllByRole("link", { name: /^branding$/i })[0]?.getAttribute("href"),
+      screen.getByRole("link", { name: /^branding$/i }).getAttribute("href"),
     ).toBe("/settings/branding");
+    expect(screen.getByRole("link", { name: /^branding$/i }).getAttribute("aria-current")).toBe(
+      "page",
+    );
   });
 });
 

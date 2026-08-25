@@ -104,6 +104,8 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
     expect(openapi.paths["/v1/documents/{id}/attest"]).toBeTruthy();
     expect(openapi.paths["/v1/documents/{id}/reject"]).toBeTruthy();
     expect(openapi.paths["/v1/verify"]).toBeTruthy();
+    expect(openapi.paths["/v1/workspace"]).toBeTruthy();
+    expect(openapi.paths["/v1/billing"]).toBeTruthy();
     const text = await (await getLlms()).text();
     expect(text).toMatch(/send/);
     expect(text).toMatch(/There is no sign/);

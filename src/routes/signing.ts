@@ -11,6 +11,7 @@ import {
 import { getEnv } from "../env.js";
 import { logEvent, type AuditDb } from "../lib/audit.js";
 import { loadBrand, parseLogo } from "../lib/branding.js";
+import { loadSigningHost, publicSignUrl } from "../lib/signing-url.js";
 import { teamForUser } from "../lib/team.js";
 import { getDeps, storeUnavailableResponse } from "../lib/deps.js";
 import {
@@ -522,7 +523,6 @@ export async function inviteNextHumanIfNeeded(
   const mailer = requireMailer();
   const store = requireStore();
   const token = newSigningToken();
-  const signUrl = `/s/${token.raw}`;
   const [slot] = await db
     .update(signersTable)
     .set({ tokenHash: token.hash, tokenEnc: sealWebhookSecret(token.raw) })
@@ -530,8 +530,9 @@ export async function inviteNextHumanIfNeeded(
     .returning();
   if (!slot) return null;
   const brand = await loadBrand(db, document.userId, store);
+  const host = await loadSigningHost(db, document.userId);
   const invite = inviteEmail({
-    signUrl,
+    signUrl: publicSignUrl(token.raw, host),
     senderEmail: document.senderEmail,
     title: document.title,
     expiresAt: document.expiresAt,

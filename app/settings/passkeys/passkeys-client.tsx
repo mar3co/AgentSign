@@ -33,7 +33,7 @@ export function PasskeysClient() {
   async function load() {
     const res = await fetch("/auth/passkeys", { credentials: "include" });
     if (res.status === 401) {
-      window.location.href = `/login?next=${encodeURIComponent("/settings/passkeys")}`;
+      window.location.href = `/login?next=${encodeURIComponent("/settings/security")}`;
       return;
     }
     const json = (await res.json().catch(() => null)) as {

@@ -47,7 +47,16 @@ POST /v1/templates/{id}/send
 GET /v1/team
 POST /v1/team/invites
 DELETE /v1/team/members/{id}
+POST /v1/team/leave
 POST /team/accept
+GET /v1/workspace
+PATCH /v1/workspace
+GET /v1/workspace/export
+POST /v1/workspace/dissolve
+GET /v1/billing
+POST /v1/billing/portal
+PUT /v1/billing/domain
+POST /v1/billing/domain/verify
 
 GET /s/{token}/logo — ceremony token only; not a public account URL.
 

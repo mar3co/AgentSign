@@ -26,7 +26,7 @@ export default async function LoginPage({
           Log in<span className="text-seal">.</span>
         </h1>
         <p className="text-base text-muted-foreground">
-          Magic link, password, passkey, or Google / GitHub.
+          Google, GitHub, a passkey, or email.
         </p>
       </section>
       <LoginForm email={sp.email ?? ""} next={safeNext(sp.next)} />

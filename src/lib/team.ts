@@ -16,6 +16,10 @@ export type Team = {
   entitled: boolean;
   displayName: string | null;
   logoPath: string | null;
+  timezone: string | null;
+  description: string | null;
+  customDomain: string | null;
+  customDomainVerifiedAt: Date | null;
   members: TeamMemberRow[];
   memberUserIds: string[];
 };
@@ -55,6 +59,10 @@ export async function teamForUser(
     entitled: isEntitled(ownerAccount),
     displayName: ownerAccount?.displayName ?? null,
     logoPath: ownerAccount?.logoPath ?? null,
+    timezone: ownerAccount?.timezone ?? null,
+    description: ownerAccount?.description ?? null,
+    customDomain: ownerAccount?.customDomain ?? null,
+    customDomainVerifiedAt: ownerAccount?.customDomainVerifiedAt ?? null,
     members: members.map((m) => ({
       id: m.id,
       email: m.email,
