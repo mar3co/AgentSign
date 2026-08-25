@@ -178,4 +178,20 @@ describe("schema", () => {
       { documentId: env!.id, event: "rejected" },
     ]);
   });
+
+  it("stores workspace timezone and description on accounts", async () => {
+    const db = await createTestDb();
+    const userId = crypto.randomUUID();
+    const [row] = await db
+      .insert(accounts)
+      .values({
+        userId,
+        email: "shop@example.com",
+        timezone: "America/New_York",
+        description: "Repair shop",
+      })
+      .returning();
+    expect(row!.timezone).toBe("America/New_York");
+    expect(row!.description).toBe("Repair shop");
+  });
 });

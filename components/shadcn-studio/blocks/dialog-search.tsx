@@ -3,7 +3,17 @@
 import { useEffect, useState } from "react";
 import type { ReactElement } from "react";
 
-import { ArrowDown, ArrowUp, Files, Search, Undo2 } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  Building2,
+  CreditCard,
+  Files,
+  KeyRound,
+  Palette,
+  Search,
+  Undo2,
+} from "lucide-react";
 import { NAV } from "@/components/app-nav";
 import {
   Dialog,
@@ -31,6 +41,10 @@ type Props = {
 
 const PAGES = [
   ...NAV.map(({ href, label, icon }) => ({ href, label, icon })),
+  { href: "/settings/workspace", label: "Workspace", icon: Building2 },
+  { href: "/settings/branding", label: "Branding", icon: Palette },
+  { href: "/settings/security", label: "Passkeys", icon: KeyRound },
+  { href: "/settings/billing", label: "Billing", icon: CreditCard },
   { href: "/docs", label: "Docs", icon: Files },
 ];
 

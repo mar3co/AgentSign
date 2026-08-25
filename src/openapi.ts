@@ -960,6 +960,110 @@ export const openapi = {
         },
       },
     },
+    "/v1/workspace": {
+      get: {
+        summary: "Get workspace settings",
+        description: "Session or live key. Name, timezone, description, and app id.",
+        security: liveOrSession,
+        responses: {
+          "200": {
+            description: "Workspace",
+            content: { "application/json": { schema: { type: "object" } } },
+          },
+          "401": errorResponse,
+        },
+      },
+      patch: {
+        summary: "Update workspace name, timezone, or description",
+        description: `${liveKeyNote} Owner only. Allowed on Free.`,
+        security: liveOrSession,
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  display_name: { type: ["string", "null"] },
+                  timezone: { type: ["string", "null"] },
+                  description: { type: ["string", "null"] },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Workspace",
+            content: { "application/json": { schema: { type: "object" } } },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+        },
+      },
+    },
+    "/v1/workspace/export": {
+      get: {
+        summary: "Export workspace metadata as JSON",
+        security: liveOrSession,
+        responses: {
+          "200": { description: "Attachment" },
+          "401": errorResponse,
+        },
+      },
+    },
+    "/v1/workspace/dissolve": {
+      post: {
+        summary: "Remove all members; keep documents and login",
+        description: `${liveKeyNote} Owner only.`,
+        security: liveOrSession,
+        responses: {
+          "204": { description: "Dissolved" },
+          "401": errorResponse,
+          "403": errorResponse,
+        },
+      },
+    },
+    "/v1/team/leave": {
+      post: {
+        summary: "Leave the team you belong to",
+        description: "Members only. Owner cannot leave.",
+        security: liveOrSession,
+        responses: {
+          "204": { description: "Left" },
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+        },
+      },
+    },
+    "/v1/billing": {
+      get: {
+        summary: "Plan, usage, and payment method",
+        security: liveOrSession,
+        responses: {
+          "200": {
+            description: "Billing",
+            content: { "application/json": { schema: { type: "object" } } },
+          },
+          "401": errorResponse,
+        },
+      },
+    },
+    "/v1/billing/portal": {
+      post: {
+        summary: "Open Stripe Customer Portal",
+        description: `${liveKeyNote} Pro owner only.`,
+        security: liveOrSession,
+        responses: {
+          "303": { description: "Redirect to Stripe" },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+        },
+      },
+    },
     "/s/{token}/logo": {
       get: {
         summary: "Ceremony logo bytes",

@@ -11,6 +11,7 @@ import {
 import { getEnv } from "../env.js";
 import { logEvent } from "../lib/audit.js";
 import { loadBrand } from "../lib/branding.js";
+import { publicSignUrl } from "../lib/signing-url.js";
 import { getDeps } from "../lib/deps.js";
 import {
   brandMailAttachments,
@@ -193,8 +194,9 @@ export async function verifyDocumentOtp(
   };
   const first = signerRows[0];
   if (first && firstSignUrl) {
+    const token = firstSignUrl.replace(/^\/s\//, "");
     const invite = inviteEmail({
-      signUrl: firstSignUrl,
+      signUrl: publicSignUrl(token),
       senderEmail: document.senderEmail,
       title: document.title,
       expiresAt: document.expiresAt,

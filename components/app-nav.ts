@@ -3,8 +3,8 @@ import {
   Bot,
   Files,
   LayoutDashboard,
-  Palette,
   Send,
+  Settings,
   Users,
 } from "lucide-react";
 
@@ -61,10 +61,10 @@ export const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
         icon: Bot,
       },
       {
-        href: "/settings/branding",
-        label: "Branding",
-        subtitle: "How your documents look to signers.",
-        icon: Palette,
+        href: "/settings",
+        label: "Settings",
+        subtitle: "Email, passkeys, branding, and plan.",
+        icon: Settings,
       },
     ],
   },

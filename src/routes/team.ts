@@ -202,6 +202,28 @@ export async function removeMember(req: Request, id: string): Promise<Response> 
   return new Response(null, { status: 204 });
 }
 
+export async function leaveTeam(req: Request): Promise<Response> {
+  const gate = await requireTeamCaller(req);
+  if (!gate.ok) return gate.response;
+  if (gate.caller.user.id === gate.team.ownerUserId) {
+    return jsonError(403, "Owner cannot leave", "owner_cannot_leave");
+  }
+  const [row] = await gate.caller.db
+    .select()
+    .from(teamMembers)
+    .where(
+      and(
+        eq(teamMembers.userId, gate.caller.user.id),
+        eq(teamMembers.status, "active"),
+      ),
+    );
+  if (!row) {
+    return jsonError(404, "Not a member", "not_found");
+  }
+  await gate.caller.db.delete(teamMembers).where(eq(teamMembers.id, row.id));
+  return new Response(null, { status: 204 });
+}
+
 async function readAcceptToken(req: Request): Promise<string | null> {
   const ct = req.headers.get("content-type") ?? "";
   if (

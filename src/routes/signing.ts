@@ -11,6 +11,7 @@ import {
 import { getEnv } from "../env.js";
 import { logEvent, type AuditDb } from "../lib/audit.js";
 import { loadBrand, parseLogo } from "../lib/branding.js";
+import { publicSignUrl } from "../lib/signing-url.js";
 import { teamForUser } from "../lib/team.js";
 import { getDeps, storeUnavailableResponse } from "../lib/deps.js";
 import {
@@ -522,7 +523,6 @@ export async function inviteNextHumanIfNeeded(
   const mailer = requireMailer();
   const store = requireStore();
   const token = newSigningToken();
-  const signUrl = `/s/${token.raw}`;
   const [slot] = await db
     .update(signersTable)
     .set({ tokenHash: token.hash, tokenEnc: sealWebhookSecret(token.raw) })
@@ -531,7 +531,7 @@ export async function inviteNextHumanIfNeeded(
   if (!slot) return null;
   const brand = await loadBrand(db, document.userId, store);
   const invite = inviteEmail({
-    signUrl,
+    signUrl: publicSignUrl(token.raw),
     senderEmail: document.senderEmail,
     title: document.title,
     expiresAt: document.expiresAt,
@@ -611,8 +611,10 @@ export async function getSigningState(
   let has_logo = false;
   if (document.userId) {
     const team = await teamForUser(db, document.userId);
-    display_name = team.displayName;
-    has_logo = Boolean(team.logoPath);
+    if (team.entitled) {
+      display_name = team.displayName;
+      has_logo = Boolean(team.logoPath);
+    }
   }
 
   const parties = await db
@@ -679,7 +681,7 @@ export async function getCeremonyLogo(
     return jsonError(404, "Not found", "not_found");
   }
   const team = await teamForUser(db, document.userId);
-  if (!team.logoPath) {
+  if (!team.entitled || !team.logoPath) {
     return jsonError(404, "Not found", "not_found");
   }
   const store = requireStore();

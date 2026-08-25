@@ -78,8 +78,8 @@ cannot separate them. The separation is structural:
 
 | Tile | Use |
 | --- | --- |
-| Ink tile (`#1c2733`, radius 5.5/24) + paper glyph + **bright-wax pixel** | In-app: sidebar, avatars on busy surfaces |
-| Wax tile (`#cc4416`) + all-white glyph | Favicon, marketing avatar, app-store icon — where the brand needs to shout |
+| Ink tile (`#1c2733`, radius 5.5/24) + paper glyph + **bright-wax pixel** | Avatars on busy surfaces |
+| Wax tile (`#cc4416`) + all-white glyph | Sidebar lockup, favicon, marketing avatar, app-store icon — where the brand needs to shout |
 
 Inside the wax tile the glyph is all white (a wax pixel on a wax ground would vanish); the
 tile itself is the wax.
@@ -123,14 +123,15 @@ correctly under fontconfig; use the static SemiBold.
 
 ## In the app
 
-The sidebar header (`components/app-shell.tsx`) should render `AgentSignMark` inside the ink
-tile in place of lucide's `PenLine` — a drop-in swap:
+The sidebar header (`components/app-shell.tsx`) renders `AgentSignMark` inside the wax
+tile. The glyph is `mono` (all `currentColor`) so a wax pixel does not vanish on a wax
+ground; the tile itself is the wax.
 
 ```tsx
 import { AgentSignMark } from "@/components/brand-mark";
 
-<div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-  <AgentSignMark className="size-4" />
+<div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand-wax text-primary-foreground">
+  <AgentSignMark className="size-4" mono />
 </div>
 ```
 
@@ -139,10 +140,13 @@ import { AgentSignMark } from "@/components/brand-mark";
 Applied 2026-08-23:
 
 - Sidebar mark: `AgentSignMark` replaces lucide `PenLine` in `components/app-shell.tsx`; the
-  public header wordmark carries the wax full-stop via `WaxStop`.
-- **Dashboard `--app-band`**: was stock Tailwind indigo-600 (`#4f39f6`); now Bond Navy
-  (`var(--tint)`), so wax is the only warm note on screen.
-- **Dark `--sidebar-primary`**: was `#1447e6`; now Bond Navy.
+  public header wordmark carries the wax full-stop via `WaxStop`. The in-app lockup uses the
+  wax tile with a mono glyph.
+- **Dashboard `--app-band`**: retired. The studio indigo / Bond Navy / wax header
+  band is gone; the app sits on one muted canvas. Wax stays on the sidebar tile,
+  **Send a PDF**, and app focus rings (`--ring`).
+- **Dark `--sidebar-primary`**: was `#1447e6`; now Bond Navy. The sidebar lockup uses
+  `--brand-wax` directly, not this token.
 - **`--seal`**: was `#8c2b2b` (predates this system); now aliases `--brand-wax`, which also
   turns the marketing headlines' colored period into the brand full-stop.
 - **Public `--primary` / `--ring`**: were navy; now `--brand-wax` (wax leads CTAs and focus).

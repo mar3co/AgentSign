@@ -19,6 +19,7 @@ import { teamForUser } from "../lib/team.js";
 import { getDeps, storeUnavailableResponse } from "../lib/deps.js";
 import { flagOn } from "../lib/flags.js";
 import { loadBrand } from "../lib/branding.js";
+import { publicSignUrl } from "../lib/signing-url.js";
 import {
   brandMailAttachments,
   createMailer,
@@ -225,7 +226,7 @@ async function inviteFirstSigner(
     await mailer.sendMail({
       to: first.email,
       ...inviteEmail({
-        signUrl,
+        signUrl: publicSignUrl(token.raw),
         senderEmail: document.senderEmail,
         title: document.title,
         expiresAt: document.expiresAt,

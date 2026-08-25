@@ -8,6 +8,7 @@ import {
 } from "../db/schema.js";
 import { logEvent, type AuditDb } from "../lib/audit.js";
 import { loadBrand } from "../lib/branding.js";
+import { publicSignUrl } from "../lib/signing-url.js";
 import { getDeps } from "../lib/deps.js";
 import {
   brandMailAttachments,
@@ -138,7 +139,7 @@ export async function remindDue(
       let signUrl: string | undefined;
       if (signer.tokenEnc) {
         try {
-          signUrl = `/s/${openWebhookSecret(signer.tokenEnc)}`;
+          signUrl = publicSignUrl(openWebhookSecret(signer.tokenEnc));
         } catch {
           // hash-only or corrupt token_enc: keep the unique-link sentence
         }

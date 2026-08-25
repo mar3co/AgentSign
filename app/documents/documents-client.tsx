@@ -10,6 +10,7 @@ import {
 
 export function DocumentsClient() {
   const [documents, setDocuments] = useState<DocumentListItem[] | null>(null);
+  const [timeZone, setTimeZone] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -42,6 +43,15 @@ export function DocumentsClient() {
               signers: e.signers ?? [],
             })),
           );
+        }
+        try {
+          const ws = await fetch("/v1/workspace", { credentials: "include" });
+          if (ws.ok) {
+            const body = (await ws.json()) as { timezone?: string | null };
+            if (!cancelled && body.timezone) setTimeZone(body.timezone);
+          }
+        } catch {
+          /* timezone is optional */
         }
       } catch {
         if (!cancelled) setError("Could not load documents.");
@@ -106,6 +116,7 @@ export function DocumentsClient() {
       documents={documents}
       onVoid={onVoid}
       onSaveTemplate={onSaveTemplate}
+      timeZone={timeZone}
     />
   );
 }

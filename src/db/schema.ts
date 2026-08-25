@@ -167,6 +167,8 @@ export const accounts = pgTable("accounts", {
   currentPeriodEnd: timestamptz("current_period_end"),
   displayName: text("display_name"),
   logoPath: text("logo_path"),
+  timezone: text("timezone"),
+  description: text("description"),
   createdAt: timestamptz("created_at").notNull().defaultNow(),
 }).enableRLS();
 

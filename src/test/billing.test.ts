@@ -6,9 +6,11 @@ import { eq } from "drizzle-orm";
 import UpgradePage from "../../app/upgrade/page.js";
 import { POST as postUpgrade } from "../../app/upgrade/checkout/route.js";
 import { POST as postStripe } from "../../app/internal/stripe/route.js";
+import { GET as getBilling } from "../../app/v1/billing/route.js";
+import { POST as postPortal } from "../../app/v1/billing/portal/route.js";
 import { POST as postLogin } from "../../app/login/session/route.js";
 import { GET as getAuthCallback } from "../../app/auth/callback/route.js";
-import { accounts, documents, signers as signersTable } from "../db/schema.js";
+import { accounts, documents, signers as signersTable, teamMembers } from "../db/schema.js";
 import { setDeps } from "../lib/deps.js";
 import { resetEnvCache } from "../env.js";
 import { createTestDb } from "./db.js";
@@ -365,6 +367,201 @@ describe("Stripe Checkout Pro", () => {
         }),
       );
       expect(res.status).toBe(200);
+    });
+  });
+});
+
+const PORTAL_URL = "https://billing.stripe.com/p/session/test";
+
+describe("billing usage and portal", () => {
+  it("GET /v1/billing reports send usage against the free cap", async () => {
+    await withStripeEnv(async () => {
+      const db = await createTestDb();
+      const fake = createFakeAuth();
+      const now = new Date("2026-08-15T00:00:00Z");
+      setDeps({
+        db,
+        auth: fake.adapter,
+        now: () => now,
+        stripe: {
+          createCheckout: async () => ({ url: CHECKOUT_URL }),
+          constructEvent: () => ({ type: "unknown", data: { object: {} } }),
+        },
+      });
+      const cookie = await magicCookie("shop@example.com");
+      const userId = fake.userFor("shop@example.com").id;
+      await db.insert(documents).values({
+        title: "One",
+        senderEmail: "shop@example.com",
+        userId,
+        status: "pending",
+        expiresAt: now,
+        shredAt: now,
+        createdAt: now,
+      });
+      const res = await getBilling(
+        new Request("http://sign.test/v1/billing", { headers: { cookie } }),
+      );
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as {
+        plan: string;
+        entitled: boolean;
+        usage: {
+          sends: { used: number; limit: number | null; window_days: number };
+          seats: { used: number; limit: number };
+        };
+        payment_method: unknown;
+      };
+      expect(json).not.toHaveProperty("domain");
+      expect(json.plan).toBe("free");
+      expect(json.entitled).toBe(false);
+      expect(json.usage.sends.used).toBe(1);
+      expect(json.usage.sends.limit).toBe(20);
+      expect(json.usage.sends.window_days).toBe(30);
+      await db.insert(documents).values({
+        title: "Voided",
+        senderEmail: "shop@example.com",
+        userId,
+        status: "deleted",
+        expiresAt: now,
+        shredAt: now,
+        createdAt: now,
+      });
+      await db.insert(documents).values({
+        title: "Walk-in",
+        senderEmail: "shop@example.com",
+        userId: null,
+        status: "pending",
+        expiresAt: now,
+        shredAt: now,
+        createdAt: now,
+      });
+      const again = await getBilling(
+        new Request("http://sign.test/v1/billing", { headers: { cookie } }),
+      );
+      expect(again.status).toBe(200);
+      const counted = (await again.json()) as {
+        usage: { sends: { used: number } };
+      };
+      expect(counted.usage.sends.used).toBe(3);
+      expect(json.usage.seats.used).toBe(1);
+      expect(json.payment_method).toBeNull();
+    });
+  });
+
+  it("Pro portal redirects to Stripe Billing Portal", async () => {
+    await withStripeEnv(async () => {
+      const db = await createTestDb();
+      const fake = createFakeAuth();
+      let portalCustomer: string | undefined;
+      setDeps({
+        db,
+        auth: fake.adapter,
+        stripe: {
+          createCheckout: async () => ({ url: CHECKOUT_URL }),
+          constructEvent: () => ({ type: "unknown", data: { object: {} } }),
+          createBillingPortal: async (params: { customer: string }) => {
+            portalCustomer = params.customer;
+            return { url: PORTAL_URL };
+          },
+          getDefaultPaymentMethod: async () => ({ brand: "visa", last4: "4242" }),
+        },
+      });
+      const cookie = await magicCookie("shop@example.com");
+      const userId = fake.userFor("shop@example.com").id;
+      await db
+        .update(accounts)
+        .set({ plan: "pro", stripeCustomerId: "cus_test_123" })
+        .where(eq(accounts.userId, userId));
+      const res = await postPortal(
+        new Request("http://sign.test/v1/billing/portal", {
+          method: "POST",
+          headers: { cookie },
+        }),
+      );
+      expect(res.status).toBe(303);
+      expect(res.headers.get("location")).toBe(PORTAL_URL);
+      expect(portalCustomer).toBe("cus_test_123");
+    });
+  });
+
+  it("does not return the owner's card last4 to a member", async () => {
+    await withStripeEnv(async () => {
+      const db = await createTestDb();
+      const fake = createFakeAuth();
+      let listed = false;
+      setDeps({
+        db,
+        auth: fake.adapter,
+        stripe: {
+          createCheckout: async () => ({ url: CHECKOUT_URL }),
+          constructEvent: () => ({ type: "unknown", data: { object: {} } }),
+          getDefaultPaymentMethod: async () => {
+            listed = true;
+            return { brand: "visa", last4: "4242" };
+          },
+        },
+      });
+      const ownerCookie = await magicCookie("shop@example.com");
+      const memberCookie = await magicCookie("tech@example.com");
+      const ownerId = fake.userFor("shop@example.com").id;
+      const memberId = fake.userFor("tech@example.com").id;
+      await db
+        .update(accounts)
+        .set({ plan: "pro", stripeCustomerId: "cus_test_123" })
+        .where(eq(accounts.userId, ownerId));
+      await db.insert(teamMembers).values({
+        ownerUserId: ownerId,
+        email: "tech@example.com",
+        userId: memberId,
+        status: "active",
+        tokenHash: "x".repeat(64),
+        invitedAt: new Date(),
+        acceptedAt: new Date(),
+      });
+      const memberRes = await getBilling(
+        new Request("http://sign.test/v1/billing", { headers: { cookie: memberCookie } }),
+      );
+      expect(memberRes.status).toBe(200);
+      const memberJson = (await memberRes.json()) as {
+        role: string;
+        payment_method: unknown;
+      };
+      expect(memberJson.role).toBe("member");
+      expect(memberJson.payment_method).toBeNull();
+      expect(listed).toBe(false);
+      const ownerRes = await getBilling(
+        new Request("http://sign.test/v1/billing", { headers: { cookie: ownerCookie } }),
+      );
+      expect(ownerRes.status).toBe(200);
+      const ownerJson = (await ownerRes.json()) as {
+        payment_method: unknown;
+      };
+      expect(ownerJson.payment_method).toEqual({ brand: "visa", last4: "4242" });
+      expect(listed).toBe(true);
+    });
+  });
+
+  it("free owner cannot open the portal", async () => {
+    await withStripeEnv(async () => {
+      const db = await createTestDb();
+      const fake = createFakeAuth();
+      setDeps({
+        db,
+        auth: fake.adapter,
+        stripe: {
+          createCheckout: async () => ({ url: CHECKOUT_URL }),
+          constructEvent: () => ({ type: "unknown", data: { object: {} } }),
+        },
+      });
+      const cookie = await magicCookie("shop@example.com");
+      const portal = await postPortal(
+        new Request("http://sign.test/v1/billing/portal", {
+          method: "POST",
+          headers: { cookie },
+        }),
+      );
+      expect(portal.status).toBe(403);
     });
   });
 });

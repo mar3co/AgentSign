@@ -177,13 +177,15 @@ export function partyLine(p: DocumentParty): string {
   return `${who} · ${p.kind} · ${state}`;
 }
 
-export function formatSentDate(iso?: string): string {
+export function formatSentDate(iso?: string, timeZone?: string | null): string {
   if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("en-US", {
+  const opts: Intl.DateTimeFormatOptions = {
     year: "numeric",
     month: "short",
     day: "2-digit",
-  });
+  };
+  if (timeZone) opts.timeZone = timeZone;
+  return new Date(iso).toLocaleDateString("en-US", opts);
 }
 
 function DocumentCell({ doc }: { doc: DocumentListItem }) {
@@ -208,9 +210,11 @@ function DocumentCell({ doc }: { doc: DocumentListItem }) {
 export function DocumentMiniTable({
   documents,
   limit = 5,
+  timeZone,
 }: {
   documents: DocumentListItem[];
   limit?: number;
+  timeZone?: string | null;
 }) {
   return (
     <Table>
@@ -237,7 +241,7 @@ export function DocumentMiniTable({
               <StatusBadge status={doc.status} />
             </TableCell>
             <TableCell className="text-muted-foreground h-14 whitespace-nowrap last:pr-4">
-              {formatSentDate(doc.createdAt)}
+              {formatSentDate(doc.createdAt, timeZone)}
             </TableCell>
           </TableRow>
         ))}
@@ -351,10 +355,12 @@ export function DocumentsList({
   documents,
   onVoid,
   onSaveTemplate,
+  timeZone,
 }: {
   documents: DocumentListItem[];
   onVoid?: (id: string) => void;
   onSaveTemplate?: (id: string) => void;
+  timeZone?: string | null;
 }) {
   const columns = useMemo<ColumnDef<ListFeatures, DocumentListItem>[]>(
     () => [
@@ -384,7 +390,7 @@ export function DocumentsList({
         header: "Sent",
         cell: ({ row }) => (
           <span className="text-muted-foreground whitespace-nowrap">
-            {formatSentDate(row.original.createdAt)}
+            {formatSentDate(row.original.createdAt, timeZone)}
           </span>
         ),
         size: 128,
@@ -403,7 +409,7 @@ export function DocumentsList({
         size: 256,
       },
     ],
-    [onVoid, onSaveTemplate],
+    [onVoid, onSaveTemplate, timeZone],
   );
 
   // v9's store owns the table state; we seed it and read back table.state.
