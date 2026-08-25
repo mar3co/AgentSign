@@ -420,6 +420,32 @@ describe("billing usage, portal, and domain", () => {
       expect(json.usage.sends.used).toBe(1);
       expect(json.usage.sends.limit).toBe(20);
       expect(json.usage.sends.window_days).toBe(30);
+      await db.insert(documents).values({
+        title: "Voided",
+        senderEmail: "shop@example.com",
+        userId,
+        status: "deleted",
+        expiresAt: now,
+        shredAt: now,
+        createdAt: now,
+      });
+      await db.insert(documents).values({
+        title: "Walk-in",
+        senderEmail: "shop@example.com",
+        userId: null,
+        status: "pending",
+        expiresAt: now,
+        shredAt: now,
+        createdAt: now,
+      });
+      const again = await getBilling(
+        new Request("http://sign.test/v1/billing", { headers: { cookie } }),
+      );
+      expect(again.status).toBe(200);
+      const counted = (await again.json()) as {
+        usage: { sends: { used: number } };
+      };
+      expect(counted.usage.sends.used).toBe(3);
       expect(json.usage.seats.used).toBe(1);
       expect(json.payment_method).toBeNull();
       expect(json.domain.hostname).toBeNull();

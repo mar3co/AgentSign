@@ -15,6 +15,7 @@ export async function loadBrand(
 ): Promise<LoadedBrand> {
   if (!userId) return { displayName: null };
   const team = await teamForUser(db, userId);
+  if (!team.entitled) return { displayName: null };
   if (!team.logoPath || !store) {
     return { displayName: team.displayName };
   }

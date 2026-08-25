@@ -1,4 +1,4 @@
-import { and, count, eq, gte, inArray, ne } from "drizzle-orm";
+import { and, count, eq, gte, inArray, ne, or } from "drizzle-orm";
 import { promises as dns } from "node:dns";
 import { accounts, documents, teamMembers, templates } from "../db/schema.js";
 import { appOrigin, getEnv } from "../env.js";
@@ -105,15 +105,19 @@ export async function getBilling(req: Request): Promise<Response> {
   const windowStart = new Date(at.getTime() - windowDays * 86_400_000);
   const senderIds = team.memberUserIds.length > 0 ? team.memberUserIds : [user.id];
 
+  const ownerEmail = team.ownerEmail?.trim().toLowerCase() ?? "";
+  const who = [
+    inArray(documents.userId, senderIds),
+    ownerEmail ? eq(documents.senderEmail, ownerEmail) : undefined,
+  ].filter((clause): clause is NonNullable<typeof clause> => Boolean(clause));
   const [sends] = await db
     .select({ n: count() })
     .from(documents)
     .where(
       and(
-        inArray(documents.userId, senderIds),
+        who.length === 1 ? who[0] : or(...who),
         gte(documents.createdAt, windowStart),
         ne(documents.status, "pending_sender"),
-        ne(documents.status, "deleted"),
       ),
     );
 

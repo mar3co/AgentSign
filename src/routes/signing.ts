@@ -612,8 +612,10 @@ export async function getSigningState(
   let has_logo = false;
   if (document.userId) {
     const team = await teamForUser(db, document.userId);
-    display_name = team.displayName;
-    has_logo = Boolean(team.logoPath);
+    if (team.entitled) {
+      display_name = team.displayName;
+      has_logo = Boolean(team.logoPath);
+    }
   }
 
   const parties = await db
@@ -680,7 +682,7 @@ export async function getCeremonyLogo(
     return jsonError(404, "Not found", "not_found");
   }
   const team = await teamForUser(db, document.userId);
-  if (!team.logoPath) {
+  if (!team.entitled || !team.logoPath) {
     return jsonError(404, "Not found", "not_found");
   }
   const store = requireStore();

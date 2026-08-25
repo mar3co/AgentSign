@@ -8,10 +8,13 @@ export function publicSignUrl(token: string, host?: string | null): string {
 }
 
 export function verifiedSigningHost(team: {
+  entitled: boolean;
   customDomain: string | null;
   customDomainVerifiedAt: Date | null;
 }): string | null {
-  if (!team.customDomain || !team.customDomainVerifiedAt) return null;
+  if (!team.entitled || !team.customDomain || !team.customDomainVerifiedAt) {
+    return null;
+  }
   return team.customDomain;
 }
 
