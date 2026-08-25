@@ -10,7 +10,7 @@ import { GET as getBilling } from "../../app/v1/billing/route.js";
 import { POST as postPortal } from "../../app/v1/billing/portal/route.js";
 import { POST as postLogin } from "../../app/login/session/route.js";
 import { GET as getAuthCallback } from "../../app/auth/callback/route.js";
-import { accounts, documents, signers as signersTable } from "../db/schema.js";
+import { accounts, documents, signers as signersTable, teamMembers } from "../db/schema.js";
 import { setDeps } from "../lib/deps.js";
 import { resetEnvCache } from "../env.js";
 import { createTestDb } from "./db.js";
@@ -482,6 +482,63 @@ describe("billing usage and portal", () => {
       expect(res.status).toBe(303);
       expect(res.headers.get("location")).toBe(PORTAL_URL);
       expect(portalCustomer).toBe("cus_test_123");
+    });
+  });
+
+  it("does not return the owner's card last4 to a member", async () => {
+    await withStripeEnv(async () => {
+      const db = await createTestDb();
+      const fake = createFakeAuth();
+      let listed = false;
+      setDeps({
+        db,
+        auth: fake.adapter,
+        stripe: {
+          createCheckout: async () => ({ url: CHECKOUT_URL }),
+          constructEvent: () => ({ type: "unknown", data: { object: {} } }),
+          getDefaultPaymentMethod: async () => {
+            listed = true;
+            return { brand: "visa", last4: "4242" };
+          },
+        },
+      });
+      const ownerCookie = await magicCookie("shop@example.com");
+      const memberCookie = await magicCookie("tech@example.com");
+      const ownerId = fake.userFor("shop@example.com").id;
+      const memberId = fake.userFor("tech@example.com").id;
+      await db
+        .update(accounts)
+        .set({ plan: "pro", stripeCustomerId: "cus_test_123" })
+        .where(eq(accounts.userId, ownerId));
+      await db.insert(teamMembers).values({
+        ownerUserId: ownerId,
+        email: "tech@example.com",
+        userId: memberId,
+        status: "active",
+        tokenHash: "x".repeat(64),
+        invitedAt: new Date(),
+        acceptedAt: new Date(),
+      });
+      const memberRes = await getBilling(
+        new Request("http://sign.test/v1/billing", { headers: { cookie: memberCookie } }),
+      );
+      expect(memberRes.status).toBe(200);
+      const memberJson = (await memberRes.json()) as {
+        role: string;
+        payment_method: unknown;
+      };
+      expect(memberJson.role).toBe("member");
+      expect(memberJson.payment_method).toBeNull();
+      expect(listed).toBe(false);
+      const ownerRes = await getBilling(
+        new Request("http://sign.test/v1/billing", { headers: { cookie: ownerCookie } }),
+      );
+      expect(ownerRes.status).toBe(200);
+      const ownerJson = (await ownerRes.json()) as {
+        payment_method: unknown;
+      };
+      expect(ownerJson.payment_method).toEqual({ brand: "visa", last4: "4242" });
+      expect(listed).toBe(true);
     });
   });
 

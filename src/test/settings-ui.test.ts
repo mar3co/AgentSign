@@ -162,5 +162,14 @@ describe("BillingClient", () => {
     expect(screen.queryByLabelText(/^hostname$/i)).toBeNull();
     expect(screen.queryByDisplayValue("sign.acme.com")).toBeNull();
   });
+
+  it("hides the payment method from a member", async () => {
+    stubBilling({ ...PRO_BILLING, role: "member" });
+    render(createElement(BillingClient));
+    expect(await screen.findByText(/you.?re on pro/i)).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: /^payment method$/i })).toBeNull();
+    expect(screen.queryByText(/4242/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /manage billing/i })).toBeNull();
+  });
 });
 

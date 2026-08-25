@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 import { createElement } from "react";
-import { afterEach, describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import { DocumentsClient } from "../../app/documents/documents-client.js";
 import {
   DocumentsList,
   formatSentDate,
@@ -12,6 +13,36 @@ describe("formatSentDate", () => {
     const iso = "2026-01-15T02:00:00.000Z";
     expect(formatSentDate(iso, "UTC")).toMatch(/Jan 15/);
     expect(formatSentDate(iso, "America/Los_Angeles")).toMatch(/Jan 14/);
+  });
+});
+
+describe("DocumentsClient", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("still lists documents if workspace timezone fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/v1/documents")) {
+          return new Response(
+            JSON.stringify({
+              documents: [
+                { id: "env_1", title: "Repair authorization", status: "completed" },
+              ],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        throw new Error("workspace down");
+      }),
+    );
+    render(createElement(DocumentsClient));
+    expect(await screen.findByText("Repair authorization")).toBeTruthy();
+    expect(screen.queryByText(/could not load documents/i)).toBeNull();
   });
 });
 

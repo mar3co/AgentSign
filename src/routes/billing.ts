@@ -74,9 +74,14 @@ export async function getBilling(req: Request): Promise<Response> {
     .from(accounts)
     .where(eq(accounts.userId, team.ownerUserId));
 
+  const role = user.id === team.ownerUserId ? "owner" : "member";
   let payment_method: { brand: string; last4: string } | null = null;
   const stripe = getStripe();
-  if (ownerAccount?.stripeCustomerId && stripe.getDefaultPaymentMethod) {
+  if (
+    role === "owner" &&
+    ownerAccount?.stripeCustomerId &&
+    stripe.getDefaultPaymentMethod
+  ) {
     try {
       payment_method = await stripe.getDefaultPaymentMethod(ownerAccount.stripeCustomerId);
     } catch {
@@ -87,7 +92,7 @@ export async function getBilling(req: Request): Promise<Response> {
   return Response.json({
     plan: team.entitled ? "pro" : "free",
     entitled: team.entitled,
-    role: user.id === team.ownerUserId ? "owner" : "member",
+    role,
     current_period_end: ownerAccount?.currentPeriodEnd
       ? ownerAccount.currentPeriodEnd.toISOString()
       : null,

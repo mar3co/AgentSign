@@ -51,6 +51,7 @@ function workspaceJson(
 function parseDisplayName(
   raw: unknown,
 ): { ok: true; value: string | null } | { ok: false; response: Response } {
+  if (raw === null) return { ok: true, value: null };
   if (typeof raw !== "string") {
     return {
       ok: false,

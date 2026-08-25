@@ -70,15 +70,16 @@ export function WorkspaceClient() {
     };
   }, []);
 
-  if (error) {
-    return (
-      <Alert variant="destructive">
-        <AlertDescription>{error}</AlertDescription>
-      </Alert>
-    );
+  if (!state) {
+    if (error) {
+      return (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      );
+    }
+    return <LoadingList />;
   }
-
-  if (!state) return <LoadingList />;
 
   async function onSave(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -156,10 +157,15 @@ export function WorkspaceClient() {
 
   return (
     <div className="flex flex-col gap-6">
+      {error ? (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
       <form onSubmit={onSave} className="flex flex-col gap-6">
         <SettingsSection
           title="Name"
-          description="Internal name for this team. Signers see it only if you put it on Branding."
+          description="Name for this team. On Pro this is also what signers see on invite mail and the signing page."
         >
           <Card>
             <CardContent className="flex flex-col gap-4">

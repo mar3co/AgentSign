@@ -79,8 +79,6 @@ export function AppShell({
   const subtitle = currentNav(pathname)?.subtitle;
   return (
     <div data-surface="app" className="contents">
-      {/* Floating sidebar and content cards on one muted canvas. No color
-         band: wax stays on the mark tile and the Send CTA. */}
       <div className="relative flex min-h-dvh w-full bg-muted">
         <SidebarProvider
           className="bg-transparent"

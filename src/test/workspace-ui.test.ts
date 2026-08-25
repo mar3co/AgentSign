@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { WorkspaceClient } from "../../app/settings/workspace/workspace-client.js";
 import { SettingsShell } from "../../components/settings-shell.js";
 
@@ -75,5 +75,31 @@ describe("WorkspaceClient", () => {
     expect(screen.getByRole("button", { name: /leave team/i })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /dissolve team/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /^save$/i })).toBeNull();
+  });
+
+  it("keeps the form after a failed save", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(OWNER), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ error: "Could not save workspace." }), {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          }),
+        ),
+    );
+    render(createElement(WorkspaceClient));
+    expect(await screen.findByDisplayValue("Shop Co")).toBeTruthy();
+    fireEvent.submit(screen.getByRole("button", { name: /^save$/i }).closest("form")!);
+    expect(await screen.findByText("Could not save workspace.")).toBeTruthy();
+    expect(screen.getByDisplayValue("Shop Co")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^save$/i })).toBeTruthy();
   });
 });

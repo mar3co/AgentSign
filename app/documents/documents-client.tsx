@@ -44,10 +44,14 @@ export function DocumentsClient() {
             })),
           );
         }
-        const ws = await fetch("/v1/workspace", { credentials: "include" });
-        if (ws.ok) {
-          const body = (await ws.json()) as { timezone?: string | null };
-          if (!cancelled && body.timezone) setTimeZone(body.timezone);
+        try {
+          const ws = await fetch("/v1/workspace", { credentials: "include" });
+          if (ws.ok) {
+            const body = (await ws.json()) as { timezone?: string | null };
+            if (!cancelled && body.timezone) setTimeZone(body.timezone);
+          }
+        } catch {
+          /* timezone is optional */
         }
       } catch {
         if (!cancelled) setError("Could not load documents.");

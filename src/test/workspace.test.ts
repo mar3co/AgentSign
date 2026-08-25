@@ -241,6 +241,32 @@ describe("workspace API", () => {
     expect(row?.description).toBe("Repair shop");
   });
 
+  it("PATCH display_name null clears the name", async () => {
+    await boot();
+    const cookie = await magicCookie("shop@example.com");
+    expect(
+      (
+        await patchWorkspace(
+          workspaceReq(cookie, {
+            method: "PATCH",
+            headers: { cookie, "content-type": "application/json" },
+            body: JSON.stringify({ display_name: "Shop Co" }),
+          }),
+        )
+      ).status,
+    ).toBe(200);
+    const res = await patchWorkspace(
+      workspaceReq(cookie, {
+        method: "PATCH",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ display_name: null }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { display_name: string | null };
+    expect(json.display_name).toBeNull();
+  });
+
   it("PATCH rejects an unknown timezone", async () => {
     await boot();
     const cookie = await magicCookie("shop@example.com");

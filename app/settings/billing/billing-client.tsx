@@ -165,34 +165,38 @@ export function BillingClient() {
           </CardContent>
         </Card>
       </SettingsSection>
-      <Separator />
-      <SettingsSection
-        title="Payment method"
-        description="Cards live at Stripe. We never collect a card number here."
-      >
-        <Card>
-          <CardContent className="flex flex-col gap-3">
-            {state.payment_method ? (
-              <p className="text-sm">
-                {state.payment_method.brand} ending in {state.payment_method.last4}
-              </p>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                {state.entitled
-                  ? "No card on file yet. Manage billing to add one."
-                  : "Upgrade to add a payment method."}
-              </p>
-            )}
-            {state.entitled && canEdit ? (
-              <form action="/v1/billing/portal" method="POST">
-                <Button type="submit" variant="outline">
-                  Update payment method
-                </Button>
-              </form>
-            ) : null}
-          </CardContent>
-        </Card>
-      </SettingsSection>
+      {canEdit ? (
+        <>
+          <Separator />
+          <SettingsSection
+            title="Payment method"
+            description="Cards live at Stripe. We never collect a card number here."
+          >
+            <Card>
+              <CardContent className="flex flex-col gap-3">
+                {state.payment_method ? (
+                  <p className="text-sm">
+                    {state.payment_method.brand} ending in {state.payment_method.last4}
+                  </p>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    {state.entitled
+                      ? "No card on file yet. Manage billing to add one."
+                      : "Upgrade to add a payment method."}
+                  </p>
+                )}
+                {state.entitled ? (
+                  <form action="/v1/billing/portal" method="POST">
+                    <Button type="submit" variant="outline">
+                      Update payment method
+                    </Button>
+                  </form>
+                ) : null}
+              </CardContent>
+            </Card>
+          </SettingsSection>
+        </>
+      ) : null}
     </div>
   );
 }
