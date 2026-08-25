@@ -91,7 +91,6 @@ const FREE_BILLING = {
     agents: { used: 0, limit: 10 },
   },
   payment_method: null,
-  domain: { hostname: null, verified: false, cname_target: "agentsign.co" },
 };
 
 const PRO_BILLING = {
@@ -106,11 +105,6 @@ const PRO_BILLING = {
     agents: { used: 1, limit: 10 },
   },
   payment_method: { brand: "visa", last4: "4242" },
-  domain: {
-    hostname: "sign.acme.com",
-    verified: true,
-    cname_target: "agentsign.co",
-  },
 };
 
 function stubBilling(body: object) {
@@ -164,7 +158,9 @@ describe("BillingClient", () => {
     expect(screen.queryByRole("button", { name: /^upgrade$/i })).toBeNull();
     expect(screen.getByText(/4242/)).toBeTruthy();
     expect(screen.getByRole("button", { name: /manage billing/i })).toBeTruthy();
-    expect(screen.getByDisplayValue("sign.acme.com")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: /^custom domain$/i })).toBeNull();
+    expect(screen.queryByLabelText(/^hostname$/i)).toBeNull();
+    expect(screen.queryByDisplayValue("sign.acme.com")).toBeNull();
   });
 });
 

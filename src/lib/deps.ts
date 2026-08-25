@@ -20,7 +20,6 @@ export type Deps = {
   p12Passphrase?: string;
   fetch?: typeof fetch;
   lookup?: (hostname: string) => Promise<{ address: string; family: number }[]>;
-  resolveCname?: (hostname: string) => Promise<string[]>;
 };
 
 let deps: Deps = {};

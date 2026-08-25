@@ -378,47 +378,7 @@ describe("workspace API", () => {
   });
 });
 
-describe("custom signing domain on invites", () => {
-  it("uses the verified hostname in invite mail", async () => {
-    const { db, userFor, sent } = await boot();
-    const { cookie, userId } = await asPro(db, userFor);
-    await db
-      .update(accounts)
-      .set({
-        customDomain: "sign.acme.com",
-        customDomainVerifiedAt: new Date(),
-      })
-      .where(eq(accounts.userId, userId));
-    const minted = await postKeys(
-      new Request("http://sign.test/v1/keys", {
-        method: "POST",
-        headers: { cookie, "content-type": "application/json" },
-        body: "{}",
-      }),
-    );
-    expect(minted.status).toBe(201);
-    const { key } = (await minted.json()) as { key: string };
-    const pdf = await minimalPdf();
-    const body = new FormData();
-    body.set("title", "Repair");
-    body.set("sender_email", "shop@example.com");
-    body.set(
-      "signers",
-      JSON.stringify([{ name: "Jane", email: "jane@example.com" }]),
-    );
-    body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
-    const res = await postDocument(
-      new Request("http://sign.test/v1/documents", {
-        method: "POST",
-        headers: { authorization: `Bearer ${key}` },
-        body,
-      }),
-    );
-    expect(res.status).toBe(201);
-    const invite = sent.find((m) => m.to === "jane@example.com");
-    expect(invite?.text).toMatch(/https:\/\/sign\.acme\.com\/s\//);
-  });
-
+describe("signer-facing brand", () => {
   it("does not brand invite mail or the ceremony with a free workspace name", async () => {
     const { db, userFor, sent } = await boot();
     const cookie = await magicCookie("shop@example.com");
@@ -469,47 +429,5 @@ describe("custom signing domain on invites", () => {
     };
     expect(ceremony.display_name).toBeNull();
     expect(ceremony.has_logo).toBe(false);
-  });
-
-  it("ignores a custom domain when the owner is not on Pro", async () => {
-    const { db, userFor, sent } = await boot();
-    const cookie = await magicCookie("shop@example.com");
-    const userId = userFor("shop@example.com").id;
-    await db
-      .update(accounts)
-      .set({
-        customDomain: "sign.acme.com",
-        customDomainVerifiedAt: new Date(),
-      })
-      .where(eq(accounts.userId, userId));
-    const minted = await postKeys(
-      new Request("http://sign.test/v1/keys", {
-        method: "POST",
-        headers: { cookie, "content-type": "application/json" },
-        body: "{}",
-      }),
-    );
-    expect(minted.status).toBe(201);
-    const { key } = (await minted.json()) as { key: string };
-    const pdf = await minimalPdf();
-    const body = new FormData();
-    body.set("title", "Repair");
-    body.set("sender_email", "shop@example.com");
-    body.set(
-      "signers",
-      JSON.stringify([{ name: "Jane", email: "jane@example.com" }]),
-    );
-    body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
-    const res = await postDocument(
-      new Request("http://sign.test/v1/documents", {
-        method: "POST",
-        headers: { authorization: `Bearer ${key}` },
-        body,
-      }),
-    );
-    expect(res.status).toBe(201);
-    const invite = sent.find((m) => m.to === "jane@example.com");
-    expect(invite?.text).toMatch(/Sign here: http:\/\/localhost:\d+\/s\//);
-    expect(invite?.text).not.toMatch(/sign\.acme\.com/);
   });
 });

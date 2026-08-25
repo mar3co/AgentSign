@@ -1040,7 +1040,7 @@ export const openapi = {
     },
     "/v1/billing": {
       get: {
-        summary: "Plan, usage, payment method, and signing domain",
+        summary: "Plan, usage, and payment method",
         security: liveOrSession,
         responses: {
           "200": {
@@ -1058,49 +1058,6 @@ export const openapi = {
         security: liveOrSession,
         responses: {
           "303": { description: "Redirect to Stripe" },
-          "400": errorResponse,
-          "401": errorResponse,
-          "403": errorResponse,
-        },
-      },
-    },
-    "/v1/billing/domain": {
-      put: {
-        summary: "Set a custom signing hostname",
-        description: `${liveKeyNote} Pro owner only. Empty hostname clears.`,
-        security: liveOrSession,
-        requestBody: {
-          required: true,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: { hostname: { type: ["string", "null"] } },
-              },
-            },
-          },
-        },
-        responses: {
-          "200": {
-            description: "Domain",
-            content: { "application/json": { schema: { type: "object" } } },
-          },
-          "400": errorResponse,
-          "401": errorResponse,
-          "403": errorResponse,
-          "409": errorResponse,
-        },
-      },
-    },
-    "/v1/billing/domain/verify": {
-      post: {
-        summary: "Verify the custom signing hostname CNAME",
-        security: liveOrSession,
-        responses: {
-          "200": {
-            description: "Domain",
-            content: { "application/json": { schema: { type: "object" } } },
-          },
           "400": errorResponse,
           "401": errorResponse,
           "403": errorResponse,

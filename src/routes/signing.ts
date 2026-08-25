@@ -11,7 +11,7 @@ import {
 import { getEnv } from "../env.js";
 import { logEvent, type AuditDb } from "../lib/audit.js";
 import { loadBrand, parseLogo } from "../lib/branding.js";
-import { loadSigningHost, publicSignUrl } from "../lib/signing-url.js";
+import { publicSignUrl } from "../lib/signing-url.js";
 import { teamForUser } from "../lib/team.js";
 import { getDeps, storeUnavailableResponse } from "../lib/deps.js";
 import {
@@ -530,9 +530,8 @@ export async function inviteNextHumanIfNeeded(
     .returning();
   if (!slot) return null;
   const brand = await loadBrand(db, document.userId, store);
-  const host = await loadSigningHost(db, document.userId);
   const invite = inviteEmail({
-    signUrl: publicSignUrl(token.raw, host),
+    signUrl: publicSignUrl(token.raw),
     senderEmail: document.senderEmail,
     title: document.title,
     expiresAt: document.expiresAt,

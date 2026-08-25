@@ -106,11 +106,14 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
     expect(openapi.paths["/v1/verify"]).toBeTruthy();
     expect(openapi.paths["/v1/workspace"]).toBeTruthy();
     expect(openapi.paths["/v1/billing"]).toBeTruthy();
+    expect(openapi.paths["/v1/billing/domain"]).toBeFalsy();
+    expect(openapi.paths["/v1/billing/domain/verify"]).toBeFalsy();
     const text = await (await getLlms()).text();
     expect(text).toMatch(/send/);
     expect(text).toMatch(/There is no sign/);
     expect(text).toMatch(/\/v1\/templates/);
     expect(text).toMatch(/\/v1\/agents/);
+    expect(text).not.toMatch(/\/v1\/billing\/domain/);
     expect(text).not.toMatch(/Optional Bearer tmp or live key/);
     expect(text).toMatch(/sign_tmp_/);
     const bearer = openapi.components.securitySchemes.bearerAuth.description;

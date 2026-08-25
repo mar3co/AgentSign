@@ -55,8 +55,6 @@ GET /v1/workspace/export
 POST /v1/workspace/dissolve
 GET /v1/billing
 POST /v1/billing/portal
-PUT /v1/billing/domain
-POST /v1/billing/domain/verify
 
 GET /s/{token}/logo — ceremony token only; not a public account URL.
 

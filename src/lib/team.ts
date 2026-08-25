@@ -18,8 +18,6 @@ export type Team = {
   logoPath: string | null;
   timezone: string | null;
   description: string | null;
-  customDomain: string | null;
-  customDomainVerifiedAt: Date | null;
   members: TeamMemberRow[];
   memberUserIds: string[];
 };
@@ -61,8 +59,6 @@ export async function teamForUser(
     logoPath: ownerAccount?.logoPath ?? null,
     timezone: ownerAccount?.timezone ?? null,
     description: ownerAccount?.description ?? null,
-    customDomain: ownerAccount?.customDomain ?? null,
-    customDomainVerifiedAt: ownerAccount?.customDomainVerifiedAt ?? null,
     members: members.map((m) => ({
       id: m.id,
       email: m.email,

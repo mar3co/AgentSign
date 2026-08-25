@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState } from "react";
 import { CircleAlert } from "lucide-react";
 import { LoadingList } from "@/components/loading-list";
 import { SettingsSection } from "@/components/settings-shell";
@@ -14,8 +14,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 
 type UsageMeter = { used: number; limit: number | null; window_days?: number };
@@ -32,7 +30,6 @@ type Billing = {
     agents: UsageMeter;
   };
   payment_method: { brand: string; last4: string } | null;
-  domain: { hostname: string | null; verified: boolean; cname_target: string };
 };
 
 function meterLabel(meter: UsageMeter): string {
@@ -62,8 +59,6 @@ function Meter({ label, meter }: { label: string; meter: UsageMeter }) {
 export function BillingClient() {
   const [state, setState] = useState<Billing | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [hostname, setHostname] = useState("");
-  const [domainMsg, setDomainMsg] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -81,10 +76,7 @@ export function BillingClient() {
           if (!cancelled) setError(json?.error ?? "Could not load billing.");
           return;
         }
-        if (!cancelled) {
-          setState(json);
-          setHostname(json.domain.hostname ?? "");
-        }
+        if (!cancelled) setState(json);
       } catch {
         if (!cancelled) setError("Could not load billing.");
       }
@@ -105,43 +97,6 @@ export function BillingClient() {
   if (!state) return <LoadingList />;
 
   const canEdit = state.role === "owner";
-
-  async function onSaveDomain(e: FormEvent) {
-    e.preventDefault();
-    setDomainMsg(null);
-    const res = await fetch("/v1/billing/domain", {
-      method: "PUT",
-      credentials: "include",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ hostname }),
-    });
-    const json = (await res.json().catch(() => null)) as
-      | Billing["domain"] & { error?: string }
-      | null;
-    if (!res.ok) {
-      setDomainMsg(json?.error ?? "Could not save domain.");
-      return;
-    }
-    setState((prev) => (prev && json ? { ...prev, domain: json } : prev));
-    setDomainMsg("Saved. Point a CNAME at the target, then verify.");
-  }
-
-  async function onVerify() {
-    setDomainMsg(null);
-    const res = await fetch("/v1/billing/domain/verify", {
-      method: "POST",
-      credentials: "include",
-    });
-    const json = (await res.json().catch(() => null)) as
-      | Billing["domain"] & { error?: string }
-      | null;
-    if (!res.ok) {
-      setDomainMsg(json?.error ?? "Could not verify domain.");
-      return;
-    }
-    setState((prev) => (prev && json ? { ...prev, domain: json } : prev));
-    setDomainMsg(json?.verified ? "Domain verified." : "Still pending.");
-  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -235,54 +190,6 @@ export function BillingClient() {
                 </Button>
               </form>
             ) : null}
-          </CardContent>
-        </Card>
-      </SettingsSection>
-      <Separator />
-      <SettingsSection
-        title="Custom domain"
-        description="Pro signing links can live on your hostname. Mail still comes from us."
-      >
-        <Card>
-          <CardContent className="flex flex-col gap-4">
-            {!state.entitled ? (
-              <p className="text-sm text-muted-foreground">
-                Custom signing domains are on Pro.
-              </p>
-            ) : (
-              <>
-                <form onSubmit={onSaveDomain} className="flex flex-col gap-3">
-                  <div className="flex flex-col gap-2">
-                    <Label htmlFor="hostname">Hostname</Label>
-                    <Input
-                      id="hostname"
-                      value={hostname}
-                      onChange={(e) => setHostname(e.target.value)}
-                      placeholder="sign.example.com"
-                      disabled={!canEdit}
-                    />
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    CNAME this host to{" "}
-                    <span className="font-mono">{state.domain.cname_target}</span>
-                    {state.domain.verified ? " · verified" : " · pending"}
-                  </p>
-                  {canEdit ? (
-                    <div className="flex flex-wrap gap-2">
-                      <Button type="submit" variant="outline">
-                        Save domain
-                      </Button>
-                      <Button type="button" variant="outline" onClick={onVerify}>
-                        Verify
-                      </Button>
-                    </div>
-                  ) : null}
-                </form>
-                {domainMsg ? (
-                  <p className="text-sm text-muted-foreground">{domainMsg}</p>
-                ) : null}
-              </>
-            )}
           </CardContent>
         </Card>
       </SettingsSection>

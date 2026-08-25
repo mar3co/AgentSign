@@ -169,8 +169,6 @@ export const accounts = pgTable("accounts", {
   logoPath: text("logo_path"),
   timezone: text("timezone"),
   description: text("description"),
-  customDomain: text("custom_domain").unique(),
-  customDomainVerifiedAt: timestamptz("custom_domain_verified_at"),
   createdAt: timestamptz("created_at").notNull().defaultNow(),
 }).enableRLS();
 
