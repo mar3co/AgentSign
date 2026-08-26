@@ -81,7 +81,8 @@ function requiredFieldsReady(
   for (const field of fields) {
     if (!field.required || field.readonly) continue;
     if (field.type === "signature" || field.type === "initials") {
-      if (!sigBlobs[field.name]) return false;
+      const blob = sigBlobs[field.name];
+      if (!blob || blob.size === 0) return false;
       continue;
     }
     if (field.type === "checkbox") {
@@ -192,6 +193,15 @@ export function SigningCeremony({
     };
   }, [sigUrls]);
 
+  useEffect(() => {
+    if (!drawingField) return;
+    drawing.current = false;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }, [drawingField]);
+
   const canFinish = useMemo(() => {
     if (!consented || busy) return false;
     if (!hasFields) return true;
@@ -296,17 +306,34 @@ export function SigningCeremony({
     canvasRef.current?.releasePointerCapture(e.pointerId);
   }
 
+  function clearPad() {
+    drawing.current = false;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+
+  function openPad(fieldName: string) {
+    clearPad();
+    setDrawingField(fieldName);
+    setError(null);
+  }
+
   async function saveSignature() {
     if (!drawingField) return;
     const canvas = canvasRef.current;
+    if (!canvas || typeof canvas.toBlob !== "function") {
+      setError("Could not save signature");
+      return;
+    }
     const blob = await new Promise<Blob | null>((resolve) => {
-      if (!canvas || typeof canvas.toBlob !== "function") {
-        resolve(new Blob([], { type: "image/png" }));
-        return;
-      }
-      canvas.toBlob((b) => resolve(b ?? new Blob([], { type: "image/png" })), "image/png");
+      canvas.toBlob((b) => resolve(b), "image/png");
     });
-    if (!blob) return;
+    if (!blob || blob.size === 0) {
+      setError("Draw your signature first");
+      return;
+    }
     const name = drawingField;
     setSigBlobs((prev) => ({ ...prev, [name]: blob }));
     setSigUrls((prev) => {
@@ -315,6 +342,7 @@ export function SigningCeremony({
       next[name] = URL.createObjectURL(blob);
       return next;
     });
+    clearPad();
     setDrawingField(null);
   }
 
@@ -428,7 +456,7 @@ export function SigningCeremony({
         <button
           type="button"
           className="flex h-full w-full min-h-11 min-w-11 items-center justify-center overflow-hidden bg-background/80 px-1 text-xs"
-          onClick={() => setDrawingField(field.name)}
+          onClick={() => openPad(field.name)}
         >
           {url ? (
             <img src={url} alt={field.name} className="max-h-full max-w-full object-contain" />
@@ -587,7 +615,10 @@ export function SigningCeremony({
                       className="h-11 flex-1 text-base"
                       type="button"
                       variant="secondary"
-                      onClick={() => setDrawingField(null)}
+                      onClick={() => {
+                        clearPad();
+                        setDrawingField(null);
+                      }}
                     >
                       Cancel
                     </Button>

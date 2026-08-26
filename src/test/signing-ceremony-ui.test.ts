@@ -16,6 +16,7 @@ describe("SigningCeremony fields UI", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it("no-fields path still has the canvas and Finish button", () => {
@@ -32,6 +33,18 @@ describe("SigningCeremony fields UI", () => {
   });
 
   it("with fields, Finish posts values and a sig file after consent", async () => {
+    const pngBytes = Uint8Array.from(
+      Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+        "base64",
+      ),
+    );
+    const toBlobSpy = vi
+      .spyOn(HTMLCanvasElement.prototype, "toBlob")
+      .mockImplementation(function (cb: BlobCallback) {
+        cb(new Blob([pngBytes], { type: "image/png" }));
+      });
+
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith("/preview")) {
@@ -46,6 +59,7 @@ describe("SigningCeremony fields UI", () => {
         const sig = body.get("sig:sig");
         expect(sig).toBeTruthy();
         expect(sig instanceof Blob).toBe(true);
+        expect((sig as Blob).size).toBeGreaterThan(0);
         expect(body.get("png")).toBeTruthy();
         return Response.json({ status: "completed", shred_at: "2026-09-01" });
       }
@@ -79,6 +93,7 @@ describe("SigningCeremony fields UI", () => {
     fireEvent.click(sigBox);
     const save = await screen.findByRole("button", { name: /save signature/i });
     fireEvent.click(save);
+    expect(toBlobSpy).toHaveBeenCalled();
 
     fireEvent.click(screen.getByText("I agree"));
 
