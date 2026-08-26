@@ -32,6 +32,13 @@ export type CertificateSigner = {
   agentSlug?: string | null;
 };
 
+export type CertificateField = {
+  role: string;
+  name: string;
+  type: string;
+  value: string;
+};
+
 export type CertificateInfo = {
   documentId: string;
   title: string;
@@ -39,6 +46,7 @@ export type CertificateInfo = {
   sha256: string;
   consentText: string;
   signers: CertificateSigner[];
+  fields?: CertificateField[];
 };
 
 function drawLiteralText(
@@ -160,6 +168,16 @@ export async function buildCertificate(
       `UA: ${signer.ua ?? "—"}`,
       "",
     );
+  }
+
+  if (info.fields?.length) {
+    lines.push("Fields", "");
+    for (const field of info.fields) {
+      lines.push(
+        `${field.role} ${field.name} (${field.type}): ${field.value}`,
+      );
+    }
+    lines.push("");
   }
 
   lines.push("Not a notary. Not legal advice.");
