@@ -1,7 +1,7 @@
 # AgentSign Design — On-page fields, embed, parallel
 
 **Date:** 2026-08-25  
-**Status:** Locked for implementation (pending user review of this file)  
+**Status:** Locked for implementation  
 **Product:** AgentSign  
 **Repo:** [yohanmarshall/AgentSign](https://github.com/yohanmarshall/AgentSign)  
 **Product plan:** [docs/2026-08-19-product-plan.md](../../2026-08-19-product-plan.md)  
