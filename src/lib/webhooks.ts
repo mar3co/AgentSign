@@ -23,12 +23,29 @@ const BLOCKED_HOSTS = new Set([
   "metadata.goog",
 ]);
 
+export type DocumentWebhookPayload = {
+  event:
+    | "document.opened"
+    | "signer.completed"
+    | "document.completed"
+    | "document.declined"
+    | "document.expired";
+  id: string;
+  status: string;
+  sha256?: string;
+  shred_at?: string;
+  signer_email?: string;
+  kind?: "human" | "agent";
+  values?: Array<{ role: string; name: string; type: string; value: string }>;
+};
+
 export type DocumentCompletedPayload = {
   event: "document.completed";
   id: string;
   status: string;
   sha256: string;
   shred_at: Date;
+  values?: Array<{ role: string; name: string; type: string; value: string }>;
 };
 
 /** HMAC key returned once as webhook_secret; stored encrypted at rest. */
@@ -322,6 +339,26 @@ async function postSignedWebhook(
 }
 
 /** One POST; failures audit webhook_failed and do not throw. */
+export async function fireDocumentWebhook(
+  db: AuditDb,
+  document: {
+    id: string;
+    webhookUrl: string | null;
+    webhookSecretHash: string | null;
+  },
+  payload: DocumentWebhookPayload,
+): Promise<void> {
+  if (!document.webhookUrl || !document.webhookSecretHash) return;
+  await postSignedWebhook(
+    document.webhookUrl,
+    document.webhookSecretHash,
+    JSON.stringify(payload),
+    document.id,
+    db,
+  );
+}
+
+/** One POST; failures audit webhook_failed and do not throw. */
 export async function fireDocumentCompleted(
   db: AuditDb,
   document: {
@@ -331,21 +368,14 @@ export async function fireDocumentCompleted(
   },
   payload: DocumentCompletedPayload,
 ): Promise<void> {
-  if (!document.webhookUrl || !document.webhookSecretHash) return;
-  const body = {
+  await fireDocumentWebhook(db, document, {
     event: payload.event,
     id: payload.id,
     status: payload.status,
     sha256: payload.sha256,
     shred_at: payload.shred_at.toISOString(),
-  };
-  await postSignedWebhook(
-    document.webhookUrl,
-    document.webhookSecretHash,
-    JSON.stringify(body),
-    document.id,
-    db,
-  );
+    ...(payload.values ? { values: payload.values } : {}),
+  });
 }
 
 async function deliverAgentWebhook(

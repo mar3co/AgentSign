@@ -541,6 +541,7 @@ export async function inviteFirstSigner(
     expiresAt: Date;
     userId: string | null;
     sendEmail?: boolean;
+    signingMode?: "sequential" | "parallel";
   },
   at: Date,
 ): Promise<{ signers: InviteSigner[] }> {
@@ -556,6 +557,73 @@ export async function inviteFirstSigner(
     role: h.roleName || defaultRoleName(h.signingOrder),
     sign_url: `/s/${tokens.get(h.id)}`,
   }));
+
+  const parallel = document.signingMode === "parallel";
+  if (parallel) {
+    for (const party of signerRows) {
+      if (party.kind === "agent") {
+        await fireAgentPartyReady(db, { id: document.id, status: "pending" }, party);
+      }
+    }
+    const brand =
+      document.sendEmail === false
+        ? null
+        : await loadBrand(db, document.userId, requireStore());
+    for (const human of humans) {
+      const raw = tokens.get(human.id);
+      if (!raw) continue;
+      if (document.sendEmail === false) {
+        await db
+          .update(signersTable)
+          .set({ sentAt: at })
+          .where(eq(signersTable.id, human.id));
+        await logEvent(db, {
+          documentId: document.id,
+          signerId: human.id,
+          event: "sent",
+        });
+        continue;
+      }
+      try {
+        await mailer.sendMail({
+          to: human.email,
+          ...inviteEmail({
+            signUrl: publicSignUrl(raw),
+            senderEmail: document.senderEmail,
+            title: document.title,
+            expiresAt: document.expiresAt,
+            brand: {
+              displayName: brand!.displayName,
+              hasLogo: Boolean(brand!.logoBytes),
+            },
+          }),
+          attachments: brandMailAttachments(brand!.logoBytes),
+        });
+        await db
+          .update(signersTable)
+          .set({ sentAt: at })
+          .where(eq(signersTable.id, human.id));
+        await logEvent(db, {
+          documentId: document.id,
+          signerId: human.id,
+          event: "sent",
+        });
+        await logEvent(db, {
+          documentId: document.id,
+          signerId: human.id,
+          event: "emailed",
+        });
+      } catch (err) {
+        await logEvent(db, {
+          documentId: document.id,
+          signerId: human.id,
+          event: "emailed_failed",
+          payload: { error: err instanceof Error ? err.message : "mail_failed" },
+        });
+      }
+    }
+    return { signers };
+  }
 
   const first = signerRows[0];
   if (!first) return { signers };

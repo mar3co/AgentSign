@@ -11,6 +11,7 @@ import { fireAgentPartyWebhooks } from "../lib/webhooks.js";
 import {
   buildCompleteAppearances,
   commitCompletedDocument,
+  fireSignerCompletedWebhook,
   inviteNextHumanIfNeeded,
   partyDone,
   type DocumentRow,
@@ -313,6 +314,11 @@ export async function attestDocument(req: Request, documentId: string): Promise<
     signerId: party.id,
     event: "attested",
   });
+  try {
+    await fireSignerCompletedWebhook(db, document, claimed, "pending");
+  } catch {
+    // delivery audits webhook_failed
+  }
 
   return Response.json({ status: "pending" });
 }

@@ -59,6 +59,7 @@ async function startDocument(opts: {
   signers?: { name: string; email: string }[];
   title?: string;
   sender?: string;
+  sendEmail?: boolean;
 }) {
   const db = await createTestDb();
   const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
@@ -81,6 +82,7 @@ async function startDocument(opts: {
     JSON.stringify(opts.signers ?? [{ name: "Jane", email: "jane@example.com" }]),
   );
   body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
+  if (opts.sendEmail === false) body.set("send_email", "false");
   const res = await postDocument(
     new Request("http://sign.test/v1/documents", { method: "POST", body }),
   );
@@ -267,6 +269,24 @@ describe("remindDue and shredDue", () => {
 
     expect(mailsTo(pending.sent, "bot@example.com")).toHaveLength(0);
     expect(reminderMails(pending.sent).some((m) => m.to === "jane@example.com")).toBe(true);
+  });
+
+  it("send_email false skips reminders", { timeout: 60_000 }, async () => {
+    let at = new Date("2026-08-20T12:00:00Z");
+    const pending = await startDocument({ now: () => at, sendEmail: false });
+    const [doc] = await pending.db
+      .select()
+      .from(documents)
+      .where(eq(documents.id, pending.id));
+    expect(doc!.sendEmail).toBe(false);
+    expect(inviteMails(pending.sent)).toHaveLength(0);
+    const janeBefore = mailsTo(pending.sent, "jane@example.com").length;
+
+    at = new Date(at.getTime() + 3 * DAY);
+    await remindDue(pending.db, pending.mailer, at);
+
+    expect(reminderMails(pending.sent)).toHaveLength(0);
+    expect(mailsTo(pending.sent, "jane@example.com").length).toBe(janeBefore);
   });
 
   it("sends at most two reminders", { timeout: 60_000 }, async () => {

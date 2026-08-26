@@ -42,6 +42,8 @@ async function startVerified(opts?: {
   signers?: { name: string; email: string }[];
   now?: () => Date;
   fields?: unknown;
+  order?: "sequential" | "parallel";
+  sendEmail?: boolean;
 }) {
   const db = await createTestDb();
   const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
@@ -67,6 +69,8 @@ async function startVerified(opts?: {
   if (opts?.fields !== undefined) {
     body.set("fields", JSON.stringify(opts.fields));
   }
+  if (opts?.order) body.set("order", opts.order);
+  if (opts?.sendEmail === false) body.set("send_email", "false");
   const res = await postDocument(
     new Request("http://sign.test/v1/documents", { method: "POST", body }),
   );
@@ -1034,5 +1038,50 @@ describe("signing ceremony", () => {
     const sealed = await store.get(objectKey(id, "sealed"));
     expect(sealed).not.toBeNull();
     expect(sealed!.byteLength).toBeGreaterThan(0);
+  });
+
+  it("parallel lets the second human Finish without sequential_wait", {
+    timeout: 60_000,
+  }, async () => {
+    const { db, sent, signers, tokens } = await startVerified({
+      order: "parallel",
+      signers: [
+        { name: "Jane", email: "jane@example.com" },
+        { name: "Bob", email: "bob@example.com" },
+      ],
+    });
+    const [doc] = await db.select().from(documents);
+    expect(doc!.signingMode).toBe("parallel");
+    expect(signers).toHaveLength(2);
+    expect(signers.every((s) => s.sign_url)).toBe(true);
+    expect(sent.filter((m) => m.to === "jane@example.com").length).toBeGreaterThan(0);
+    expect(sent.filter((m) => m.to === "bob@example.com").length).toBeGreaterThan(0);
+
+    const bob = tokens[1]!;
+    const wait = await getSigningState(bob);
+    expect(wait.status).toBe(200);
+    expect(((await wait.json()) as { sequentialWait: boolean }).sequentialWait).toBe(
+      false,
+    );
+
+    setDeps({ p12: makeDevP12("test"), p12Passphrase: "test" });
+    expect(
+      (await postConsent(consentRequest(bob), { params: Promise.resolve({ token: bob }) }))
+        .status,
+    ).toBe(200);
+    expect(
+      (await postSign(signRequest(bob), { params: Promise.resolve({ token: bob }) })).status,
+    ).toBe(200);
+
+    const jane = tokens[0]!;
+    expect(
+      (await postConsent(consentRequest(jane), { params: Promise.resolve({ token: jane }) }))
+        .status,
+    ).toBe(200);
+    const finish = await postSign(signRequest(jane), {
+      params: Promise.resolve({ token: jane }),
+    });
+    expect(finish.status).toBe(200);
+    expect(((await finish.json()) as { status: string }).status).toBe("completed");
   });
 });

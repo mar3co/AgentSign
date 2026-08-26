@@ -106,6 +106,7 @@ export async function remindDue(
     .where(eq(documents.status, "pending"));
   for (const document of pending) {
     if (document.expiresAt.getTime() <= now.getTime()) continue;
+    if (document.sendEmail === false) continue;
     const rows = await db
       .select()
       .from(signersTable)

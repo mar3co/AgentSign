@@ -801,7 +801,11 @@ describe("POST /v1/documents/:id/attest", () => {
     expect("sha256" in agentDonePayload).toBe(false);
     expect(String(agentDone[0]!.init.body)).not.toContain(agent.key);
 
-    const envDone = posts.filter((p) => p.url === "https://example.com/env-hook");
+    const envDone = posts.filter(
+      (p) =>
+        p.url === "https://example.com/env-hook" &&
+        String(p.init.body).includes("document.completed"),
+    );
     expect(envDone).toHaveLength(1);
     const envPayload = JSON.parse(String(envDone[0]!.init.body)) as Record<string, unknown>;
     expect(envPayload.event).toBe("document.completed");
@@ -814,6 +818,13 @@ describe("POST /v1/documents/:id/attest", () => {
       .update(`${envTs}.${String(envDone[0]!.init.body)}`)
       .digest("hex");
     expect(envSig).toBe(`sha256=${envExpected}`);
+    expect(
+      posts.some(
+        (p) =>
+          p.url === "https://example.com/env-hook" &&
+          String(p.init.body).includes("signer.completed"),
+      ),
+    ).toBe(true);
   });
 
   it("inviteNextHumanIfNeeded does not email when document is not pending", {

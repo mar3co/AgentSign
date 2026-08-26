@@ -41,6 +41,7 @@ import {
   fireAgentPartyReady,
   fireAgentPartyWebhooks,
   fireDocumentCompleted,
+  fireDocumentWebhook,
   openWebhookSecret,
   sealWebhookSecret,
   webhookEncryptionReady,
@@ -145,6 +146,40 @@ function certificateFields(
     }
     return { role: field.role, name: field.name, type: field.type, value };
   });
+}
+
+async function webhookFieldValues(
+  store: BlobStore | null,
+  documentId: string,
+  fields: DocumentField[],
+  parties: SignerRow[],
+  onlySignerId?: string,
+): Promise<Array<{ role: string; name: string; type: string; value: string }>> {
+  if (fields.length === 0) return [];
+  const out: Array<{ role: string; name: string; type: string; value: string }> = [];
+  for (const field of fields) {
+    const party = parties.find((s) => signerRole(s) === field.role);
+    if (!party) continue;
+    if (onlySignerId && party.id !== onlySignerId) continue;
+    let value = "";
+    if (field.type === "signature" || field.type === "initials") {
+      let signed = false;
+      if (store) {
+        const png =
+          (await store.get(fieldAppearanceKey(documentId, party.id, field.name))) ??
+          (await store.get(appearanceKey(documentId, party.id)));
+        signed = Boolean(png);
+      }
+      value = signed ? "[signed]" : "";
+    } else if (field.type === "checkbox") {
+      value = checkboxChecked(party.values?.[field.name]) ? "true" : "false";
+    } else {
+      const v = party.values?.[field.name];
+      value = v == null ? "" : String(v);
+    }
+    out.push({ role: field.role, name: field.name, type: field.type, value });
+  }
+  return out;
 }
 
 async function buildFieldParties(
@@ -607,12 +642,29 @@ export async function commitCompletedDocument(opts: {
   }
 
   try {
+    await fireSignerCompletedWebhook(db, document, signer, "completed");
+  } catch {
+    // delivery audits webhook_failed
+  }
+  const completedValues = await webhookFieldValues(
+    store,
+    document.id,
+    docFields,
+    (
+      await db
+        .select()
+        .from(signersTable)
+        .where(eq(signersTable.documentId, document.id))
+    ).sort((a, b) => a.signingOrder - b.signingOrder),
+  );
+  try {
     await fireDocumentCompleted(db, document, {
       event: "document.completed",
       id: document.id,
       status: "completed",
       sha256: result.sha256,
       shred_at: shredAt,
+      ...(completedValues.length ? { values: completedValues } : {}),
     });
   } catch (err) {
     await logEvent(db, {
@@ -640,6 +692,35 @@ export async function commitCompletedDocument(opts: {
   });
 }
 
+export async function fireSignerCompletedWebhook(
+  db: AuditDb,
+  document: DocumentRow,
+  party: SignerRow,
+  status: string,
+): Promise<void> {
+  const store = requireStore();
+  const parties = await db
+    .select()
+    .from(signersTable)
+    .where(eq(signersTable.documentId, document.id));
+  parties.sort((a, b) => a.signingOrder - b.signingOrder);
+  const values = await webhookFieldValues(
+    store,
+    document.id,
+    document.fields ?? [],
+    parties,
+    party.id,
+  );
+  await fireDocumentWebhook(db, document, {
+    event: "signer.completed",
+    id: document.id,
+    status,
+    signer_email: party.email,
+    kind: party.kind === "agent" ? "agent" : "human",
+    ...(values.length ? { values } : {}),
+  });
+}
+
 export async function inviteNextHumanIfNeeded(
   db: AuditDb,
   document: DocumentRow,
@@ -648,6 +729,7 @@ export async function inviteNextHumanIfNeeded(
   at: Date,
   rollbackCurrent: () => Promise<void>,
 ): Promise<Response | null> {
+  if (document.signingMode === "parallel") return null;
   const next = allSigners.find((s) => s.signingOrder === current.signingOrder + 1);
   if (!next || partyDone(next) || next.sentAt) return null;
   const [live] = await db
@@ -776,6 +858,18 @@ export async function getSigningState(
       ip: req ? clientIp(req) : undefined,
       ua: req?.headers.get("user-agent") ?? undefined,
     });
+    if (signer.kind !== "agent") {
+      try {
+        await fireDocumentWebhook(db, document, {
+          event: "document.opened",
+          id: document.id,
+          status: document.status,
+          signer_email: signer.email,
+        });
+      } catch {
+        // delivery audits webhook_failed; open still succeeds
+      }
+    }
   }
 
   let display_name: string | null = null;
@@ -1111,6 +1205,11 @@ export async function postSign(req: Request, token: string): Promise<Response> {
     ip: ip ?? undefined,
     ua: ua ?? undefined,
   });
+  try {
+    await fireSignerCompletedWebhook(db, document, claimed, "pending");
+  } catch {
+    // delivery audits webhook_failed
+  }
 
   return Response.json({ status: "pending" });
 }

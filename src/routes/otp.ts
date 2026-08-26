@@ -156,6 +156,8 @@ export async function verifyDocumentOtp(
       expiresAt: document.expiresAt,
       userId: owner?.userId ?? document.userId,
       sendEmail: document.sendEmail,
+      signingMode:
+        document.signingMode === "parallel" ? "parallel" : "sequential",
     },
     at,
   );
