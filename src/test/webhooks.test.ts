@@ -160,9 +160,30 @@ describe("document.completed webhook", () => {
       expect(completed).toHaveLength(1);
       expect(completed[0]!.url).toBe("https://example.com/hook");
       expect(completed[0]!.init.method).toBe("POST");
-      expect(
-        posts.some((p) => String(p.init.body).includes('"signer.completed"')),
-      ).toBe(true);
+
+      const signerDone = posts.filter((p) =>
+        String(p.init.body).includes('"signer.completed"'),
+      );
+      expect(signerDone).toHaveLength(1);
+      const signerRaw = String(signerDone[0]!.init.body);
+      const signerPayload = JSON.parse(signerRaw) as Record<string, unknown>;
+      expect(signerPayload).toMatchObject({
+        event: "signer.completed",
+        id: created.id,
+        status: "completed",
+        kind: "human",
+        signer_email: "jane@example.com",
+      });
+      expect("sign_url" in signerPayload).toBe(false);
+      expect(signerRaw).not.toContain(done.key);
+      expect(signerRaw).not.toContain(done.signers[0]!.sign_url);
+      expect(signerRaw).not.toContain(created.webhook_secret);
+      const signerTs = header(signerDone[0]!.init, "X-Sign-Timestamp");
+      const signerSig = header(signerDone[0]!.init, "X-Sign-Signature");
+      const signerExpected = createHmac("sha256", created.webhook_secret!)
+        .update(`${signerTs}.${signerRaw}`)
+        .digest("hex");
+      expect(signerSig).toBe(`sha256=${signerExpected}`);
 
       const rawBody = String(completed[0]!.init.body);
       const payload = JSON.parse(rawBody) as Record<string, unknown>;

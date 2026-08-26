@@ -646,17 +646,36 @@ export async function commitCompletedDocument(opts: {
   } catch {
     // delivery audits webhook_failed
   }
-  const completedValues = await webhookFieldValues(
-    store,
-    document.id,
-    docFields,
-    (
-      await db
-        .select()
-        .from(signersTable)
-        .where(eq(signersTable.documentId, document.id))
-    ).sort((a, b) => a.signingOrder - b.signingOrder),
+  const liveParties = (
+    await db
+      .select()
+      .from(signersTable)
+      .where(eq(signersTable.documentId, document.id))
+  ).sort((a, b) => a.signingOrder - b.signingOrder);
+  const needsCompletedAppearances = docFields.some(
+    (f) => f.type === "signature" || f.type === "initials",
   );
+  let completedValues: Array<{
+    role: string;
+    name: string;
+    type: string;
+    value: string;
+  }> = [];
+  try {
+    completedValues = await webhookFieldValues(
+      needsCompletedAppearances ? store : null,
+      document.id,
+      docFields,
+      liveParties,
+    );
+  } catch {
+    completedValues = await webhookFieldValues(
+      null,
+      document.id,
+      docFields,
+      liveParties,
+    );
+  }
   try {
     await fireDocumentCompleted(db, document, {
       event: "document.completed",
@@ -698,19 +717,31 @@ export async function fireSignerCompletedWebhook(
   party: SignerRow,
   status: string,
 ): Promise<void> {
-  const store = requireStore();
+  const fields = document.fields ?? [];
+  const role = signerRole(party);
+  const needsAppearances = fields.some(
+    (f) =>
+      f.role === role && (f.type === "signature" || f.type === "initials"),
+  );
+  const store = needsAppearances ? requireStore() : null;
   const parties = await db
     .select()
     .from(signersTable)
     .where(eq(signersTable.documentId, document.id));
   parties.sort((a, b) => a.signingOrder - b.signingOrder);
-  const values = await webhookFieldValues(
-    store,
-    document.id,
-    document.fields ?? [],
-    parties,
-    party.id,
-  );
+  let values: Array<{ role: string; name: string; type: string; value: string }> =
+    [];
+  try {
+    values = await webhookFieldValues(
+      store,
+      document.id,
+      fields,
+      parties,
+      party.id,
+    );
+  } catch {
+    values = await webhookFieldValues(null, document.id, fields, parties, party.id);
+  }
   await fireDocumentWebhook(db, document, {
     event: "signer.completed",
     id: document.id,
