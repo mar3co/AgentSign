@@ -972,4 +972,67 @@ describe("signing ceremony", () => {
     );
     expect(preview.status).toBe(409);
   });
+
+  it("checkbox-only signer then signature signer completes", { timeout: 60_000 }, async () => {
+    const { store, id, token, signers } = await startVerified({
+      signers: [
+        { name: "Jane", email: "jane@example.com" },
+        { name: "Bob", email: "bob@example.com" },
+      ],
+      fields: [
+        {
+          name: "agree",
+          type: "checkbox",
+          role: "Signer 1",
+          required: true,
+          readonly: false,
+          areas: [{ page: 1, x: 10, y: 80, w: 5, h: 5 }],
+        },
+        {
+          name: "sig",
+          type: "signature",
+          role: "Signer 2",
+          required: true,
+          readonly: false,
+          areas: [{ page: 1, x: 10, y: 60, w: 40, h: 10 }],
+        },
+      ],
+    });
+    setDeps({ p12: makeDevP12("test"), p12Passphrase: "test" });
+    expect(
+      (await postConsent(consentRequest(token), { params: Promise.resolve({ token }) })).status,
+    ).toBe(200);
+    const janeBody = new FormData();
+    janeBody.set("values", JSON.stringify({ agree: true }));
+    const jane = await postSign(
+      new Request(`http://sign.test/s/${token}/sign`, {
+        method: "POST",
+        headers: { "user-agent": "test-ua", "x-forwarded-for": "1.2.3.4" },
+        body: janeBody,
+      }),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(jane.status).toBe(200);
+
+    const bob = tokenFromUrl(signers[1]!.sign_url!);
+    expect(
+      (await postConsent(consentRequest(bob), { params: Promise.resolve({ token: bob }) })).status,
+    ).toBe(200);
+    const bobBody = new FormData();
+    bobBody.set("png", new Blob([png], { type: "image/png" }), "sig.png");
+    bobBody.set("values", JSON.stringify({}));
+    const signed = await postSign(
+      new Request(`http://sign.test/s/${bob}/sign`, {
+        method: "POST",
+        headers: { "user-agent": "test-ua", "x-forwarded-for": "1.2.3.4" },
+        body: bobBody,
+      }),
+      { params: Promise.resolve({ token: bob }) },
+    );
+    expect(signed.status).toBe(200);
+    expect(((await signed.json()) as { status: string }).status).toBe("completed");
+    const sealed = await store.get(objectKey(id, "sealed"));
+    expect(sealed).not.toBeNull();
+    expect(sealed!.byteLength).toBeGreaterThan(0);
+  });
 });

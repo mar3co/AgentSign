@@ -227,6 +227,8 @@ export async function attestDocument(req: Request, documentId: string): Promise<
       allSigners,
       party.id,
       at,
+      undefined,
+      (document.fields ?? []).length === 0,
     );
     if (!built.ok) return built.error;
     return commitCompletedDocument({

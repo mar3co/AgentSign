@@ -276,6 +276,7 @@ export async function buildCompleteAppearances(
   currentId: string,
   at: Date,
   currentPng?: Uint8Array,
+  requirePriorPng = true,
 ): Promise<
   { ok: true; appearances: SignatureAppearance[] } | { ok: false; error: Response }
 > {
@@ -303,7 +304,7 @@ export async function buildCompleteAppearances(
     }
     if (!s.signedAt) continue;
     const prior = await store.get(appearanceKey(documentId, s.id));
-    if (!prior) {
+    if (!prior && requirePriorPng) {
       return {
         ok: false,
         error: jsonError(500, "Prior signature missing", "missing_appearance"),
@@ -311,7 +312,7 @@ export async function buildCompleteAppearances(
     }
     appearances.push({
       kind: "human",
-      png: prior,
+      png: prior ?? undefined,
       name: s.name,
       email: s.email,
       signedAt: s.signedAt,
@@ -1047,6 +1048,7 @@ export async function postSign(req: Request, token: string): Promise<Response> {
       signer.id,
       at,
       currentPng,
+      docFields.length === 0,
     );
     if (!built.ok) return built.error;
     return commitCompletedDocument({
