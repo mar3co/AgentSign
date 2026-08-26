@@ -524,18 +524,22 @@ export async function inviteNextHumanIfNeeded(
   const mailer = requireMailer();
   const store = requireStore();
   let raw: string;
-  if (next.tokenEnc) {
-    raw = openWebhookSecret(next.tokenEnc);
+  let tokenHash = next.tokenHash;
+  let tokenEnc = next.tokenEnc;
+  if (tokenEnc) {
+    raw = openWebhookSecret(tokenEnc);
   } else {
     const token = newSigningToken();
     raw = token.raw;
-    const [slot] = await db
-      .update(signersTable)
-      .set({ tokenHash: token.hash, tokenEnc: sealWebhookSecret(token.raw) })
-      .where(and(eq(signersTable.id, next.id), isNull(signersTable.sentAt)))
-      .returning();
-    if (!slot) return null;
+    tokenHash = token.hash;
+    tokenEnc = sealWebhookSecret(token.raw);
   }
+  const [slot] = await db
+    .update(signersTable)
+    .set({ sentAt: at, tokenHash, tokenEnc })
+    .where(and(eq(signersTable.id, next.id), isNull(signersTable.sentAt)))
+    .returning();
+  if (!slot) return null;
   const brand = await loadBrand(db, document.userId, store);
   const invite = inviteEmail({
     signUrl: publicSignUrl(raw),
@@ -553,10 +557,6 @@ export async function inviteNextHumanIfNeeded(
       ...invite,
       attachments: brandMailAttachments(brand.logoBytes),
     });
-    await db
-      .update(signersTable)
-      .set({ sentAt: at })
-      .where(eq(signersTable.id, next.id));
     await logEvent(db, {
       documentId: document.id,
       signerId: next.id,
@@ -569,6 +569,10 @@ export async function inviteNextHumanIfNeeded(
     });
   } catch (err) {
     await rollbackCurrent();
+    await db
+      .update(signersTable)
+      .set({ sentAt: null })
+      .where(eq(signersTable.id, next.id));
     await logEvent(db, {
       documentId: document.id,
       signerId: next.id,

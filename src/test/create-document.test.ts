@@ -1122,4 +1122,53 @@ describe("POST /v1/documents on-page fields", () => {
     };
     expect(got.signers[0]!.values?.["Full Name"]).toBe("Jane");
   });
+
+  it("GET sign_url is omitted for a signer account", { timeout: 60_000 }, async () => {
+    await bootAuth();
+    const ownerCookie = await magicCookie("shop@example.com");
+    const key = await mintLive(ownerCookie);
+    const res = await postDocument(
+      new Request("http://sign.test/v1/documents", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}` },
+        body: await documentBody([
+          { name: "Jane", email: "jane@example.com" },
+          { name: "Bob", email: "bob@example.com" },
+        ]),
+      }),
+    );
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as {
+      id: string;
+      signers: { sign_url?: string }[];
+    };
+    expect(created.signers[0]!.sign_url).toMatch(/^\/s\//);
+    expect(created.signers[1]!.sign_url).toMatch(/^\/s\//);
+
+    const janeCookie = await magicCookie("jane@example.com");
+    const asSigner = await getDocument(
+      new Request(`http://sign.test/v1/documents/${created.id}`, {
+        headers: { cookie: janeCookie },
+      }),
+      { params: Promise.resolve({ id: created.id }) },
+    );
+    expect(asSigner.status).toBe(200);
+    const signerGot = (await asSigner.json()) as {
+      signers: { sign_url?: string }[];
+    };
+    expect(signerGot.signers.some((s) => s.sign_url)).toBe(false);
+
+    const asOwner = await getDocument(
+      new Request(`http://sign.test/v1/documents/${created.id}`, {
+        headers: { authorization: `Bearer ${key}` },
+      }),
+      { params: Promise.resolve({ id: created.id }) },
+    );
+    expect(asOwner.status).toBe(200);
+    const ownerGot = (await asOwner.json()) as {
+      signers: { sign_url?: string }[];
+    };
+    expect(ownerGot.signers[0]!.sign_url).toMatch(/^\/s\//);
+    expect(ownerGot.signers[1]!.sign_url).toMatch(/^\/s\//);
+  });
 });

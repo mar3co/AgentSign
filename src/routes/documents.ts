@@ -1357,7 +1357,7 @@ export async function getDocument(req: Request, documentId: string): Promise<Res
       const role = s.roleName || defaultRoleName(s.signingOrder);
       const values = await signerPublicValues(store, document.id, s.id, role, fields, s.values);
       let sign_url: string | undefined;
-      if (s.kind !== "agent" && s.tokenEnc) {
+      if (authed.canDelete && s.kind !== "agent" && s.tokenEnc) {
         try {
           sign_url = `/s/${openWebhookSecret(s.tokenEnc)}`;
         } catch {

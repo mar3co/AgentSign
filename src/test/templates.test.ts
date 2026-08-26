@@ -276,7 +276,7 @@ describe("templates API", () => {
     expect(await store.get(`templates/${template.id}/original.pdf`)).toBeNull();
   });
 
-  it("POST document_id copies original PDF and defaults roles to signer names", { timeout: 60_000 }, async () => {
+  it("POST document_id copies original PDF and defaults roles to signer role names", { timeout: 60_000 }, async () => {
     const { db, store, userFor } = await boot();
     const { cookie } = await asPro(db, userFor);
     const minted = await postKeys(
@@ -319,8 +319,62 @@ describe("templates API", () => {
     expect(created.status).toBe(201);
     const template = (await created.json()) as TemplateJson;
     expect(template.title).toBe("Repair authorization");
-    expect(template.roles).toEqual([{ signing_order: 1, role_name: "Jane" }]);
+    expect(template.roles).toEqual([{ signing_order: 1, role_name: "Signer 1" }]);
     expect(await store.get(`templates/${template.id}/original.pdf`)).toEqual(pdf);
+  });
+
+  it("POST document_id copies tagged fields using signer role names", {
+    timeout: 60_000,
+  }, async () => {
+    const { db, userFor } = await boot();
+    const { cookie } = await asPro(db, userFor);
+    const minted = await postKeys(
+      new Request("http://sign.test/v1/keys", {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    expect(minted.status).toBe(201);
+    const { key } = (await minted.json()) as { key: string };
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    page.drawText("{{sig}}", { x: 72, y: 700, size: 12, font });
+    const pdf = await doc.save();
+    const envBody = new FormData();
+    envBody.set("title", "Repair authorization");
+    envBody.set("sender_email", "shop@example.com");
+    envBody.set(
+      "signers",
+      JSON.stringify([{ name: "Jane", email: "jane@example.com" }]),
+    );
+    envBody.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
+    const envRes = await postDocument(
+      new Request("http://sign.test/v1/documents", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}` },
+        body: envBody,
+      }),
+    );
+    expect(envRes.status).toBe(201);
+    const { id: documentId } = (await envRes.json()) as { id: string };
+
+    const save = new FormData();
+    save.set("document_id", documentId);
+    const created = await postTemplate(
+      new Request("http://sign.test/v1/templates", {
+        method: "POST",
+        headers: { cookie },
+        body: save,
+      }),
+    );
+    expect(created.status).toBe(201);
+    const template = (await created.json()) as TemplateJson;
+    expect(template.roles).toEqual([{ signing_order: 1, role_name: "Signer 1" }]);
+    expect(template.fields?.some((f) => f.name === "sig" && f.role === "Signer 1")).toBe(
+      true,
+    );
   });
 
   it("POST send creates pending document and mails invite", { timeout: 60_000 }, async () => {

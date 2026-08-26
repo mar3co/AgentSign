@@ -13,6 +13,7 @@ import { requireCaller } from "../lib/caller.js";
 import { getDeps, storeUnavailableResponse } from "../lib/deps.js";
 import { TEMPLATE_CAP } from "../lib/entitlement.js";
 import {
+  defaultRoleName,
   mergeFields,
   parseFieldsJson,
   type DocumentField,
@@ -323,7 +324,9 @@ export async function createTemplate(req: Request): Promise<Response> {
         .from(signersTable)
         .where(eq(signersTable.documentId, documentId));
       signerRows.sort((a, b) => a.signingOrder - b.signingOrder);
-      roleNames = signerRows.map((s) => s.name.trim()).filter(Boolean);
+      roleNames = signerRows
+        .map((s) => (s.roleName || defaultRoleName(s.signingOrder)).trim())
+        .filter(Boolean);
       if (roleNames.length === 0) {
         return jsonError(400, "At least one role is required", "invalid_request");
       }

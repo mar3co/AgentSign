@@ -13,7 +13,7 @@ import { POST as postSign } from "../../app/s/[token]/sign/route.js";
 import { POST as postDecline } from "../../app/s/[token]/decline/route.js";
 import { GET as getPdf } from "../../app/v1/documents/[id]/pdf/route.js";
 import { GET as getCeremonyPdf } from "../../app/s/[token]/pdf/route.js";
-import { getSigningState } from "../routes/signing.js";
+import { getSigningState, inviteNextHumanIfNeeded } from "../routes/signing.js";
 import { SigningCeremony } from "../../app/s/[token]/signing-ceremony.js";
 import { PDFDocument } from "pdf-lib";
 import SigningPage from "../../app/s/[token]/page.js";
@@ -763,5 +763,36 @@ describe("signing ceremony", () => {
     rows.sort((a, b) => a.signingOrder - b.signingOrder);
     expect(rows[0]!.signedAt).not.toBeNull();
     expect(rows[1]!.sentAt).not.toBeNull();
+  });
+
+  it("inviteNextHumanIfNeeded claims sent_at before mailing a minted token", {
+    timeout: 60_000,
+  }, async () => {
+    const { db, sent, id } = await startVerified({
+      signers: [
+        { name: "Jane", email: "jane@example.com" },
+        { name: "Bob", email: "bob@example.com" },
+      ],
+    });
+    const allSigners = await db
+      .select()
+      .from(signersTable)
+      .where(eq(signersTable.documentId, id));
+    allSigners.sort((a, b) => a.signingOrder - b.signingOrder);
+    expect(allSigners[1]!.tokenEnc).toBeTruthy();
+    expect(allSigners[1]!.sentAt).toBeNull();
+    const [document] = await db.select().from(documents).where(eq(documents.id, id));
+    const before = sent.filter((m) => m.to === "bob@example.com").length;
+    const at = new Date();
+    await Promise.all([
+      inviteNextHumanIfNeeded(db, document!, allSigners, allSigners[0]!, at, async () => {}),
+      inviteNextHumanIfNeeded(db, document!, allSigners, allSigners[0]!, at, async () => {}),
+    ]);
+    expect(sent.filter((m) => m.to === "bob@example.com")).toHaveLength(before + 1);
+    const [bob] = await db
+      .select()
+      .from(signersTable)
+      .where(eq(signersTable.id, allSigners[1]!.id));
+    expect(bob!.sentAt).not.toBeNull();
   });
 });
