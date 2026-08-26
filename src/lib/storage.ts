@@ -14,6 +14,14 @@ export function appearanceKey(documentId: string, signerId: string): string {
   return `${documentId}/appearance/${signerId}.png`;
 }
 
+export function fieldAppearanceKey(
+  documentId: string,
+  signerId: string,
+  fieldName: string,
+): string {
+  return `${documentId}/appearance/${signerId}/${encodeURIComponent(fieldName)}.png`;
+}
+
 export { createFsStore } from "./storage/fs.js";
 export {
   createSupabaseStore,
