@@ -194,9 +194,7 @@ describe("email templates", () => {
     expect(done.signers[0]!.email).toBe("jane@example.com");
     expect(done.signers[0]!.sign_url).toMatch(/^\/s\//);
     expect(done.signers[1]!.email).toBe("bob@example.com");
-    expect(done.signers[1]!.sign_url == null || done.signers[1]!.sign_url === "").toBe(
-      true,
-    );
+    expect(done.signers[1]!.sign_url).toMatch(/^\/s\//);
 
     const janeUrl = done.signers[0]!.sign_url!;
     const jane = tokenFromUrl(janeUrl);

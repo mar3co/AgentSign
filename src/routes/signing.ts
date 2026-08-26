@@ -33,6 +33,7 @@ import {
   fireAgentPartyReady,
   fireAgentPartyWebhooks,
   fireDocumentCompleted,
+  openWebhookSecret,
   sealWebhookSecret,
   webhookEncryptionReady,
 } from "../lib/webhooks.js";
@@ -522,16 +523,22 @@ export async function inviteNextHumanIfNeeded(
 
   const mailer = requireMailer();
   const store = requireStore();
-  const token = newSigningToken();
-  const [slot] = await db
-    .update(signersTable)
-    .set({ tokenHash: token.hash, tokenEnc: sealWebhookSecret(token.raw) })
-    .where(and(eq(signersTable.id, next.id), isNull(signersTable.sentAt)))
-    .returning();
-  if (!slot) return null;
+  let raw: string;
+  if (next.tokenEnc) {
+    raw = openWebhookSecret(next.tokenEnc);
+  } else {
+    const token = newSigningToken();
+    raw = token.raw;
+    const [slot] = await db
+      .update(signersTable)
+      .set({ tokenHash: token.hash, tokenEnc: sealWebhookSecret(token.raw) })
+      .where(and(eq(signersTable.id, next.id), isNull(signersTable.sentAt)))
+      .returning();
+    if (!slot) return null;
+  }
   const brand = await loadBrand(db, document.userId, store);
   const invite = inviteEmail({
-    signUrl: publicSignUrl(token.raw),
+    signUrl: publicSignUrl(raw),
     senderEmail: document.senderEmail,
     title: document.title,
     expiresAt: document.expiresAt,

@@ -138,6 +138,14 @@ async function resolveHost(host: string): Promise<{ address: string; family: num
   }
 }
 
+/** Host/IP denylist without DNS. Embed origins use this so they are not resolved. */
+export function isBlockedWebhookHost(host: string): boolean {
+  const h = normalizeHost(host);
+  if (!h) return true;
+  if (BLOCKED_HOSTS.has(h) || h.endsWith(".localhost")) return true;
+  return isBlockedIp(h);
+}
+
 /** Reject non-https, localhost, private/link-local/metadata targets (SSRF). */
 export async function webhookUrlError(url: string): Promise<string | null> {
   let parsed: URL;
@@ -149,10 +157,7 @@ export async function webhookUrlError(url: string): Promise<string | null> {
   if (parsed.protocol !== "https:") return "Webhook URL must be https";
   const host = normalizeHost(parsed.hostname);
   if (!host) return "Invalid webhook URL";
-  if (BLOCKED_HOSTS.has(host) || host.endsWith(".localhost")) {
-    return "Webhook URL is not allowed";
-  }
-  if (isBlockedIp(host)) return "Webhook URL is not allowed";
+  if (isBlockedWebhookHost(host)) return "Webhook URL is not allowed";
   const resolved = await resolveHost(host);
   if (resolved.length === 0) return "Webhook URL is not allowed";
   for (const row of resolved) {

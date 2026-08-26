@@ -19,7 +19,6 @@ import { PDFDocument } from "pdf-lib";
 import SigningPage from "../../app/s/[token]/page.js";
 import { makeDevP12 } from "../lib/pdf/devP12.js";
 import { sha256Hex } from "../lib/hash.js";
-import { newSigningToken } from "../lib/tokens.js";
 import { minimalPdf } from "./pdf.js";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -254,21 +253,10 @@ describe("signing ceremony", () => {
       ],
     });
     expect(seq.signers[0]!.sign_url).toMatch(/^\/s\//);
-    expect(seq.signers[1]!.sign_url == null || seq.signers[1]!.sign_url === "").toBe(
-      true,
-    );
-    // Defense-in-depth: if a later signer somehow has a token before prior signs, wait.
-    const bobEarly = newSigningToken();
-    const bobRows = await seq.db
-      .select()
-      .from(signersTable)
-      .where(eq(signersTable.documentId, seq.id));
-    bobRows.sort((a, b) => a.signingOrder - b.signingOrder);
-    await seq.db
-      .update(signersTable)
-      .set({ tokenHash: bobEarly.hash })
-      .where(eq(signersTable.id, bobRows[1]!.id));
-    const wait = await getSigningState(bobEarly.raw);
+    expect(seq.signers[1]!.sign_url).toMatch(/^\/s\//);
+    // Later humans already have a token; sequential wait still 409 until prior signs.
+    const bobEarly = tokenFromUrl(seq.signers[1]!.sign_url!);
+    const wait = await getSigningState(bobEarly);
     expect(wait.status).toBe(409);
     const body = (await wait.json()) as { error: string };
     expect(body.error).toBe("Waiting on previous signer.");

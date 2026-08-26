@@ -343,17 +343,37 @@ async function loadPdfJs() {
   return import("pdfjs-dist/legacy/build/pdf.mjs");
 }
 
+/** pdfjs forbids enumerable extras on Array.prototype (PGlite/test DB adds `.random`). */
+async function hideEnumerableArrayExtras<T>(fn: () => Promise<T>): Promise<T> {
+  const hidden: [string, PropertyDescriptor][] = [];
+  for (const key of Object.keys(Array.prototype as unknown as Record<string, unknown>)) {
+    const desc = Object.getOwnPropertyDescriptor(Array.prototype, key);
+    if (!desc?.enumerable) continue;
+    hidden.push([key, desc]);
+    Object.defineProperty(Array.prototype, key, { ...desc, enumerable: false });
+  }
+  try {
+    return await fn();
+  } finally {
+    for (const [key, desc] of hidden) {
+      Object.defineProperty(Array.prototype, key, desc);
+    }
+  }
+}
+
 export async function parsePdfTags(bytes: Uint8Array): Promise<ParseTagsResult> {
-  const pdfjs = await loadPdfJs();
+  const pdfjs = await hideEnumerableArrayExtras(() => loadPdfJs());
   let pdf;
   try {
     // pdfjs v6 types dropped disableWorker/isEvalSupported; still pass per plan.
-    pdf = await pdfjs.getDocument({
-      data: bytes.slice(),
-      disableWorker: true,
-      isEvalSupported: false,
-      useSystemFonts: true,
-    } as Parameters<typeof pdfjs.getDocument>[0]).promise;
+    pdf = await hideEnumerableArrayExtras(() =>
+      pdfjs.getDocument({
+        data: bytes.slice(),
+        disableWorker: true,
+        isEvalSupported: false,
+        useSystemFonts: true,
+      } as Parameters<typeof pdfjs.getDocument>[0]).promise,
+    );
   } catch (err) {
     const e = new Error("invalid_pdf");
     e.cause = err;
