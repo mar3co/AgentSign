@@ -34,6 +34,13 @@ export async function burnFields(
   original: Uint8Array,
   input: { fields: DocumentField[]; parties: BurnParty[] },
 ): Promise<Uint8Array> {
+  const roles = new Set<string>();
+  for (const party of input.parties) {
+    if (roles.has(party.role)) {
+      throw new Error("Signer roles must be unique");
+    }
+    roles.add(party.role);
+  }
   const doc = await PDFDocument.load(original);
   const pages = doc.getPages();
   const font = await doc.embedFont(StandardFonts.Helvetica);
@@ -48,6 +55,7 @@ export async function burnFields(
       const { width: pageWidth, height: pageHeight } = page.getSize();
       const rect = areaToPdfRect(pageWidth, pageHeight, area);
       const { x, y, w, h } = rect;
+      if (w <= 0 || h <= 0) continue;
 
       if (field.type === "signature" || field.type === "initials") {
         const png = party.pngs[field.name];

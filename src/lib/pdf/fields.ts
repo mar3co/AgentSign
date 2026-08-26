@@ -136,9 +136,16 @@ export function areaToPdfRect(
   pageHeight: number,
   area: FieldArea,
 ): { x: number; y: number; w: number; h: number } {
-  const w = (area.w / 100) * pageWidth;
-  const h = (area.h / 100) * pageHeight;
-  const x = (area.x / 100) * pageWidth;
-  const y = pageHeight - (area.y / 100) * pageHeight - h;
+  let x = (area.x / 100) * pageWidth;
+  let w = (area.w / 100) * pageWidth;
+  const top = (area.y / 100) * pageHeight;
+  let h = (area.h / 100) * pageHeight;
+  let y = pageHeight - top - h;
+  const x2 = Math.min(pageWidth, Math.max(0, x + w));
+  const y2 = Math.min(pageHeight, Math.max(0, y + h));
+  x = Math.min(pageWidth, Math.max(0, x));
+  y = Math.min(pageHeight, Math.max(0, y));
+  w = Math.max(0, x2 - x);
+  h = Math.max(0, y2 - y);
   return { x, y, w, h };
 }

@@ -972,6 +972,72 @@ describe("POST /v1/documents on-page fields", () => {
     expect(got.fields.some((f) => f.name === "sig")).toBe(true);
   });
 
+  it("rejects a readonly field without a value", { timeout: 60_000 }, async () => {
+    await bootAuth();
+    const cookie = await magicCookie("shop@example.com");
+    const key = await mintLive(cookie);
+    const body = await documentBody([{ name: "Jane", email: "jane@example.com" }]);
+    body.set(
+      "fields",
+      JSON.stringify([
+        {
+          name: "Title",
+          type: "text",
+          role: "Signer 1",
+          required: false,
+          readonly: true,
+          areas: [area()],
+        },
+      ]),
+    );
+    const res = await postDocument(
+      new Request("http://sign.test/v1/documents", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}` },
+        body,
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code: string }).code).toBe("invalid_values");
+  });
+
+  it("rejects tag and API fields that conflict on type", { timeout: 60_000 }, async () => {
+    await bootAuth();
+    const cookie = await magicCookie("shop@example.com");
+    const key = await mintLive(cookie);
+    const pdf = await taggedPdf(["{{sig}}"]);
+    const body = new FormData();
+    body.set("title", "Repair authorization");
+    body.set("sender_email", "shop@example.com");
+    body.set(
+      "signers",
+      JSON.stringify([{ name: "Jane", email: "jane@example.com" }]),
+    );
+    body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
+    body.set(
+      "fields",
+      JSON.stringify([
+        {
+          name: "sig",
+          type: "text",
+          role: "Signer 1",
+          required: true,
+          readonly: false,
+          areas: [area()],
+        },
+      ]),
+    );
+    const res = await postDocument(
+      new Request("http://sign.test/v1/documents", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}` },
+        body,
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code: string }).code).toBe("invalid_fields");
+  });
+
   it("rejects a signature field on an agent role", { timeout: 60_000 }, async () => {
     const { db, userFor } = await bootAuth();
     const cookie = await magicCookie("shop@example.com");

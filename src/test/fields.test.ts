@@ -75,4 +75,14 @@ describe("fields", () => {
     expect(r.h).toBeCloseTo(79.2);
     expect(r.y).toBeCloseTo(792 - 79.2);
   });
+
+  it("areaToPdfRect clamps overflow to the page", () => {
+    const r = areaToPdfRect(612, 792, { page: 1, x: 90, y: 90, w: 20, h: 20 });
+    expect(r.x).toBeGreaterThanOrEqual(0);
+    expect(r.y).toBeGreaterThanOrEqual(0);
+    expect(r.x + r.w).toBeLessThanOrEqual(612);
+    expect(r.y + r.h).toBeLessThanOrEqual(792);
+    expect(r.w).toBeGreaterThan(0);
+    expect(r.h).toBeGreaterThan(0);
+  });
 });

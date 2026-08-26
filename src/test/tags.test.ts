@@ -30,6 +30,29 @@ describe("parsePdfTags", () => {
     expect(again.fields).toEqual([]);
   });
 
+  it("parses a text tag area within 1 percent of the drawn box", async () => {
+    const pageWidth = 612;
+    const pageHeight = 792;
+    const x = 72;
+    const y = 700;
+    const size = 12;
+    const text = "{{Full Name;type=text;role=Signer 1}}";
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([pageWidth, pageHeight]);
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    page.drawText(text, { x, y, size, font });
+    const w = font.widthOfTextAtSize(text, size);
+    const result = await parsePdfTags(await doc.save());
+    const field = result.fields.find((f) => f.name === "Full Name");
+    expect(field).toBeTruthy();
+    const area = field!.areas[0]!;
+    expect(area.page).toBe(1);
+    expect(Math.abs(area.x - (x / pageWidth) * 100)).toBeLessThanOrEqual(1);
+    expect(Math.abs(area.y - ((pageHeight - (y + size)) / pageHeight) * 100)).toBeLessThanOrEqual(1);
+    expect(Math.abs(area.w - (w / pageWidth) * 100)).toBeLessThanOrEqual(1);
+    expect(Math.abs(area.h - (size / pageHeight) * 100)).toBeLessThanOrEqual(1);
+  });
+
   it("joins split {{ sig }} items", async () => {
     const doc = await PDFDocument.create();
     const page = doc.addPage([612, 792]);

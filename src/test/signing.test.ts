@@ -876,7 +876,9 @@ describe("signing ceremony", () => {
       { params: Promise.resolve({ id }) },
     );
     expect(pdf.status).toBe(200);
-    const sealedDoc = await PDFDocument.load(await pdf.arrayBuffer());
+    const sealedBytes = Buffer.from(await pdf.arrayBuffer());
+    expect(sealedBytes.includes(Buffer.from("/Image"))).toBe(true);
+    const sealedDoc = await PDFDocument.load(sealedBytes);
     expect(sealedDoc.getPageCount()).toBe(1);
   });
 
