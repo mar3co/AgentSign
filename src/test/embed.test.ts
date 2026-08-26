@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
+import { NextRequest } from "next/server";
+import { middleware } from "../../middleware.js";
 import { GET as getAuthCallback } from "../../app/auth/callback/route.js";
 import { POST as postLogin } from "../../app/login/session/route.js";
 import { POST as postDocument } from "../../app/v1/documents/route.js";
@@ -209,6 +211,44 @@ describe("create embed options", () => {
       .where(eq(signersTable.documentId, json.id));
     expect(rows[0]!.sentAt).toBeTruthy();
     expect(rows[0]!.tokenEnc).toBeTruthy();
+  });
+
+  it("middleware sets frame-ancestors for embed_origin and omits X-Frame-Options", {
+    timeout: 60_000,
+  }, async () => {
+    await bootAuth();
+    const cookie = await magicCookie("shop@example.com");
+    const key = await mintLive(cookie);
+    const pdf = await minimalPdf();
+    const body = new FormData();
+    body.set("title", "Repair authorization");
+    body.set("sender_email", "shop@example.com");
+    body.set(
+      "signers",
+      JSON.stringify([{ name: "Jane", email: "jane@example.com" }]),
+    );
+    body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
+    body.set("send_email", "false");
+    body.set("embed_origin", "https://app.example.com");
+    const res = await postDocument(
+      new Request("http://sign.test/v1/documents", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}` },
+        body,
+      }),
+    );
+    expect(res.status).toBe(201);
+    const json = (await res.json()) as {
+      signers: { sign_url?: string }[];
+    };
+    const token = json.signers[0]!.sign_url!.replace(/^\/s\//, "");
+    const framed = await middleware(
+      new NextRequest(`http://sign.test/s/${token}`),
+    );
+    expect(framed.headers.get("Content-Security-Policy")).toBe(
+      "frame-ancestors 'self' https://app.example.com",
+    );
+    expect(framed.headers.get("X-Frame-Options")).toBeNull();
   });
 
   it("completed_redirect_url to http is 400", async () => {

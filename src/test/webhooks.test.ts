@@ -397,6 +397,44 @@ describe("document.completed webhook", () => {
     },
   );
 
+  it("signer.completed omits unsigned optional initials", { timeout: 60_000 }, async () => {
+    const { sent, posts, res } = await startVerified({
+      webhookUrl: "https://example.com/hook",
+      fields: [
+        {
+          name: "sig",
+          type: "signature",
+          role: "Signer 1",
+          required: true,
+          readonly: false,
+          areas: [{ page: 1, x: 10, y: 80, w: 40, h: 10 }],
+        },
+        {
+          name: "ini",
+          type: "initials",
+          role: "Signer 1",
+          required: false,
+          readonly: false,
+          areas: [{ page: 1, x: 10, y: 60, w: 15, h: 8 }],
+        },
+      ],
+    });
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as { id: string };
+    const { sign } = await verifyAndSign(created.id, sent);
+    expect(sign.status).toBe(200);
+
+    const signerDone = posts.filter((p) =>
+      String(p.init.body).includes('"signer.completed"'),
+    );
+    expect(signerDone).toHaveLength(1);
+    const payload = JSON.parse(String(signerDone[0]!.init.body)) as {
+      values?: { name: string; value: string }[];
+    };
+    expect(payload.values?.find((v) => v.name === "sig")?.value).toBe("[signed]");
+    expect(payload.values?.some((v) => v.name === "ini")).toBe(false);
+  });
+
   it("first open fires document.opened", { timeout: 60_000 }, async () => {
     const frozen = new Date("2026-08-20T12:00:00Z");
     const { sent, posts, res } = await startVerified({

@@ -170,7 +170,8 @@ async function webhookFieldValues(
         );
         signed = Boolean(png);
       }
-      value = signed ? "[signed]" : "";
+      if (!signed) continue;
+      value = "[signed]";
     } else if (field.type === "checkbox") {
       value = checkboxChecked(party.values?.[field.name]) ? "true" : "false";
     } else {

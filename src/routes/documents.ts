@@ -1,5 +1,6 @@
 import { and, count, eq, gte, inArray, ne, or } from "drizzle-orm";
 import { z } from "zod";
+import { PDFDocument } from "pdf-lib";
 import { getDb } from "../db/client.js";
 import {
   accounts,
@@ -38,6 +39,7 @@ import { newOtp } from "../lib/otp.js";
 import { parseEmbedOrigin } from "../lib/embed.js";
 import {
   defaultRoleName,
+  fieldsFitPageCount,
   mergeFields,
   parseFieldsJson,
   type DocumentField,
@@ -370,7 +372,37 @@ export async function parsePdfAndFields(
       response: jsonError(400, merged.error, merged.code),
     };
   }
+  const pages = await fieldsMatchPdfPages(merged.fields, storedBytes);
+  if (!pages.ok) return pages;
   return { ok: true, fields: merged.fields, storedBytes };
+}
+
+async function fieldsMatchPdfPages(
+  fields: DocumentField[],
+  bytes: Uint8Array,
+): Promise<
+  | { ok: true }
+  | { ok: false; response: Response }
+> {
+  if (fields.length === 0) return { ok: true };
+  let pageCount: number;
+  try {
+    const doc = await PDFDocument.load(bytes);
+    pageCount = doc.getPageCount();
+  } catch {
+    return {
+      ok: false,
+      response: jsonError(400, "File must be a PDF", "invalid_pdf"),
+    };
+  }
+  const fit = fieldsFitPageCount(fields, pageCount);
+  if (!fit.ok) {
+    return {
+      ok: false,
+      response: jsonError(400, fit.error, fit.code),
+    };
+  }
+  return { ok: true };
 }
 
 export async function parseDocumentExtras(input: {
@@ -721,10 +753,13 @@ export async function sendPreparedPdf(opts: {
 
   const resolved = await resolveSignerParties(db, opts.signers, opts.userId);
   if (!resolved.ok) return resolved.response;
+  const fields = opts.fields ?? [];
+  const pages = await fieldsMatchPdfPages(fields, opts.bytes);
+  if (!pages.ok) return pages.response;
   const prepared = prepareParties(
     resolved.parties,
     opts.signers,
-    opts.fields ?? [],
+    fields,
     opts.values ?? {},
   );
   if (!prepared.ok) return prepared.response;
@@ -786,7 +821,7 @@ export async function sendPreparedPdf(opts: {
       sha256: fileHash,
       webhookUrl,
       webhookSecretHash,
-      fields: opts.fields ?? [],
+      fields,
       signingMode: opts.signingMode ?? "sequential",
       sendEmail: opts.sendEmail ?? true,
       completedRedirectUrl: opts.completedRedirectUrl ?? null,

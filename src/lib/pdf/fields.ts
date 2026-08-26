@@ -40,13 +40,18 @@ const requiredByType: Record<FieldType, boolean> = {
   checkbox: false,
 };
 
-const fieldAreaSchema = z.object({
-  page: z.number().int().positive(),
-  x: z.number().finite(),
-  y: z.number().finite(),
-  w: z.number().finite().gt(0),
-  h: z.number().finite().gt(0),
-});
+const fieldAreaSchema = z
+  .object({
+    page: z.number().int().positive(),
+    x: z.number().finite(),
+    y: z.number().finite(),
+    w: z.number().finite().gt(0),
+    h: z.number().finite().gt(0),
+  })
+  .refine(
+    (a) => a.x < 100 && a.x + a.w > 0 && a.y < 100 && a.y + a.h > 0,
+    { message: "area must intersect the page" },
+  );
 
 const documentFieldSchema = z
   .object({
@@ -70,6 +75,20 @@ type FieldsResult =
 
 function invalid(error: string): FieldsResult {
   return { ok: false, error, code: "invalid_fields" };
+}
+
+export function fieldsFitPageCount(
+  fields: DocumentField[],
+  pageCount: number,
+): FieldsResult {
+  for (const field of fields) {
+    for (const area of field.areas) {
+      if (area.page > pageCount) {
+        return invalid("area page is out of range");
+      }
+    }
+  }
+  return { ok: true, fields };
 }
 
 export function defaultRoleName(signingOrder: number): string {

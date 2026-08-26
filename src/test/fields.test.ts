@@ -85,4 +85,31 @@ describe("fields", () => {
     expect(r.w).toBeGreaterThan(0);
     expect(r.h).toBeGreaterThan(0);
   });
+
+  it("rejects an area that does not intersect the page and allows overflow that does", () => {
+    const overflow = parseFieldsJson([
+      {
+        name: "sig",
+        type: "signature",
+        role: "Signer 1",
+        required: true,
+        readonly: false,
+        areas: [{ page: 1, x: 90, y: 90, w: 20, h: 20 }],
+      },
+    ]);
+    expect(overflow.ok).toBe(true);
+
+    const off = parseFieldsJson([
+      {
+        name: "sig",
+        type: "signature",
+        role: "Signer 1",
+        required: true,
+        readonly: false,
+        areas: [{ page: 1, x: 101, y: 10, w: 10, h: 8 }],
+      },
+    ]);
+    expect(off.ok).toBe(false);
+    if (!off.ok) expect(off.code).toBe("invalid_fields");
+  });
 });

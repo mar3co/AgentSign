@@ -64,6 +64,15 @@ describe("parsePdfTags", () => {
     expect(result.fields.some((f) => f.type === "signature")).toBe(true);
   });
 
+  it("parses init, date, and name aliases", async () => {
+    const bytes = await drawTags(["{{init}}", "{{date}}", "{{name}}"]);
+    const result = await parsePdfTags(bytes);
+    const byName = Object.fromEntries(result.fields.map((f) => [f.name, f.type]));
+    expect(byName.init).toBe("initials");
+    expect(byName.date).toBe("date");
+    expect(byName.name).toBe("name");
+  });
+
   it("unknown type throws invalid_fields", async () => {
     const bytes = await drawTags(["{{Pay;type=payment}}"]);
     await expect(parsePdfTags(bytes)).rejects.toMatchObject({

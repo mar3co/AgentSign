@@ -19,8 +19,9 @@ import {
   signers as signersTable,
 } from "../db/schema.js";
 import { resetEnvCache } from "../env.js";
-import { resetDeps, setDeps } from "../lib/deps.js";
-import { createFsStore } from "../lib/storage.js";
+import { getDeps, resetDeps, setDeps } from "../lib/deps.js";
+import { parsePdfTags } from "../lib/pdf/tags.js";
+import { createFsStore, objectKey } from "../lib/storage.js";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import { createTestDb } from "./db.js";
 import { minimalPdf } from "./pdf.js";
@@ -970,6 +971,40 @@ describe("POST /v1/documents on-page fields", () => {
     expect(status.status).toBe(200);
     const got = (await status.json()) as { fields: { name: string }[] };
     expect(got.fields.some((f) => f.name === "sig")).toBe(true);
+
+    const stored = await getDeps().store?.get(objectKey(json.id, "original"));
+    expect(stored).toBeTruthy();
+    const again = await parsePdfTags(stored!);
+    expect(again.fields).toEqual([]);
+  });
+
+  it("rejects a field on a page the PDF does not have", { timeout: 60_000 }, async () => {
+    await bootAuth();
+    const cookie = await magicCookie("shop@example.com");
+    const key = await mintLive(cookie);
+    const body = await documentBody([{ name: "Jane", email: "jane@example.com" }]);
+    body.set(
+      "fields",
+      JSON.stringify([
+        {
+          name: "sig",
+          type: "signature",
+          role: "Signer 1",
+          required: true,
+          readonly: false,
+          areas: [{ page: 2, x: 10, y: 20, w: 30, h: 8 }],
+        },
+      ]),
+    );
+    const res = await postDocument(
+      new Request("http://sign.test/v1/documents", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}` },
+        body,
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code: string }).code).toBe("invalid_fields");
   });
 
   it("rejects a readonly field without a value", { timeout: 60_000 }, async () => {
