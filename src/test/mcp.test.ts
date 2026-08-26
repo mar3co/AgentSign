@@ -69,7 +69,7 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
     void server;
     const init = await client.getServerVersion();
     expect(init?.name).toBe("agentsign");
-    expect(init?.version).toBe("2.0.0");
+    expect(init?.version).toBe("2.1.0");
   });
 
   it("GET /openapi.json lists the five HTTP paths", async () => {
@@ -95,7 +95,7 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
   });
 
   it("documents v1.2 rest and MCP tools without a sign tool", async () => {
-    expect(openapi.info.version).toBe("2.0.0");
+    expect(openapi.info.version).toBe("2.1.0");
     expect(openapi.openapi).toBe("3.1.0");
     expect(openapi.paths["/v1/branding"]).toBeTruthy();
     expect(openapi.paths["/v1/templates"]).toBeTruthy();
@@ -108,6 +108,7 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
     expect(openapi.paths["/v1/billing"]).toBeTruthy();
     expect(openapi.paths["/v1/billing/domain"]).toBeFalsy();
     expect(openapi.paths["/v1/billing/domain/verify"]).toBeFalsy();
+    expect(openapi.paths["/s/{token}/preview"]).toBeTruthy();
     const text = await (await getLlms()).text();
     expect(text).toMatch(/send/);
     expect(text).toMatch(/There is no sign/);
@@ -116,6 +117,9 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
     expect(text).not.toMatch(/\/v1\/billing\/domain/);
     expect(text).not.toMatch(/Optional Bearer tmp or live key/);
     expect(text).toMatch(/sign_tmp_/);
+    expect(text).toMatch(/embed_origin/);
+    expect(text).toMatch(/\{\{sig\}\}/);
+    expect(text).toMatch(/send_email/);
     const bearer = openapi.components.securitySchemes.bearerAuth.description;
     expect(bearer).not.toMatch(/Optional on POST \/v1\/documents/);
     expect(bearer).toMatch(/sign_tmp_/);
@@ -137,13 +141,90 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
     const listed = await client.listTools();
     const send = listed.tools.find((t) => t.name === "send");
     const template = listed.tools.find((t) => t.name === "send_template");
+    const names = listed.tools.map((t) => t.name);
+    expect(names).not.toContain("sign");
     const templateSchema = JSON.stringify(template?.inputSchema);
     expect(templateSchema).not.toMatch(/"kind"/);
     expect(templateSchema).not.toMatch(/"agent"/);
+    expect(templateSchema).not.toMatch(/"fields"/);
+    expect(templateSchema).toMatch(/"values"/);
+    expect(templateSchema).toMatch(/"send_email"/);
+    expect(templateSchema).toMatch(/"embed_origin"/);
     const sendSchema = JSON.stringify(send?.inputSchema);
     expect(sendSchema).toMatch(/"kind"/);
     expect(sendSchema).toMatch(/"agent"/);
+    expect(sendSchema).toMatch(/"fields"/);
+    expect(sendSchema).toMatch(/"values"/);
+    expect(sendSchema).toMatch(/"order"/);
+    expect(sendSchema).toMatch(/"send_email"/);
+    expect(sendSchema).toMatch(/"completed_redirect_url"/);
+    expect(sendSchema).toMatch(/"embed_origin"/);
   });
+
+  it(
+    "send with fields JSON stores them for status",
+    { timeout: 60_000 },
+    async () => {
+      const db = await createTestDb();
+      const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+      const sent: { to: string; subject: string; text: string }[] = [];
+      setDeps({
+        db,
+        store,
+        mailer: { sendMail: async (m) => { sent.push(m); } },
+        p12: makeDevP12("test"),
+        p12Passphrase: "test",
+      });
+
+      const { client } = await connectMcp();
+      const pdf = await minimalPdf();
+      const fields = JSON.stringify([
+        {
+          name: "sig",
+          type: "signature",
+          role: "Signer 1",
+          required: true,
+          readonly: false,
+          areas: [{ page: 1, x: 10, y: 20, w: 30, h: 8 }],
+        },
+      ]);
+      const sendResult = await client.callTool({
+        name: "send",
+        arguments: {
+          title: "Fielded authorization",
+          sender_email: "shop@example.com",
+          signers: [{ name: "Jane", email: "jane@example.com" }],
+          pdf: Buffer.from(pdf).toString("base64"),
+          fields,
+        },
+      });
+      const sendText = textOf(sendResult as { content: Array<{ type: string; text?: string }> });
+      const sendJson = JSON.parse(sendText) as { id: string; status: string };
+      expect(sendJson.id).toBeTruthy();
+      expect(sendJson.status).toBe("pending_sender");
+
+      const code = sent[0]!.text.match(/\b(\d{6})\b/)![1]!;
+      const verify = await postOtp(
+        new Request(`http://sign.test/v1/documents/${sendJson.id}/otp`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ code }),
+        }),
+        { params: Promise.resolve({ id: sendJson.id }) },
+      );
+      expect(verify.status).toBe(200);
+      const done = (await verify.json()) as { key: string };
+      const statusResult = await client.callTool({
+        name: "status",
+        arguments: { id: sendJson.id, api_key: done.key },
+      });
+      const statusText = textOf(
+        statusResult as { content: Array<{ type: string; text?: string }> },
+      );
+      const statusJson = JSON.parse(statusText) as { fields: { name: string }[] };
+      expect(statusJson.fields.some((f) => f.name === "sig")).toBe(true);
+    },
+  );
 
   it("POST /mcp Streamable HTTP uses protocolVersion 2025-11-25 and lists MCP tools", async () => {
     const headers = {

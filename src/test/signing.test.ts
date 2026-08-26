@@ -11,15 +11,16 @@ import { POST as postOtp } from "../../app/v1/documents/[id]/otp/route.js";
 import { POST as postConsent } from "../../app/s/[token]/consent/route.js";
 import { POST as postSign } from "../../app/s/[token]/sign/route.js";
 import { POST as postDecline } from "../../app/s/[token]/decline/route.js";
+import { GET as getDocument } from "../../app/v1/documents/[id]/route.js";
 import { GET as getPdf } from "../../app/v1/documents/[id]/pdf/route.js";
 import { GET as getCeremonyPdf } from "../../app/s/[token]/pdf/route.js";
-import { getSigningState } from "../routes/signing.js";
+import { GET as getPreview } from "../../app/s/[token]/preview/route.js";
+import { getSigningState, inviteNextHumanIfNeeded } from "../routes/signing.js";
 import { SigningCeremony } from "../../app/s/[token]/signing-ceremony.js";
 import { PDFDocument } from "pdf-lib";
 import SigningPage from "../../app/s/[token]/page.js";
 import { makeDevP12 } from "../lib/pdf/devP12.js";
 import { sha256Hex } from "../lib/hash.js";
-import { newSigningToken } from "../lib/tokens.js";
 import { minimalPdf } from "./pdf.js";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -41,6 +42,9 @@ function tokenFromUrl(signUrl: string) {
 async function startVerified(opts?: {
   signers?: { name: string; email: string }[];
   now?: () => Date;
+  fields?: unknown;
+  order?: "sequential" | "parallel";
+  sendEmail?: boolean;
 }) {
   const db = await createTestDb();
   const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
@@ -63,6 +67,11 @@ async function startVerified(opts?: {
     ),
   );
   body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
+  if (opts?.fields !== undefined) {
+    body.set("fields", JSON.stringify(opts.fields));
+  }
+  if (opts?.order) body.set("order", opts.order);
+  if (opts?.sendEmail === false) body.set("send_email", "false");
   const res = await postDocument(
     new Request("http://sign.test/v1/documents", { method: "POST", body }),
   );
@@ -254,21 +263,10 @@ describe("signing ceremony", () => {
       ],
     });
     expect(seq.signers[0]!.sign_url).toMatch(/^\/s\//);
-    expect(seq.signers[1]!.sign_url == null || seq.signers[1]!.sign_url === "").toBe(
-      true,
-    );
-    // Defense-in-depth: if a later signer somehow has a token before prior signs, wait.
-    const bobEarly = newSigningToken();
-    const bobRows = await seq.db
-      .select()
-      .from(signersTable)
-      .where(eq(signersTable.documentId, seq.id));
-    bobRows.sort((a, b) => a.signingOrder - b.signingOrder);
-    await seq.db
-      .update(signersTable)
-      .set({ tokenHash: bobEarly.hash })
-      .where(eq(signersTable.id, bobRows[1]!.id));
-    const wait = await getSigningState(bobEarly.raw);
+    expect(seq.signers[1]!.sign_url).toMatch(/^\/s\//);
+    // Later humans already have a token; sequential wait still 409 until prior signs.
+    const bobEarly = tokenFromUrl(seq.signers[1]!.sign_url!);
+    const wait = await getSigningState(bobEarly);
     expect(wait.status).toBe(409);
     const body = (await wait.json()) as { error: string };
     expect(body.error).toBe("Waiting on previous signer.");
@@ -775,5 +773,446 @@ describe("signing ceremony", () => {
     rows.sort((a, b) => a.signingOrder - b.signingOrder);
     expect(rows[0]!.signedAt).not.toBeNull();
     expect(rows[1]!.sentAt).not.toBeNull();
+  });
+
+  it("inviteNextHumanIfNeeded claims sent_at before mailing a minted token", {
+    timeout: 60_000,
+  }, async () => {
+    const { db, sent, id } = await startVerified({
+      signers: [
+        { name: "Jane", email: "jane@example.com" },
+        { name: "Bob", email: "bob@example.com" },
+      ],
+    });
+    const allSigners = await db
+      .select()
+      .from(signersTable)
+      .where(eq(signersTable.documentId, id));
+    allSigners.sort((a, b) => a.signingOrder - b.signingOrder);
+    expect(allSigners[1]!.tokenEnc).toBeTruthy();
+    expect(allSigners[1]!.sentAt).toBeNull();
+    const [document] = await db.select().from(documents).where(eq(documents.id, id));
+    const before = sent.filter((m) => m.to === "bob@example.com").length;
+    const at = new Date();
+    await Promise.all([
+      inviteNextHumanIfNeeded(db, document!, allSigners, allSigners[0]!, at, async () => {}),
+      inviteNextHumanIfNeeded(db, document!, allSigners, allSigners[0]!, at, async () => {}),
+    ]);
+    expect(sent.filter((m) => m.to === "bob@example.com")).toHaveLength(before + 1);
+    const [bob] = await db
+      .select()
+      .from(signersTable)
+      .where(eq(signersTable.id, allSigners[1]!.id));
+    expect(bob!.sentAt).not.toBeNull();
+  });
+
+  it("preview returns the original PDF while pending", { timeout: 30_000 }, async () => {
+    const { store, id, token } = await startVerified();
+    const res = await getPreview(
+      new Request(`http://sign.test/s/${token}/preview`),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toMatch(/pdf/);
+    expect(res.headers.get("content-disposition")).toMatch(/inline/i);
+    const original = await store.get(objectKey(id, "original"));
+    expect(original).not.toBeNull();
+    expect(Buffer.from(await res.arrayBuffer())).toEqual(Buffer.from(original!));
+  });
+
+  it("Finish with a signature field completes without an extra page", {
+    timeout: 60_000,
+  }, async () => {
+    const frozen = new Date("2026-08-20T12:00:00Z");
+    const { id, token, key } = await startVerified({
+      now: () => frozen,
+      fields: [
+        {
+          name: "sig",
+          type: "signature",
+          role: "Signer 1",
+          required: true,
+          readonly: false,
+          areas: [{ page: 1, x: 10, y: 80, w: 40, h: 10 }],
+        },
+      ],
+    });
+    setDeps({ p12: makeDevP12("test"), p12Passphrase: "test" });
+
+    const state = await getSigningState(token);
+    expect(state.status).toBe(200);
+    const json = (await state.json()) as {
+      id: string;
+      fields: { name: string; type: string }[];
+      values: Record<string, string | boolean>;
+      signing_mode: string;
+    };
+    expect(json.id).toBe(id);
+    expect(json.fields).toEqual([
+      expect.objectContaining({ name: "sig", type: "signature" }),
+    ]);
+    expect(json.signing_mode).toBe("sequential");
+
+    expect(
+      (await postConsent(consentRequest(token), { params: Promise.resolve({ token }) })).status,
+    ).toBe(200);
+    const body = new FormData();
+    body.set("png", new Blob([png], { type: "image/png" }), "sig.png");
+    body.set("values", JSON.stringify({}));
+    const sign = await postSign(
+      new Request(`http://sign.test/s/${token}/sign`, {
+        method: "POST",
+        headers: { "user-agent": "test-ua", "x-forwarded-for": "1.2.3.4" },
+        body,
+      }),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(sign.status).toBe(200);
+
+    const pdf = await getPdf(
+      new Request(`http://sign.test/v1/documents/${id}/pdf`, {
+        headers: { authorization: `Bearer ${key}` },
+      }),
+      { params: Promise.resolve({ id }) },
+    );
+    expect(pdf.status).toBe(200);
+    const sealedBytes = Buffer.from(await pdf.arrayBuffer());
+    expect(sealedBytes.includes(Buffer.from("/Image"))).toBe(true);
+    const sealedDoc = await PDFDocument.load(sealedBytes);
+    expect(sealedDoc.getPageCount()).toBe(1);
+  });
+
+  it("unsigned optional initials stay empty when a sibling signature is drawn", {
+    timeout: 60_000,
+  }, async () => {
+    const { id, token, key } = await startVerified({
+      fields: [
+        {
+          name: "sig",
+          type: "signature",
+          role: "Signer 1",
+          required: true,
+          readonly: false,
+          areas: [{ page: 1, x: 10, y: 80, w: 40, h: 10 }],
+        },
+        {
+          name: "ini",
+          type: "initials",
+          role: "Signer 1",
+          required: false,
+          readonly: false,
+          areas: [{ page: 1, x: 10, y: 60, w: 15, h: 8 }],
+        },
+      ],
+    });
+    setDeps({ p12: makeDevP12("test"), p12Passphrase: "test" });
+    expect(
+      (await postConsent(consentRequest(token), { params: Promise.resolve({ token }) })).status,
+    ).toBe(200);
+    const body = new FormData();
+    body.set("png", new Blob([png], { type: "image/png" }), "sig.png");
+    body.set("values", JSON.stringify({}));
+    const sign = await postSign(
+      new Request(`http://sign.test/s/${token}/sign`, {
+        method: "POST",
+        headers: { "user-agent": "test-ua", "x-forwarded-for": "1.2.3.4" },
+        body,
+      }),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(sign.status).toBe(200);
+
+    const status = await getDocument(
+      new Request(`http://sign.test/v1/documents/${id}`, {
+        headers: { authorization: `Bearer ${key}` },
+      }),
+      { params: Promise.resolve({ id }) },
+    );
+    expect(status.status).toBe(200);
+    const got = (await status.json()) as {
+      signers: { values?: Record<string, string | boolean> }[];
+    };
+    expect(got.signers[0]!.values?.sig).toBe("[signed]");
+    expect(got.signers[0]!.values?.ini).toBeUndefined();
+
+    const cert = await getPdf(
+      new Request(`http://sign.test/v1/documents/${id}/pdf?kind=certificate`, {
+        headers: { authorization: `Bearer ${key}` },
+      }),
+      { params: Promise.resolve({ id }) },
+    );
+    expect(cert.status).toBe(200);
+    const bytes = Buffer.from(await cert.arrayBuffer());
+    expect(bytes.includes(Buffer.from("Signer 1 sig (signature): drawn"))).toBe(true);
+    expect(bytes.includes(Buffer.from("Signer 1 ini (initials): drawn"))).toBe(false);
+  });
+
+  it("required checkbox false returns 400 invalid_values", { timeout: 30_000 }, async () => {
+    const { token, db } = await startVerified({
+      fields: [
+        {
+          name: "agree",
+          type: "checkbox",
+          role: "Signer 1",
+          required: true,
+          readonly: false,
+          areas: [{ page: 1, x: 10, y: 80, w: 5, h: 5 }],
+        },
+      ],
+    });
+    expect(
+      (await postConsent(consentRequest(token), { params: Promise.resolve({ token }) })).status,
+    ).toBe(200);
+    const body = new FormData();
+    body.set("png", new Blob([png], { type: "image/png" }), "sig.png");
+    body.set("values", JSON.stringify({ agree: false }));
+    const sign = await postSign(
+      new Request(`http://sign.test/s/${token}/sign`, {
+        method: "POST",
+        headers: { "user-agent": "test-ua" },
+        body,
+      }),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(sign.status).toBe(400);
+    expect(((await sign.json()) as { code: string }).code).toBe("invalid_values");
+    const [row] = await db.select().from(signersTable);
+    expect(row!.signedAt).toBeNull();
+  });
+
+  it("consent is still required when fields exist", { timeout: 30_000 }, async () => {
+    const { token } = await startVerified({
+      fields: [
+        {
+          name: "sig",
+          type: "signature",
+          role: "Signer 1",
+          required: true,
+          readonly: false,
+          areas: [{ page: 1, x: 10, y: 80, w: 40, h: 10 }],
+        },
+      ],
+    });
+    const body = new FormData();
+    body.set("png", new Blob([png], { type: "image/png" }), "sig.png");
+    body.set("values", JSON.stringify({}));
+    const sign = await postSign(
+      new Request(`http://sign.test/s/${token}/sign`, {
+        method: "POST",
+        body,
+      }),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(sign.status).toBe(400);
+    expect(((await sign.json()) as { code: string }).code).toBe("consent_required");
+  });
+
+  it("sequential wait still 409 for signer 2", { timeout: 30_000 }, async () => {
+    const seq = await startVerified({
+      signers: [
+        { name: "Jane", email: "jane@example.com" },
+        { name: "Bob", email: "bob@example.com" },
+      ],
+      fields: [
+        {
+          name: "sig",
+          type: "signature",
+          role: "Signer 1",
+          required: true,
+          readonly: false,
+          areas: [{ page: 1, x: 10, y: 80, w: 40, h: 10 }],
+        },
+        {
+          name: "sig",
+          type: "signature",
+          role: "Signer 2",
+          required: true,
+          readonly: false,
+          areas: [{ page: 1, x: 10, y: 60, w: 40, h: 10 }],
+        },
+      ],
+    });
+    const bob = tokenFromUrl(seq.signers[1]!.sign_url!);
+    const wait = await getSigningState(bob);
+    expect(wait.status).toBe(409);
+    expect(((await wait.json()) as { error: string }).error).toBe(
+      "Waiting on previous signer.",
+    );
+    const preview = await getPreview(
+      new Request(`http://sign.test/s/${bob}/preview`),
+      { params: Promise.resolve({ token: bob }) },
+    );
+    expect(preview.status).toBe(409);
+  });
+
+  it("checkbox-only signer then signature signer completes", { timeout: 60_000 }, async () => {
+    const { store, id, token, signers } = await startVerified({
+      signers: [
+        { name: "Jane", email: "jane@example.com" },
+        { name: "Bob", email: "bob@example.com" },
+      ],
+      fields: [
+        {
+          name: "agree",
+          type: "checkbox",
+          role: "Signer 1",
+          required: true,
+          readonly: false,
+          areas: [{ page: 1, x: 10, y: 80, w: 5, h: 5 }],
+        },
+        {
+          name: "sig",
+          type: "signature",
+          role: "Signer 2",
+          required: true,
+          readonly: false,
+          areas: [{ page: 1, x: 10, y: 60, w: 40, h: 10 }],
+        },
+      ],
+    });
+    setDeps({ p12: makeDevP12("test"), p12Passphrase: "test" });
+    expect(
+      (await postConsent(consentRequest(token), { params: Promise.resolve({ token }) })).status,
+    ).toBe(200);
+    const janeBody = new FormData();
+    janeBody.set("values", JSON.stringify({ agree: true }));
+    const jane = await postSign(
+      new Request(`http://sign.test/s/${token}/sign`, {
+        method: "POST",
+        headers: { "user-agent": "test-ua", "x-forwarded-for": "1.2.3.4" },
+        body: janeBody,
+      }),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(jane.status).toBe(200);
+
+    const bob = tokenFromUrl(signers[1]!.sign_url!);
+    expect(
+      (await postConsent(consentRequest(bob), { params: Promise.resolve({ token: bob }) })).status,
+    ).toBe(200);
+    const bobBody = new FormData();
+    bobBody.set("png", new Blob([png], { type: "image/png" }), "sig.png");
+    bobBody.set("values", JSON.stringify({}));
+    const signed = await postSign(
+      new Request(`http://sign.test/s/${bob}/sign`, {
+        method: "POST",
+        headers: { "user-agent": "test-ua", "x-forwarded-for": "1.2.3.4" },
+        body: bobBody,
+      }),
+      { params: Promise.resolve({ token: bob }) },
+    );
+    expect(signed.status).toBe(200);
+    expect(((await signed.json()) as { status: string }).status).toBe("completed");
+    const sealed = await store.get(objectKey(id, "sealed"));
+    expect(sealed).not.toBeNull();
+    expect(sealed!.byteLength).toBeGreaterThan(0);
+  });
+
+  it("parallel lets the second human Finish without sequential_wait", {
+    timeout: 60_000,
+  }, async () => {
+    const { db, sent, signers, tokens } = await startVerified({
+      order: "parallel",
+      signers: [
+        { name: "Jane", email: "jane@example.com" },
+        { name: "Bob", email: "bob@example.com" },
+      ],
+    });
+    const [doc] = await db.select().from(documents);
+    expect(doc!.signingMode).toBe("parallel");
+    expect(signers).toHaveLength(2);
+    expect(signers.every((s) => s.sign_url)).toBe(true);
+    expect(sent.filter((m) => m.to === "jane@example.com").length).toBeGreaterThan(0);
+    expect(sent.filter((m) => m.to === "bob@example.com").length).toBeGreaterThan(0);
+
+    const bob = tokens[1]!;
+    const wait = await getSigningState(bob);
+    expect(wait.status).toBe(200);
+    expect(((await wait.json()) as { sequentialWait: boolean }).sequentialWait).toBe(
+      false,
+    );
+
+    setDeps({ p12: makeDevP12("test"), p12Passphrase: "test" });
+    expect(
+      (await postConsent(consentRequest(bob), { params: Promise.resolve({ token: bob }) }))
+        .status,
+    ).toBe(200);
+    expect(
+      (await postSign(signRequest(bob), { params: Promise.resolve({ token: bob }) })).status,
+    ).toBe(200);
+
+    const jane = tokens[0]!;
+    expect(
+      (await postConsent(consentRequest(jane), { params: Promise.resolve({ token: jane }) }))
+        .status,
+    ).toBe(200);
+    const finish = await postSign(signRequest(jane), {
+      params: Promise.resolve({ token: jane }),
+    });
+    expect(finish.status).toBe(200);
+    expect(((await finish.json()) as { status: string }).status).toBe("completed");
+  });
+
+  it("parallel last-two Finish completes instead of leaving pending", {
+    timeout: 60_000,
+  }, async () => {
+    const { db, store, id, tokens } = await startVerified({
+      order: "parallel",
+      signers: [
+        { name: "Jane", email: "jane@example.com" },
+        { name: "Bob", email: "bob@example.com" },
+      ],
+    });
+    const jane = tokens[0]!;
+    const bob = tokens[1]!;
+    expect(
+      (await postConsent(consentRequest(jane), { params: Promise.resolve({ token: jane }) }))
+        .status,
+    ).toBe(200);
+    expect(
+      (await postConsent(consentRequest(bob), { params: Promise.resolve({ token: bob }) }))
+        .status,
+    ).toBe(200);
+
+    const innerPut = store.put.bind(store);
+    let appearancePuts = 0;
+    let releasePair: () => void = () => {};
+    const pair = new Promise<void>((resolve) => {
+      releasePair = resolve;
+    });
+    setDeps({
+      p12: makeDevP12("test"),
+      p12Passphrase: "test",
+      store: {
+        get: store.get.bind(store),
+        delete: store.delete.bind(store),
+        async put(key: string, bytes: Uint8Array) {
+          await innerPut(key, bytes);
+          if (!key.includes("/appearance/")) return;
+          appearancePuts += 1;
+          if (appearancePuts === 2) releasePair();
+          if (appearancePuts <= 2) await pair;
+        },
+      },
+    });
+
+    const [a, b] = await Promise.all([
+      postSign(signRequest(jane), { params: Promise.resolve({ token: jane }) }),
+      postSign(signRequest(bob), { params: Promise.resolve({ token: bob }) }),
+    ]);
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
+    const statuses = [
+      ((await a.json()) as { status: string }).status,
+      ((await b.json()) as { status: string }).status,
+    ];
+    expect(statuses).toContain("completed");
+
+    const [env] = await db.select().from(documents).where(eq(documents.id, id));
+    expect(env!.status).toBe("completed");
+    expect(await store.get(objectKey(id, "sealed"))).not.toBeNull();
+    const rows = await db.select().from(signersTable).where(eq(signersTable.documentId, id));
+    expect(rows).toHaveLength(2);
+    expect(rows.every((s) => s.signedAt)).toBe(true);
   });
 });

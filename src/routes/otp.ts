@@ -6,23 +6,21 @@ import {
   apiKeys,
   documents,
   otpChallenges,
-  signers as signersTable,
 } from "../db/schema.js";
 import { getEnv } from "../env.js";
 import { logEvent } from "../lib/audit.js";
 import { loadBrand } from "../lib/branding.js";
-import { publicSignUrl } from "../lib/signing-url.js";
 import { getDeps } from "../lib/deps.js";
 import {
   brandMailAttachments,
   createMailer,
-  inviteEmail,
   sendLiveEmail,
   type Mailer,
 } from "../lib/email.js";
 import { verifyOtp } from "../lib/otp.js";
-import { newSigningToken, newTmpKey } from "../lib/tokens.js";
-import { sealWebhookSecret, webhookEncryptionReady } from "../lib/webhooks.js";
+import { newTmpKey } from "../lib/tokens.js";
+import { webhookEncryptionReady } from "../lib/webhooks.js";
+import { inviteFirstSigner } from "./documents.js";
 
 const MAX_ATTEMPTS = 5;
 
@@ -148,29 +146,21 @@ export async function verifyDocumentOtp(
     })
     .where(eq(documents.id, document.id));
 
-  const signerRows = await db
-    .select()
-    .from(signersTable)
-    .where(eq(signersTable.documentId, document.id));
-  signerRows.sort((a, b) => a.signingOrder - b.signingOrder);
-
-  // Mint a real signing token only for signer 1; later signers keep pending placeholders.
-  const outSigners: { email: string; sign_url: string | null }[] = [];
-  let firstSignUrl: string | null = null;
-  for (const row of signerRows) {
-    if (row.signingOrder === 1 && row.kind !== "agent") {
-      const token = newSigningToken();
-      const signUrl = `/s/${token.raw}`;
-      await db
-        .update(signersTable)
-        .set({ tokenHash: token.hash, tokenEnc: sealWebhookSecret(token.raw) })
-        .where(eq(signersTable.id, row.id));
-      firstSignUrl = signUrl;
-      outSigners.push({ email: row.email, sign_url: signUrl });
-    } else {
-      outSigners.push({ email: row.email, sign_url: null });
-    }
-  }
+  const invited = await inviteFirstSigner(
+    db,
+    requireMailer(),
+    {
+      id: document.id,
+      senderEmail: document.senderEmail,
+      title: document.title,
+      expiresAt: document.expiresAt,
+      userId: owner?.userId ?? document.userId,
+      sendEmail: document.sendEmail,
+      signingMode:
+        document.signingMode === "parallel" ? "parallel" : "sequential",
+    },
+    at,
+  );
 
   const tmp = newTmpKey();
   await db.insert(apiKeys).values({
@@ -192,45 +182,6 @@ export async function verifyDocumentOtp(
     displayName: brand.displayName,
     hasLogo: Boolean(brand.logoBytes),
   };
-  const first = signerRows[0];
-  if (first && firstSignUrl) {
-    const token = firstSignUrl.replace(/^\/s\//, "");
-    const invite = inviteEmail({
-      signUrl: publicSignUrl(token),
-      senderEmail: document.senderEmail,
-      title: document.title,
-      expiresAt: document.expiresAt,
-      brand: mailBrand,
-    });
-    try {
-      await mailer.sendMail({
-        to: first.email,
-        ...invite,
-        attachments: brandMailAttachments(brand.logoBytes),
-      });
-      await db
-        .update(signersTable)
-        .set({ sentAt: at })
-        .where(eq(signersTable.id, first.id));
-      await logEvent(db, {
-        documentId: document.id,
-        signerId: first.id,
-        event: "sent",
-      });
-      await logEvent(db, {
-        documentId: document.id,
-        signerId: first.id,
-        event: "emailed",
-      });
-    } catch (err) {
-      await logEvent(db, {
-        documentId: document.id,
-        signerId: first.id,
-        event: "emailed_failed",
-        payload: { error: err instanceof Error ? err.message : "mail_failed" },
-      });
-    }
-  }
 
   try {
     const live = sendLiveEmail({
@@ -256,6 +207,6 @@ export async function verifyDocumentOtp(
     id: document.id,
     status: "pending",
     key: tmp.raw,
-    signers: outSigners,
+    signers: invited.signers,
   });
 }

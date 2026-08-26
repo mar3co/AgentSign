@@ -12,6 +12,7 @@ import { auditEvents, documents } from "../db/schema.js";
 import { setDeps } from "../lib/deps.js";
 import { makeDevP12 } from "../lib/pdf/devP12.js";
 import { createFsStore } from "../lib/storage.js";
+import { getSigningState } from "../routes/signing.js";
 import {
   fireAgentWebhook,
   newWebhookSecret,
@@ -48,6 +49,8 @@ async function startVerified(opts: {
   fetch?: typeof fetch;
   now?: () => Date;
   failFetch?: boolean;
+  fields?: unknown;
+  values?: unknown;
 }) {
   const db = await createTestDb();
   const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
@@ -80,6 +83,8 @@ async function startVerified(opts: {
   body.set("signers", JSON.stringify([{ name: "Jane", email: "jane@example.com" }]));
   body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
   if (opts.webhookUrl) body.set("webhook_url", opts.webhookUrl);
+  if (opts.fields !== undefined) body.set("fields", JSON.stringify(opts.fields));
+  if (opts.values !== undefined) body.set("values", JSON.stringify(opts.values));
   const res = await postDocument(
     new Request("http://sign.test/v1/documents", { method: "POST", body }),
   );
@@ -149,11 +154,38 @@ describe("document.completed webhook", () => {
 
       const { done, sign } = await verifyAndSign(created.id, sent);
       expect(sign.status).toBe(200);
-      expect(posts).toHaveLength(1);
-      expect(posts[0]!.url).toBe("https://example.com/hook");
-      expect(posts[0]!.init.method).toBe("POST");
+      const completed = posts.filter((p) =>
+        String(p.init.body).includes('"document.completed"'),
+      );
+      expect(completed).toHaveLength(1);
+      expect(completed[0]!.url).toBe("https://example.com/hook");
+      expect(completed[0]!.init.method).toBe("POST");
 
-      const rawBody = String(posts[0]!.init.body);
+      const signerDone = posts.filter((p) =>
+        String(p.init.body).includes('"signer.completed"'),
+      );
+      expect(signerDone).toHaveLength(1);
+      const signerRaw = String(signerDone[0]!.init.body);
+      const signerPayload = JSON.parse(signerRaw) as Record<string, unknown>;
+      expect(signerPayload).toMatchObject({
+        event: "signer.completed",
+        id: created.id,
+        status: "completed",
+        kind: "human",
+        signer_email: "jane@example.com",
+      });
+      expect("sign_url" in signerPayload).toBe(false);
+      expect(signerRaw).not.toContain(done.key);
+      expect(signerRaw).not.toContain(done.signers[0]!.sign_url);
+      expect(signerRaw).not.toContain(created.webhook_secret);
+      const signerTs = header(signerDone[0]!.init, "X-Sign-Timestamp");
+      const signerSig = header(signerDone[0]!.init, "X-Sign-Signature");
+      const signerExpected = createHmac("sha256", created.webhook_secret!)
+        .update(`${signerTs}.${signerRaw}`)
+        .digest("hex");
+      expect(signerSig).toBe(`sha256=${signerExpected}`);
+
+      const rawBody = String(completed[0]!.init.body);
       const payload = JSON.parse(rawBody) as Record<string, unknown>;
       expect(payload.event).toBe("document.completed");
       expect(payload.id).toBe(created.id);
@@ -169,8 +201,8 @@ describe("document.completed webhook", () => {
       expect(rawBody).not.toContain(done.signers[0]!.sign_url);
       expect(rawBody).not.toContain(created.webhook_secret);
 
-      const timestamp = header(posts[0]!.init, "X-Sign-Timestamp");
-      const signature = header(posts[0]!.init, "X-Sign-Signature");
+      const timestamp = header(completed[0]!.init, "X-Sign-Timestamp");
+      const signature = header(completed[0]!.init, "X-Sign-Signature");
       expect(timestamp).toBe(String(Math.floor(frozen.getTime() / 1000)));
       const expected = createHmac("sha256", created.webhook_secret!)
         .update(`${timestamp}.${rawBody}`)
@@ -228,7 +260,10 @@ describe("document.completed webhook", () => {
       expect(signed.status).toBe("completed");
       const [env] = await db.select().from(documents).where(eq(documents.id, created.id));
       expect(env!.status).toBe("completed");
-      expect(posts).toHaveLength(1);
+      expect(posts.length).toBeGreaterThanOrEqual(1);
+      expect(
+        posts.some((p) => String(p.init.body).includes('"document.completed"')),
+      ).toBe(true);
       const events = await db
         .select()
         .from(auditEvents)
@@ -260,6 +295,198 @@ describe("document.completed webhook", () => {
       lookup: async () => [{ address: "127.0.0.1", family: 4 }],
     });
     expect(await webhookUrlError("https://evil.example/hook")).toBeTruthy();
+  });
+
+  it(
+    "document.completed webhook includes field values and not sign_url",
+    { timeout: 60_000 },
+    async () => {
+      const frozen = new Date("2026-08-20T12:00:00Z");
+      const { sent, posts, res } = await startVerified({
+        webhookUrl: "https://example.com/hook",
+        now: () => frozen,
+        fields: [
+          {
+            name: "Full Name",
+            type: "text",
+            role: "Signer 1",
+            required: true,
+            readonly: false,
+            areas: [{ page: 1, x: 10, y: 80, w: 40, h: 8 }],
+          },
+        ],
+        values: { "Full Name": "Jane Doe" },
+      });
+      expect(res.status).toBe(201);
+      const created = (await res.json()) as {
+        id: string;
+        webhook_secret: string;
+      };
+
+      const code = sent[0]!.text.match(/\b(\d{6})\b/)![1]!;
+      const verify = await postOtp(
+        new Request(`http://sign.test/v1/documents/${created.id}/otp`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ code }),
+        }),
+        { params: Promise.resolve({ id: created.id }) },
+      );
+      expect(verify.status).toBe(200);
+      const done = (await verify.json()) as {
+        id: string;
+        key: string;
+        signers: { email: string; sign_url: string | null }[];
+      };
+      const token = done.signers[0]!.sign_url!.replace(/^\/s\//, "");
+      expect(
+        (
+          await postConsent(
+            new Request(`http://sign.test/s/${token}/consent`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ consent: true }),
+            }),
+            { params: Promise.resolve({ token }) },
+          )
+        ).status,
+      ).toBe(200);
+      const pngBody = new FormData();
+      pngBody.set("png", new Blob([png], { type: "image/png" }), "sig.png");
+      pngBody.set("values", JSON.stringify({ "Full Name": "Jane Doe" }));
+      const sign = await postSign(
+        new Request(`http://sign.test/s/${token}/sign`, {
+          method: "POST",
+          body: pngBody,
+        }),
+        { params: Promise.resolve({ token }) },
+      );
+      expect(sign.status).toBe(200);
+
+      const completed = posts.filter((p) =>
+        String(p.init.body).includes('"document.completed"'),
+      );
+      expect(completed).toHaveLength(1);
+      const rawBody = String(completed[0]!.init.body);
+      const payload = JSON.parse(rawBody) as {
+        event: string;
+        id: string;
+        values?: { role: string; name: string; type: string; value: string }[];
+      };
+      expect(payload.event).toBe("document.completed");
+      expect(payload.id).toBe(created.id);
+      expect(payload.values).toEqual([
+        {
+          role: "Signer 1",
+          name: "Full Name",
+          type: "text",
+          value: "Jane Doe",
+        },
+      ]);
+      expect("sign_url" in payload).toBe(false);
+      expect(rawBody).not.toContain(done.key);
+      expect(rawBody).not.toContain(done.signers[0]!.sign_url);
+      expect(rawBody).not.toContain(created.webhook_secret);
+
+      const timestamp = header(completed[0]!.init, "X-Sign-Timestamp");
+      const signature = header(completed[0]!.init, "X-Sign-Signature");
+      const expected = createHmac("sha256", created.webhook_secret)
+        .update(`${timestamp}.${rawBody}`)
+        .digest("hex");
+      expect(signature).toBe(`sha256=${expected}`);
+    },
+  );
+
+  it("signer.completed omits unsigned optional initials", { timeout: 60_000 }, async () => {
+    const { sent, posts, res } = await startVerified({
+      webhookUrl: "https://example.com/hook",
+      fields: [
+        {
+          name: "sig",
+          type: "signature",
+          role: "Signer 1",
+          required: true,
+          readonly: false,
+          areas: [{ page: 1, x: 10, y: 80, w: 40, h: 10 }],
+        },
+        {
+          name: "ini",
+          type: "initials",
+          role: "Signer 1",
+          required: false,
+          readonly: false,
+          areas: [{ page: 1, x: 10, y: 60, w: 15, h: 8 }],
+        },
+      ],
+    });
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as { id: string };
+    const { sign } = await verifyAndSign(created.id, sent);
+    expect(sign.status).toBe(200);
+
+    const signerDone = posts.filter((p) =>
+      String(p.init.body).includes('"signer.completed"'),
+    );
+    expect(signerDone).toHaveLength(1);
+    const payload = JSON.parse(String(signerDone[0]!.init.body)) as {
+      values?: { name: string; value: string }[];
+    };
+    expect(payload.values?.find((v) => v.name === "sig")?.value).toBe("[signed]");
+    expect(payload.values?.some((v) => v.name === "ini")).toBe(false);
+  });
+
+  it("first open fires document.opened", { timeout: 60_000 }, async () => {
+    const frozen = new Date("2026-08-20T12:00:00Z");
+    const { sent, posts, res } = await startVerified({
+      webhookUrl: "https://example.com/hook",
+      now: () => frozen,
+    });
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as {
+      id: string;
+      webhook_secret: string;
+    };
+    const code = sent[0]!.text.match(/\b(\d{6})\b/)![1]!;
+    const verify = await postOtp(
+      new Request(`http://sign.test/v1/documents/${created.id}/otp`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code }),
+      }),
+      { params: Promise.resolve({ id: created.id }) },
+    );
+    expect(verify.status).toBe(200);
+    const done = (await verify.json()) as {
+      signers: { email: string; sign_url: string | null }[];
+    };
+    const token = done.signers[0]!.sign_url!.replace(/^\/s\//, "");
+    posts.length = 0;
+
+    const first = await getSigningState(token);
+    expect(first.status).toBe(200);
+    expect(posts).toHaveLength(1);
+    const rawBody = String(posts[0]!.init.body);
+    const payload = JSON.parse(rawBody) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      event: "document.opened",
+      id: created.id,
+      status: "pending",
+      signer_email: "jane@example.com",
+    });
+    expect("sign_url" in payload).toBe(false);
+    expect(rawBody).not.toContain(token);
+    expect(rawBody).not.toContain(created.webhook_secret);
+    const timestamp = header(posts[0]!.init, "X-Sign-Timestamp");
+    const signature = header(posts[0]!.init, "X-Sign-Signature");
+    const expected = createHmac("sha256", created.webhook_secret)
+      .update(`${timestamp}.${rawBody}`)
+      .digest("hex");
+    expect(signature).toBe(`sha256=${expected}`);
+
+    posts.length = 0;
+    const again = await getSigningState(token);
+    expect(again.status).toBe(200);
+    expect(posts).toHaveLength(0);
   });
 });
 

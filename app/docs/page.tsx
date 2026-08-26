@@ -27,6 +27,10 @@ const VERIFY_BLOCK = `$ curl -F file=@sealed.pdf \\
        https://agentsign.co/v1/verify
 { "valid": true, "human_signatures": 1, "agent_attestations": 1 }`;
 
+const EMBED_BLOCK = `<iframe src="https://agentsign.co/s/TOKEN"></iframe>
+// listen for { source: "agentsign", event }
+// optional: embed_origin, send_email=false, fields JSON, PDF {{sig}}`;
+
 export default function DocsPage() {
   return (
     <PageShell variant="public" width="full">
@@ -41,6 +45,8 @@ export default function DocsPage() {
               Everything here speaks plain HTTP. Send a PDF with one request.
               No key needed: we email you a one-time code and hand back a
               throwaway key for that document. Log in to mint live keys.
+              On-page fields use PDF tags or fields JSON; there is no placer
+              and no sign tool.
             </p>
             <div className="flex flex-wrap items-center gap-3">
               <a
@@ -127,6 +133,41 @@ export default function DocsPage() {
           <TerminalPanel eyebrow="Verify" address="POST /v1/verify">
             <pre className="overflow-x-auto whitespace-pre">
               {VERIFY_BLOCK}
+            </pre>
+          </TerminalPanel>
+        }
+      />
+
+      <TwoReader
+        human={
+          <>
+            <h2 className="font-heading text-2xl tracking-[-0.01em] md:text-3xl">
+              Embed
+            </h2>
+            <p className="max-w-prose text-[15px] leading-relaxed text-muted-foreground">
+              Iframe the ceremony at{" "}
+              <code className="font-mono text-sm text-foreground">/s/:token</code>
+              . Set{" "}
+              <code className="font-mono text-sm text-foreground">
+                embed_origin
+              </code>{" "}
+              and listen for{" "}
+              <code className="font-mono text-sm text-foreground">
+                postMessage
+              </code>
+              . Use{" "}
+              <code className="font-mono text-sm text-foreground">
+                send_email=false
+              </code>{" "}
+              when you deliver the link yourself. Tags and fields JSON place
+              signatures; we do not ship a placer.
+            </p>
+          </>
+        }
+        machine={
+          <TerminalPanel eyebrow="Embed" address="GET /s/{token}">
+            <pre className="overflow-x-auto whitespace-pre">
+              {EMBED_BLOCK}
             </pre>
           </TerminalPanel>
         }

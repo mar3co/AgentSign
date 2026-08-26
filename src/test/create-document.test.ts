@@ -19,8 +19,10 @@ import {
   signers as signersTable,
 } from "../db/schema.js";
 import { resetEnvCache } from "../env.js";
-import { resetDeps, setDeps } from "../lib/deps.js";
-import { createFsStore } from "../lib/storage.js";
+import { getDeps, resetDeps, setDeps } from "../lib/deps.js";
+import { parsePdfTags } from "../lib/pdf/tags.js";
+import { createFsStore, objectKey } from "../lib/storage.js";
+import { PDFDocument, StandardFonts } from "pdf-lib";
 import { createTestDb } from "./db.js";
 import { minimalPdf } from "./pdf.js";
 
@@ -906,5 +908,488 @@ describe("POST /v1/documents agent parties", () => {
     const json = (await res.json()) as { error: string; code: string };
     expect(json.error).toBeTruthy();
     expect(json.code).toBe("pro_required");
+  });
+});
+
+async function taggedPdf(labels: string[]): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([612, 792]);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  let y = 700;
+  for (const label of labels) {
+    page.drawText(label, { x: 72, y, size: 12, font });
+    y -= 24;
+  }
+  return doc.save();
+}
+
+function area() {
+  return { page: 1, x: 10, y: 20, w: 30, h: 8 };
+}
+
+describe("POST /v1/documents on-page fields", () => {
+  it("parses tags, stores fields, and returns every human sign_url", {
+    timeout: 60_000,
+  }, async () => {
+    await bootAuth();
+    const cookie = await magicCookie("shop@example.com");
+    const key = await mintLive(cookie);
+    const pdf = await taggedPdf(["{{sig}}"]);
+    const body = new FormData();
+    body.set("title", "Repair authorization");
+    body.set("sender_email", "shop@example.com");
+    body.set(
+      "signers",
+      JSON.stringify([
+        { name: "Jane", email: "jane@example.com" },
+        { name: "Bob", email: "bob@example.com" },
+      ]),
+    );
+    body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
+    const res = await postDocument(
+      new Request("http://sign.test/v1/documents", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}` },
+        body,
+      }),
+    );
+    expect(res.status).toBe(201);
+    const json = (await res.json()) as {
+      id: string;
+      signers: { email: string; sign_url?: string }[];
+    };
+    expect(json.signers).toHaveLength(2);
+    expect(json.signers[0]!.sign_url).toMatch(/^\/s\//);
+    expect(json.signers[1]!.sign_url).toMatch(/^\/s\//);
+
+    const status = await getDocument(
+      new Request(`http://sign.test/v1/documents/${json.id}`, {
+        headers: { authorization: `Bearer ${key}` },
+      }),
+      { params: Promise.resolve({ id: json.id }) },
+    );
+    expect(status.status).toBe(200);
+    const got = (await status.json()) as { fields: { name: string }[] };
+    expect(got.fields.some((f) => f.name === "sig")).toBe(true);
+
+    const stored = await getDeps().store?.get(objectKey(json.id, "original"));
+    expect(stored).toBeTruthy();
+    const again = await parsePdfTags(stored!);
+    expect(again.fields).toEqual([]);
+  });
+
+  it("rejects a field on a page the PDF does not have", { timeout: 60_000 }, async () => {
+    await bootAuth();
+    const cookie = await magicCookie("shop@example.com");
+    const key = await mintLive(cookie);
+    const body = await documentBody([{ name: "Jane", email: "jane@example.com" }]);
+    body.set(
+      "fields",
+      JSON.stringify([
+        {
+          name: "sig",
+          type: "signature",
+          role: "Signer 1",
+          required: true,
+          readonly: false,
+          areas: [{ page: 2, x: 10, y: 20, w: 30, h: 8 }],
+        },
+      ]),
+    );
+    const res = await postDocument(
+      new Request("http://sign.test/v1/documents", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}` },
+        body,
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code: string }).code).toBe("invalid_fields");
+  });
+
+  it("rejects a readonly field without a value", { timeout: 60_000 }, async () => {
+    await bootAuth();
+    const cookie = await magicCookie("shop@example.com");
+    const key = await mintLive(cookie);
+    const body = await documentBody([{ name: "Jane", email: "jane@example.com" }]);
+    body.set(
+      "fields",
+      JSON.stringify([
+        {
+          name: "Title",
+          type: "text",
+          role: "Signer 1",
+          required: false,
+          readonly: true,
+          areas: [area()],
+        },
+      ]),
+    );
+    const res = await postDocument(
+      new Request("http://sign.test/v1/documents", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}` },
+        body,
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code: string }).code).toBe("invalid_values");
+  });
+
+  it("rejects tag and API fields that conflict on type", { timeout: 60_000 }, async () => {
+    await bootAuth();
+    const cookie = await magicCookie("shop@example.com");
+    const key = await mintLive(cookie);
+    const pdf = await taggedPdf(["{{sig}}"]);
+    const body = new FormData();
+    body.set("title", "Repair authorization");
+    body.set("sender_email", "shop@example.com");
+    body.set(
+      "signers",
+      JSON.stringify([{ name: "Jane", email: "jane@example.com" }]),
+    );
+    body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
+    body.set(
+      "fields",
+      JSON.stringify([
+        {
+          name: "sig",
+          type: "text",
+          role: "Signer 1",
+          required: true,
+          readonly: false,
+          areas: [area()],
+        },
+      ]),
+    );
+    const res = await postDocument(
+      new Request("http://sign.test/v1/documents", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}` },
+        body,
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code: string }).code).toBe("invalid_fields");
+  });
+
+  it("rejects a signature field on an agent role", { timeout: 60_000 }, async () => {
+    const { db, userFor } = await bootAuth();
+    const cookie = await magicCookie("shop@example.com");
+    await db
+      .update(accounts)
+      .set({ plan: "pro" })
+      .where(eq(accounts.userId, userFor("shop@example.com").id));
+    const createdAgent = await postAgents(
+      new Request("http://sign.test/v1/agents", {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ slug: "grok-legal", name: "Grok Legal" }),
+      }),
+    );
+    expect(createdAgent.status).toBe(201);
+    const key = await mintLive(cookie);
+    const body = await documentBody([
+      {
+        name: "Grok Legal",
+        email: "shop@example.com",
+        kind: "agent",
+        agent: "grok-legal",
+        role: "grok",
+      },
+      { name: "Jane", email: "jane@example.com" },
+    ]);
+    body.set(
+      "fields",
+      JSON.stringify([
+        {
+          name: "sig",
+          type: "signature",
+          role: "grok",
+          required: true,
+          readonly: false,
+          areas: [area()],
+        },
+      ]),
+    );
+    const res = await postDocument(
+      new Request("http://sign.test/v1/documents", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}` },
+        body,
+      }),
+    );
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as { error: string; code: string };
+    expect(json.error).toBeTruthy();
+    expect(json.code).toBe("invalid_fields");
+  });
+
+  it("rejects fields with zero humans", { timeout: 60_000 }, async () => {
+    const { db, userFor } = await bootAuth();
+    const cookie = await magicCookie("shop@example.com");
+    await db
+      .update(accounts)
+      .set({ plan: "pro" })
+      .where(eq(accounts.userId, userFor("shop@example.com").id));
+    const createdAgent = await postAgents(
+      new Request("http://sign.test/v1/agents", {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ slug: "grok-legal", name: "Grok Legal" }),
+      }),
+    );
+    expect(createdAgent.status).toBe(201);
+    const key = await mintLive(cookie);
+    const body = await documentBody([
+      {
+        name: "Grok Legal",
+        email: "shop@example.com",
+        kind: "agent",
+        agent: "grok-legal",
+        role: "grok",
+      },
+    ]);
+    body.set(
+      "fields",
+      JSON.stringify([
+        {
+          name: "Note",
+          type: "text",
+          role: "grok",
+          required: false,
+          readonly: true,
+          default_value: "ok",
+          areas: [area()],
+        },
+      ]),
+    );
+    const res = await postDocument(
+      new Request("http://sign.test/v1/documents", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}` },
+        body,
+      }),
+    );
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as { error: string; code: string };
+    expect(json.error).toBeTruthy();
+    expect(json.code).toBe("invalid_fields");
+  });
+
+  it("rejects duplicate signer roles when fields exist", { timeout: 60_000 }, async () => {
+    await bootAuth();
+    const cookie = await magicCookie("shop@example.com");
+    const key = await mintLive(cookie);
+    const body = await documentBody([
+      { name: "Jane", email: "jane@example.com", role: "Customer" },
+      { name: "Bob", email: "bob@example.com", role: "Customer" },
+    ]);
+    body.set(
+      "fields",
+      JSON.stringify([
+        {
+          name: "sig",
+          type: "signature",
+          role: "Customer",
+          required: true,
+          readonly: false,
+          areas: [area()],
+        },
+      ]),
+    );
+    const res = await postDocument(
+      new Request("http://sign.test/v1/documents", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}` },
+        body,
+      }),
+    );
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as { error: string; code: string };
+    expect(json.error).toBeTruthy();
+    expect(json.code).toBe("invalid_fields");
+  });
+
+  it("rejects a default role that collides with another signer when fields exist", {
+    timeout: 60_000,
+  }, async () => {
+    await bootAuth();
+    const cookie = await magicCookie("shop@example.com");
+    const key = await mintLive(cookie);
+    const body = await documentBody([
+      { name: "Jane", email: "jane@example.com", role: "Signer 2" },
+      { name: "Bob", email: "bob@example.com" },
+    ]);
+    body.set(
+      "fields",
+      JSON.stringify([
+        {
+          name: "sig",
+          type: "signature",
+          role: "Signer 2",
+          required: true,
+          readonly: false,
+          areas: [area()],
+        },
+      ]),
+    );
+    const res = await postDocument(
+      new Request("http://sign.test/v1/documents", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}` },
+        body,
+      }),
+    );
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as { error: string; code: string };
+    expect(json.error).toBeTruthy();
+    expect(json.code).toBe("invalid_fields");
+  });
+
+  it("applies per-signer prefill over document values", { timeout: 60_000 }, async () => {
+    await bootAuth();
+    const cookie = await magicCookie("shop@example.com");
+    const key = await mintLive(cookie);
+    const body = await documentBody([
+      {
+        name: "Jane",
+        email: "jane@example.com",
+        values: { "Full Name": "Jane" },
+      },
+    ]);
+    body.set(
+      "fields",
+      JSON.stringify([
+        {
+          name: "Full Name",
+          type: "text",
+          role: "Signer 1",
+          required: false,
+          readonly: false,
+          areas: [area()],
+        },
+      ]),
+    );
+    body.set("values", JSON.stringify({ "Full Name": "Doc" }));
+    const res = await postDocument(
+      new Request("http://sign.test/v1/documents", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}` },
+        body,
+      }),
+    );
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as { id: string };
+    const status = await getDocument(
+      new Request(`http://sign.test/v1/documents/${created.id}`, {
+        headers: { authorization: `Bearer ${key}` },
+      }),
+      { params: Promise.resolve({ id: created.id }) },
+    );
+    expect(status.status).toBe(200);
+    const got = (await status.json()) as {
+      signers: { values?: Record<string, string | boolean> }[];
+    };
+    expect(got.signers[0]!.values?.["Full Name"]).toBe("Jane");
+  });
+
+  it("GET sign_url is omitted for a signer account", { timeout: 60_000 }, async () => {
+    await bootAuth();
+    const ownerCookie = await magicCookie("shop@example.com");
+    const key = await mintLive(ownerCookie);
+    const res = await postDocument(
+      new Request("http://sign.test/v1/documents", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}` },
+        body: await documentBody([
+          { name: "Jane", email: "jane@example.com" },
+          { name: "Bob", email: "bob@example.com" },
+        ]),
+      }),
+    );
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as {
+      id: string;
+      signers: { sign_url?: string }[];
+    };
+    expect(created.signers[0]!.sign_url).toMatch(/^\/s\//);
+    expect(created.signers[1]!.sign_url).toMatch(/^\/s\//);
+
+    const janeCookie = await magicCookie("jane@example.com");
+    const asSigner = await getDocument(
+      new Request(`http://sign.test/v1/documents/${created.id}`, {
+        headers: { cookie: janeCookie },
+      }),
+      { params: Promise.resolve({ id: created.id }) },
+    );
+    expect(asSigner.status).toBe(200);
+    const signerGot = (await asSigner.json()) as {
+      signers: { sign_url?: string }[];
+    };
+    expect(signerGot.signers.some((s) => s.sign_url)).toBe(false);
+
+    const asOwner = await getDocument(
+      new Request(`http://sign.test/v1/documents/${created.id}`, {
+        headers: { authorization: `Bearer ${key}` },
+      }),
+      { params: Promise.resolve({ id: created.id }) },
+    );
+    expect(asOwner.status).toBe(200);
+    const ownerGot = (await asOwner.json()) as {
+      signers: { sign_url?: string }[];
+    };
+    expect(ownerGot.signers[0]!.sign_url).toMatch(/^\/s\//);
+    expect(ownerGot.signers[1]!.sign_url).toMatch(/^\/s\//);
+  });
+
+  it("send_email false mints URLs and does not send invite mail", async () => {
+    const { db, sent } = await bootAuth();
+    const cookie = await magicCookie("shop@example.com");
+    const key = await mintLive(cookie);
+    const body = await documentBody([
+      { name: "Jane", email: "jane@example.com" },
+    ]);
+    body.set("send_email", "false");
+    const before = sent.length;
+    const res = await postDocument(
+      new Request("http://sign.test/v1/documents", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}` },
+        body,
+      }),
+    );
+    expect(res.status).toBe(201);
+    const json = (await res.json()) as {
+      id: string;
+      signers: { email: string; sign_url?: string }[];
+    };
+    expect(json.signers[0]!.sign_url).toMatch(/^\/s\//);
+    const after = sent.slice(before);
+    expect(after.some((m) => m.to === "jane@example.com")).toBe(false);
+    expect(after.some((m) => /please sign/i.test(m.subject))).toBe(false);
+    const rows = await db
+      .select()
+      .from(signersTable)
+      .where(eq(signersTable.documentId, json.id));
+    expect(rows[0]!.sentAt).toBeTruthy();
+  });
+
+  it("completed_redirect_url to http is 400", async () => {
+    await bootAuth();
+    const cookie = await magicCookie("shop@example.com");
+    const key = await mintLive(cookie);
+    const body = await documentBody([
+      { name: "Jane", email: "jane@example.com" },
+    ]);
+    body.set("completed_redirect_url", "http://app.example.com/done");
+    const res = await postDocument(
+      new Request("http://sign.test/v1/documents", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}` },
+        body,
+      }),
+    );
+    expect(res.status).toBe(400);
   });
 });

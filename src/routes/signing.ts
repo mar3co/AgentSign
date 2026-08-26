@@ -24,15 +24,25 @@ import {
   type Mailer,
 } from "../lib/email.js";
 import { sha256Hex } from "../lib/hash.js";
+import type { CertificateField } from "../lib/pdf/certificate.js";
 import { completeDocumentPdf } from "../lib/pdf/complete.js";
 import { loadSigningP12 } from "../lib/pdf/devP12.js";
+import type { BurnParty } from "../lib/pdf/burnFields.js";
+import { defaultRoleName, type DocumentField } from "../lib/pdf/fields.js";
 import type { SignatureAppearance } from "../lib/pdf/appendSignaturePage.js";
-import { appearanceKey, objectKey, type BlobStore } from "../lib/storage.js";
+import {
+  appearanceKey,
+  fieldAppearanceKey,
+  objectKey,
+  type BlobStore,
+} from "../lib/storage.js";
 import { hashSigningToken, newSigningToken } from "../lib/tokens.js";
 import {
   fireAgentPartyReady,
   fireAgentPartyWebhooks,
   fireDocumentCompleted,
+  fireDocumentWebhook,
+  openWebhookSecret,
   sealWebhookSecret,
   webhookEncryptionReady,
 } from "../lib/webhooks.js";
@@ -54,6 +64,163 @@ const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 function isPng(bytes: Uint8Array): boolean {
   if (bytes.byteLength < PNG_MAGIC.length) return false;
   return PNG_MAGIC.every((b, i) => bytes[i] === b);
+}
+
+const PNG_MAX_BYTES = 1_000_000;
+
+type FieldValues = Record<string, string | boolean>;
+
+function signerRole(signer: SignerRow): string {
+  return signer.roleName || defaultRoleName(signer.signingOrder);
+}
+
+function utcDate(at: Date): string {
+  return at.toISOString().slice(0, 10);
+}
+
+function checkboxChecked(value: unknown): boolean {
+  return value === true || value === "true";
+}
+
+function valuesAgree(posted: string | boolean, stored: string | boolean | undefined): boolean {
+  if (stored === undefined) return false;
+  if (posted === stored) return true;
+  if (checkboxChecked(posted) && checkboxChecked(stored)) return true;
+  if (
+    (posted === false || posted === "false") &&
+    (stored === false || stored === "false")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+async function parseSignValues(
+  form: FormData,
+): Promise<{ ok: true; values: FieldValues } | { ok: false; error: Response }> {
+  const raw = form.get("values");
+  if (raw == null || raw === "") return { ok: true, values: {} };
+  let text: string;
+  if (typeof raw === "string") text = raw;
+  else if (raw instanceof Blob) text = await raw.text();
+  else return { ok: false, error: jsonError(400, "Invalid values", "invalid_values") };
+  if (text.trim() === "") return { ok: true, values: {} };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { ok: false, error: jsonError(400, "Invalid values", "invalid_values") };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { ok: false, error: jsonError(400, "Invalid values", "invalid_values") };
+  }
+  const values: FieldValues = {};
+  for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+    if (typeof v !== "string" && typeof v !== "boolean") {
+      return { ok: false, error: jsonError(400, "Invalid values", "invalid_values") };
+    }
+    values[k] = v;
+  }
+  return { ok: true, values };
+}
+
+async function readPngPart(part: FormDataEntryValue | null): Promise<Uint8Array | null> {
+  if (!(part instanceof Blob)) return null;
+  return new Uint8Array(await part.arrayBuffer());
+}
+
+function certificateFields(
+  fields: DocumentField[],
+  parties: BurnParty[],
+): CertificateField[] {
+  return fields.map((field) => {
+    const party = parties.find((p) => p.role === field.role);
+    let value = "";
+    if (field.type === "signature" || field.type === "initials") {
+      value = party?.pngs[field.name] ? "drawn" : "";
+    } else if (field.type === "checkbox") {
+      value = checkboxChecked(party?.values[field.name]) ? "yes" : "no";
+    } else {
+      const v = party?.values[field.name];
+      value = v == null ? "" : String(v);
+    }
+    return { role: field.role, name: field.name, type: field.type, value };
+  });
+}
+
+async function webhookFieldValues(
+  store: BlobStore | null,
+  documentId: string,
+  fields: DocumentField[],
+  parties: SignerRow[],
+  onlySignerId?: string,
+): Promise<Array<{ role: string; name: string; type: string; value: string }>> {
+  if (fields.length === 0) return [];
+  const out: Array<{ role: string; name: string; type: string; value: string }> = [];
+  for (const field of fields) {
+    const party = parties.find((s) => signerRole(s) === field.role);
+    if (!party) continue;
+    if (onlySignerId && party.id !== onlySignerId) continue;
+    let value = "";
+    if (field.type === "signature" || field.type === "initials") {
+      let signed = false;
+      if (store) {
+        const png = await store.get(
+          fieldAppearanceKey(documentId, party.id, field.name),
+        );
+        signed = Boolean(png);
+      }
+      if (!signed) continue;
+      value = "[signed]";
+    } else if (field.type === "checkbox") {
+      value = checkboxChecked(party.values?.[field.name]) ? "true" : "false";
+    } else {
+      const v = party.values?.[field.name];
+      value = v == null ? "" : String(v);
+    }
+    out.push({ role: field.role, name: field.name, type: field.type, value });
+  }
+  return out;
+}
+
+async function buildFieldParties(
+  store: BlobStore,
+  documentId: string,
+  fields: DocumentField[],
+  allSigners: SignerRow[],
+  current: SignerRow,
+  at: Date,
+  claim: CompleteClaim,
+): Promise<BurnParty[]> {
+  const parties: BurnParty[] = [];
+  for (const s of allSigners) {
+    const role = signerRole(s);
+    const pngs: Record<string, Uint8Array> = {};
+    for (const field of fields) {
+      if (field.role !== role) continue;
+      if (field.type !== "signature" && field.type !== "initials") continue;
+      const bytes = await store.get(
+        fieldAppearanceKey(documentId, s.id, field.name),
+      );
+      if (bytes) pngs[field.name] = bytes;
+    }
+    const signedAt =
+      s.id === current.id
+        ? claim === "sign"
+          ? at
+          : (s.attestedAt ?? s.signedAt ?? at)
+        : (s.signedAt ?? s.attestedAt);
+    parties.push({
+      role,
+      kind: s.kind,
+      name: s.name,
+      email: s.email,
+      signedAt: signedAt ?? at,
+      values: s.values ?? {},
+      pngs,
+    });
+  }
+  return parties;
 }
 
 function requireDb(): AuditDb {
@@ -119,7 +286,9 @@ async function loadSigner(token: string): Promise<Loaded> {
 async function sequentialWait(
   db: AuditDb,
   signer: SignerRow,
+  document: DocumentRow,
 ): Promise<Response | null> {
+  if (document.signingMode === "parallel") return null;
   if (signer.signingOrder <= 1) return null;
   const [prev] = await db
     .select()
@@ -143,6 +312,7 @@ export async function buildCompleteAppearances(
   currentId: string,
   at: Date,
   currentPng?: Uint8Array,
+  requirePriorPng = true,
 ): Promise<
   { ok: true; appearances: SignatureAppearance[] } | { ok: false; error: Response }
 > {
@@ -159,12 +329,6 @@ export async function buildCompleteAppearances(
       continue;
     }
     if (isCurrent) {
-      if (!currentPng) {
-        return {
-          ok: false,
-          error: jsonError(500, "Prior signature missing", "missing_appearance"),
-        };
-      }
       appearances.push({
         kind: "human",
         png: currentPng,
@@ -176,7 +340,7 @@ export async function buildCompleteAppearances(
     }
     if (!s.signedAt) continue;
     const prior = await store.get(appearanceKey(documentId, s.id));
-    if (!prior) {
+    if (!prior && requirePriorPng) {
       return {
         ok: false,
         error: jsonError(500, "Prior signature missing", "missing_appearance"),
@@ -184,7 +348,7 @@ export async function buildCompleteAppearances(
     }
     appearances.push({
       kind: "human",
-      png: prior,
+      png: prior ?? undefined,
       name: s.name,
       email: s.email,
       signedAt: s.signedAt,
@@ -207,6 +371,7 @@ export async function commitCompletedDocument(opts: {
   claim: CompleteClaim;
   attestMethod?: "agent_key" | "oauth" | null;
   attestLabel?: string | null;
+  alreadyClaimed?: boolean;
 }): Promise<Response> {
   const {
     db,
@@ -220,6 +385,7 @@ export async function commitCompletedDocument(opts: {
     claim,
     attestMethod = null,
     attestLabel = null,
+    alreadyClaimed = false,
   } = opts;
   const store = requireStore();
   if (!store) return storeUnavailableResponse();
@@ -264,6 +430,27 @@ export async function commitCompletedDocument(opts: {
   }
 
   const pages = appearances.map((a) => (footer ? { ...a, footer } : a));
+  const docFields = document.fields ?? [];
+  const useFields = docFields.length > 0;
+  let fieldParties: BurnParty[] | undefined;
+  let certFields: CertificateField[] | undefined;
+  if (useFields) {
+    const live = await db
+      .select()
+      .from(signersTable)
+      .where(eq(signersTable.documentId, document.id));
+    live.sort((a, b) => a.signingOrder - b.signingOrder);
+    fieldParties = await buildFieldParties(
+      store,
+      document.id,
+      docFields,
+      live,
+      signer,
+      at,
+      claim,
+    );
+    certFields = certificateFields(docFields, fieldParties);
+  }
 
   let result: Awaited<ReturnType<typeof completeDocumentPdf>>;
   try {
@@ -271,6 +458,7 @@ export async function commitCompletedDocument(opts: {
     result = await completeDocumentPdf({
       original,
       appearances: pages,
+      ...(useFields ? { fields: docFields, fieldParties } : {}),
       p12,
       passphrase,
       meta: {
@@ -298,6 +486,7 @@ export async function commitCompletedDocument(opts: {
           ip: s.id === signer.id ? ip : s.ip,
           ua: s.id === signer.id ? ua : s.ua,
         })),
+        ...(certFields ? { fields: certFields } : {}),
       },
     });
   } catch {
@@ -309,36 +498,38 @@ export async function commitCompletedDocument(opts: {
 
   try {
     await db.transaction(async (tx) => {
-      const [claimed] =
-        claim === "sign"
-          ? await tx
-              .update(signersTable)
-              .set({ signedAt: at, ip, ua })
-              .where(
-                and(
-                  eq(signersTable.id, signer.id),
-                  isNull(signersTable.signedAt),
-                  isNull(signersTable.declinedAt),
-                ),
-              )
-              .returning()
-          : await tx
-              .update(signersTable)
-              .set({
-                attestedAt: at,
-                attestMethod,
-                attestLabel,
-              })
-              .where(
-                and(
-                  eq(signersTable.id, signer.id),
-                  eq(signersTable.kind, "agent"),
-                  isNull(signersTable.attestedAt),
-                  isNull(signersTable.rejectedAt),
-                ),
-              )
-              .returning();
-      if (!claimed) throw new Error("complete_conflict");
+      if (!alreadyClaimed) {
+        const [claimed] =
+          claim === "sign"
+            ? await tx
+                .update(signersTable)
+                .set({ signedAt: at, ip, ua })
+                .where(
+                  and(
+                    eq(signersTable.id, signer.id),
+                    isNull(signersTable.signedAt),
+                    isNull(signersTable.declinedAt),
+                  ),
+                )
+                .returning()
+            : await tx
+                .update(signersTable)
+                .set({
+                  attestedAt: at,
+                  attestMethod,
+                  attestLabel,
+                })
+                .where(
+                  and(
+                    eq(signersTable.id, signer.id),
+                    eq(signersTable.kind, "agent"),
+                    isNull(signersTable.attestedAt),
+                    isNull(signersTable.rejectedAt),
+                  ),
+                )
+                .returning();
+        if (!claimed) throw new Error("complete_conflict");
+      }
       const [updated] = await tx
         .update(documents)
         .set({ status: "completed", sha256: result.sha256, shredAt })
@@ -361,6 +552,19 @@ export async function commitCompletedDocument(opts: {
       ]);
     });
   } catch {
+    if (alreadyClaimed) {
+      const [env] = await db
+        .select()
+        .from(documents)
+        .where(eq(documents.id, document.id));
+      if (env?.status === "completed" && env.sha256) {
+        return Response.json({
+          status: "completed",
+          shred_at: env.shredAt.toISOString(),
+          sha256: env.sha256,
+        });
+      }
+    }
     return jsonError(409, "Document is not awaiting signature", "invalid_state");
   }
   try {
@@ -383,26 +587,30 @@ export async function commitCompletedDocument(opts: {
           inArray(files.kind, ["sealed", "certificate"]),
         ),
       );
-    if (claim === "sign") {
-      await db
-        .update(signersTable)
-        .set({ signedAt: null })
-        .where(eq(signersTable.id, signer.id));
-    } else {
-      await db
-        .update(signersTable)
-        .set({ attestedAt: null, attestMethod: null, attestLabel: null })
-        .where(eq(signersTable.id, signer.id));
+    if (!alreadyClaimed) {
+      if (claim === "sign") {
+        await db
+          .update(signersTable)
+          .set({ signedAt: null })
+          .where(eq(signersTable.id, signer.id));
+      } else {
+        await db
+          .update(signersTable)
+          .set({ attestedAt: null, attestMethod: null, attestLabel: null })
+          .where(eq(signersTable.id, signer.id));
+      }
     }
     return jsonError(500, "Failed to complete document", "complete_failed");
   }
-  await logEvent(db, {
-    documentId: document.id,
-    signerId: signer.id,
-    event: claim === "sign" ? "signed" : "attested",
-    ip: claim === "sign" ? ip ?? undefined : undefined,
-    ua: claim === "sign" ? ua ?? undefined : undefined,
-  });
+  if (!alreadyClaimed) {
+    await logEvent(db, {
+      documentId: document.id,
+      signerId: signer.id,
+      event: claim === "sign" ? "signed" : "attested",
+      ip: claim === "sign" ? ip ?? undefined : undefined,
+      ua: claim === "sign" ? ua ?? undefined : undefined,
+    });
+  }
   try {
     await syncTmpKeyExpiry(db, document.id, shredAt);
   } catch {
@@ -456,12 +664,48 @@ export async function commitCompletedDocument(opts: {
   }
 
   try {
+    await fireSignerCompletedWebhook(db, document, signer, "completed");
+  } catch {
+    // delivery audits webhook_failed
+  }
+  const liveParties = (
+    await db
+      .select()
+      .from(signersTable)
+      .where(eq(signersTable.documentId, document.id))
+  ).sort((a, b) => a.signingOrder - b.signingOrder);
+  const needsCompletedAppearances = docFields.some(
+    (f) => f.type === "signature" || f.type === "initials",
+  );
+  let completedValues: Array<{
+    role: string;
+    name: string;
+    type: string;
+    value: string;
+  }> = [];
+  try {
+    completedValues = await webhookFieldValues(
+      needsCompletedAppearances ? store : null,
+      document.id,
+      docFields,
+      liveParties,
+    );
+  } catch {
+    completedValues = await webhookFieldValues(
+      null,
+      document.id,
+      docFields,
+      liveParties,
+    );
+  }
+  try {
     await fireDocumentCompleted(db, document, {
       event: "document.completed",
       id: document.id,
       status: "completed",
       sha256: result.sha256,
       shred_at: shredAt,
+      ...(completedValues.length ? { values: completedValues } : {}),
     });
   } catch (err) {
     await logEvent(db, {
@@ -489,6 +733,94 @@ export async function commitCompletedDocument(opts: {
   });
 }
 
+/** After claiming a party, seal if every party is now done (parallel last-two race). */
+export async function completeIfAllPartiesDone(opts: {
+  db: AuditDb;
+  document: DocumentRow;
+  signer: SignerRow;
+  at: Date;
+  ip: string | null;
+  ua: string | null;
+  currentPng?: Uint8Array;
+  claim: CompleteClaim;
+  attestMethod?: "agent_key" | "oauth" | null;
+  attestLabel?: string | null;
+}): Promise<Response | null> {
+  const live = await opts.db
+    .select()
+    .from(signersTable)
+    .where(eq(signersTable.documentId, opts.document.id));
+  live.sort((a, b) => a.signingOrder - b.signingOrder);
+  if (!live.every(partyDone)) return null;
+  const store = requireStore();
+  if (!store) return storeUnavailableResponse();
+  const built = await buildCompleteAppearances(
+    store,
+    opts.document.id,
+    live,
+    opts.signer.id,
+    opts.at,
+    opts.currentPng,
+    (opts.document.fields ?? []).length === 0,
+  );
+  if (!built.ok) return built.error;
+  return commitCompletedDocument({
+    db: opts.db,
+    document: opts.document,
+    signer: opts.signer,
+    allSigners: live,
+    at: opts.at,
+    ip: opts.ip,
+    ua: opts.ua,
+    appearances: built.appearances,
+    claim: opts.claim,
+    attestMethod: opts.attestMethod,
+    attestLabel: opts.attestLabel,
+    alreadyClaimed: true,
+  });
+}
+
+export async function fireSignerCompletedWebhook(
+  db: AuditDb,
+  document: DocumentRow,
+  party: SignerRow,
+  status: string,
+): Promise<void> {
+  const fields = document.fields ?? [];
+  const role = signerRole(party);
+  const needsAppearances = fields.some(
+    (f) =>
+      f.role === role && (f.type === "signature" || f.type === "initials"),
+  );
+  const store = needsAppearances ? requireStore() : null;
+  const parties = await db
+    .select()
+    .from(signersTable)
+    .where(eq(signersTable.documentId, document.id));
+  parties.sort((a, b) => a.signingOrder - b.signingOrder);
+  let values: Array<{ role: string; name: string; type: string; value: string }> =
+    [];
+  try {
+    values = await webhookFieldValues(
+      store,
+      document.id,
+      fields,
+      parties,
+      party.id,
+    );
+  } catch {
+    values = await webhookFieldValues(null, document.id, fields, parties, party.id);
+  }
+  await fireDocumentWebhook(db, document, {
+    event: "signer.completed",
+    id: document.id,
+    status,
+    signer_email: party.email,
+    kind: party.kind === "agent" ? "agent" : "human",
+    ...(values.length ? { values } : {}),
+  });
+}
+
 export async function inviteNextHumanIfNeeded(
   db: AuditDb,
   document: DocumentRow,
@@ -497,6 +829,7 @@ export async function inviteNextHumanIfNeeded(
   at: Date,
   rollbackCurrent: () => Promise<void>,
 ): Promise<Response | null> {
+  if (document.signingMode === "parallel") return null;
   const next = allSigners.find((s) => s.signingOrder === current.signingOrder + 1);
   if (!next || partyDone(next) || next.sentAt) return null;
   const [live] = await db
@@ -520,18 +853,38 @@ export async function inviteNextHumanIfNeeded(
     );
   }
 
-  const mailer = requireMailer();
   const store = requireStore();
-  const token = newSigningToken();
+  let raw: string;
+  let tokenHash = next.tokenHash;
+  let tokenEnc = next.tokenEnc;
+  if (tokenEnc) {
+    raw = openWebhookSecret(tokenEnc);
+  } else {
+    const token = newSigningToken();
+    raw = token.raw;
+    tokenHash = token.hash;
+    tokenEnc = sealWebhookSecret(token.raw);
+  }
   const [slot] = await db
     .update(signersTable)
-    .set({ tokenHash: token.hash, tokenEnc: sealWebhookSecret(token.raw) })
+    .set({ sentAt: at, tokenHash, tokenEnc })
     .where(and(eq(signersTable.id, next.id), isNull(signersTable.sentAt)))
     .returning();
   if (!slot) return null;
+
+  if (document.sendEmail === false) {
+    await logEvent(db, {
+      documentId: document.id,
+      signerId: next.id,
+      event: "sent",
+    });
+    return null;
+  }
+
+  const mailer = requireMailer();
   const brand = await loadBrand(db, document.userId, store);
   const invite = inviteEmail({
-    signUrl: publicSignUrl(token.raw),
+    signUrl: publicSignUrl(raw),
     senderEmail: document.senderEmail,
     title: document.title,
     expiresAt: document.expiresAt,
@@ -546,10 +899,6 @@ export async function inviteNextHumanIfNeeded(
       ...invite,
       attachments: brandMailAttachments(brand.logoBytes),
     });
-    await db
-      .update(signersTable)
-      .set({ sentAt: at })
-      .where(eq(signersTable.id, next.id));
     await logEvent(db, {
       documentId: document.id,
       signerId: next.id,
@@ -562,6 +911,10 @@ export async function inviteNextHumanIfNeeded(
     });
   } catch (err) {
     await rollbackCurrent();
+    await db
+      .update(signersTable)
+      .set({ sentAt: null })
+      .where(eq(signersTable.id, next.id));
     await logEvent(db, {
       documentId: document.id,
       signerId: next.id,
@@ -590,7 +943,7 @@ export async function getSigningState(
     return jsonError(410, "This link has expired", "expired");
   }
 
-  const wait = await sequentialWait(db, signer);
+  const wait = await sequentialWait(db, signer, document);
   if (wait && !signer.signedAt) return wait;
 
   if (!signer.openedAt) {
@@ -605,6 +958,18 @@ export async function getSigningState(
       ip: req ? clientIp(req) : undefined,
       ua: req?.headers.get("user-agent") ?? undefined,
     });
+    if (signer.kind !== "agent") {
+      try {
+        await fireDocumentWebhook(db, document, {
+          event: "document.opened",
+          id: document.id,
+          status: document.status,
+          signer_email: signer.email,
+        });
+      } catch {
+        // delivery audits webhook_failed; open still succeeds
+      }
+    }
   }
 
   let display_name: string | null = null;
@@ -648,6 +1013,9 @@ export async function getSigningState(
     })
     .filter((row): row is { slug: string; email: string } => Boolean(row));
 
+  const role = signerRole(signer);
+  const partyFields = (document.fields ?? []).filter((f) => f.role === role);
+
   return Response.json({
     title: document.title,
     signerName: signer.name,
@@ -661,6 +1029,12 @@ export async function getSigningState(
     display_name,
     has_logo,
     attested,
+    id: document.id,
+    fields: partyFields,
+    values: signer.values ?? {},
+    signing_mode: document.signingMode,
+    completed_redirect_url: document.completedRedirectUrl,
+    embed_origin: document.embedOrigin,
   });
 }
 
@@ -715,7 +1089,7 @@ export async function postConsent(
   if (document.status !== "pending" || signer.declinedAt || signer.signedAt) {
     return jsonError(409, "Document is not awaiting signature", "invalid_state");
   }
-  const wait = await sequentialWait(db, signer);
+  const wait = await sequentialWait(db, signer, document);
   if (wait) return wait;
 
   try {
@@ -754,7 +1128,7 @@ export async function postSign(req: Request, token: string): Promise<Response> {
   if (document.status !== "pending" || signer.declinedAt || signer.signedAt) {
     return jsonError(409, "Document is not awaiting signature", "invalid_state");
   }
-  const wait = await sequentialWait(db, signer);
+  const wait = await sequentialWait(db, signer, document);
   if (wait) return wait;
   if (!signer.consentedAt) {
     return jsonError(400, "Consent is required before signing", "consent_required");
@@ -766,13 +1140,98 @@ export async function postSign(req: Request, token: string): Promise<Response> {
   } catch {
     return jsonError(400, "Expected multipart form data", "invalid_request");
   }
-  const file = form.get("png");
-  if (!(file instanceof Blob)) {
-    return jsonError(400, "A PNG signature is required", "invalid_png");
-  }
-  const png = new Uint8Array(await file.arrayBuffer());
-  if (png.byteLength > 1_000_000 || !isPng(png)) {
-    return jsonError(400, "A PNG signature is required", "invalid_png");
+
+  const docFields = document.fields ?? [];
+  const partyFields = docFields.filter((f) => f.role === signerRole(signer));
+  let currentPng: Uint8Array | undefined;
+
+  if (partyFields.length > 0) {
+    const parsed = await parseSignValues(form);
+    if (!parsed.ok) return parsed.error;
+    const posted = parsed.values;
+    const signatureCount = partyFields.filter((f) => f.type === "signature").length;
+    const pngs = new Map<string, Uint8Array>();
+    const nextValues: FieldValues = {};
+
+    for (const field of partyFields) {
+      const stored = signer.values?.[field.name];
+      const rawPosted = posted[field.name];
+
+      if (field.readonly) {
+        if (rawPosted !== undefined && !valuesAgree(rawPosted, stored)) {
+          return jsonError(400, "Invalid values", "invalid_values");
+        }
+        if (stored !== undefined) nextValues[field.name] = stored;
+        continue;
+      }
+
+      if (field.type === "checkbox") {
+        const checked = checkboxChecked(rawPosted);
+        if (field.required && !checked) {
+          return jsonError(400, "Invalid values", "invalid_values");
+        }
+        nextValues[field.name] = checked;
+        continue;
+      }
+
+      if (field.type === "signature" || field.type === "initials") {
+        const named = await readPngPart(form.get(`sig:${field.name}`));
+        const fallback =
+          field.type === "signature" && signatureCount === 1
+            ? await readPngPart(form.get("png"))
+            : null;
+        const pngBytes = named ?? fallback;
+        if (!pngBytes || pngBytes.byteLength === 0) {
+          if (field.required) {
+            return jsonError(400, "Invalid values", "invalid_values");
+          }
+          continue;
+        }
+        if (pngBytes.byteLength > PNG_MAX_BYTES || !isPng(pngBytes)) {
+          return jsonError(400, "A PNG signature is required", "invalid_png");
+        }
+        pngs.set(field.name, pngBytes);
+        continue;
+      }
+
+      let text =
+        typeof rawPosted === "string"
+          ? rawPosted
+          : rawPosted === undefined
+            ? ""
+            : String(rawPosted);
+      if (field.type === "date" && text.trim() === "") text = utcDate(at);
+      if (field.type === "name" && text.trim() === "") text = signer.name;
+      if (field.required && text.trim() === "") {
+        return jsonError(400, "Invalid values", "invalid_values");
+      }
+      nextValues[field.name] = text;
+    }
+
+    await db
+      .update(signersTable)
+      .set({ values: nextValues })
+      .where(eq(signersTable.id, signer.id));
+
+    for (const [name, bytes] of pngs) {
+      await store.put(fieldAppearanceKey(document.id, signer.id, name), bytes);
+    }
+    const firstSig = partyFields.find((f) => f.type === "signature" && pngs.has(f.name));
+    currentPng = firstSig ? pngs.get(firstSig.name) : pngs.values().next().value;
+    if (currentPng) {
+      await store.put(appearanceKey(document.id, signer.id), currentPng);
+    }
+  } else {
+    const file = form.get("png");
+    if (!(file instanceof Blob)) {
+      return jsonError(400, "A PNG signature is required", "invalid_png");
+    }
+    const png = new Uint8Array(await file.arrayBuffer());
+    if (png.byteLength > PNG_MAX_BYTES || !isPng(png)) {
+      return jsonError(400, "A PNG signature is required", "invalid_png");
+    }
+    currentPng = png;
+    await store.put(appearanceKey(document.id, signer.id), png);
   }
 
   const ip = clientIp(req) ?? signer.ip;
@@ -792,10 +1251,10 @@ export async function postSign(req: Request, token: string): Promise<Response> {
       allSigners,
       signer.id,
       at,
-      png,
+      currentPng,
+      docFields.length === 0,
     );
     if (!built.ok) return built.error;
-    await store.put(appearanceKey(document.id, signer.id), png);
     return commitCompletedDocument({
       db,
       document,
@@ -808,8 +1267,6 @@ export async function postSign(req: Request, token: string): Promise<Response> {
       claim: "sign",
     });
   }
-
-  await store.put(appearanceKey(document.id, signer.id), png);
 
   const [claimed] = await db
     .update(signersTable)
@@ -848,8 +1305,60 @@ export async function postSign(req: Request, token: string): Promise<Response> {
     ip: ip ?? undefined,
     ua: ua ?? undefined,
   });
+  const completed = await completeIfAllPartiesDone({
+    db,
+    document,
+    signer,
+    at,
+    ip,
+    ua,
+    currentPng,
+    claim: "sign",
+  });
+  if (completed) return completed;
+  try {
+    await fireSignerCompletedWebhook(db, document, claimed, "pending");
+  } catch {
+    // delivery audits webhook_failed
+  }
 
   return Response.json({ status: "pending" });
+}
+
+export async function getCeremonyPreview(
+  _req: Request,
+  token: string,
+): Promise<Response> {
+  const loaded = await loadSigner(token);
+  if (!loaded.ok) return loaded.error;
+  const { db, signer, document } = loaded;
+  const at = now();
+
+  if (document.status === "deleted") {
+    return jsonError(410, "This link has expired", "deleted");
+  }
+  if (!signer.signedAt && document.expiresAt.getTime() <= at.getTime()) {
+    return jsonError(410, "This link has expired", "expired");
+  }
+  const wait = await sequentialWait(db, signer, document);
+  if (wait && !signer.signedAt) return wait;
+  if (document.status !== "pending") {
+    return jsonError(409, "Document is not awaiting signature", "invalid_state");
+  }
+
+  const store = requireStore();
+  if (!store) return storeUnavailableResponse();
+  const original = await store.get(objectKey(document.id, "original"));
+  if (!original) {
+    return jsonError(500, "Original document missing", "missing_original");
+  }
+  return new Response(Buffer.from(original), {
+    status: 200,
+    headers: {
+      "content-type": "application/pdf",
+      "content-disposition": "inline",
+    },
+  });
 }
 
 export async function getCeremonyPdf(req: Request, token: string): Promise<Response> {
@@ -905,7 +1414,7 @@ export async function postDecline(
   if (document.status !== "pending") {
     return jsonError(409, "Document is not awaiting signature", "invalid_state");
   }
-  const wait = await sequentialWait(db, signer);
+  const wait = await sequentialWait(db, signer, document);
   if (wait) return wait;
 
   let reason: string | undefined;

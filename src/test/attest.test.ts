@@ -193,6 +193,7 @@ async function documentBody(
   signers: unknown,
   sender = "shop@example.com",
   webhookUrl?: string,
+  order?: "sequential" | "parallel",
 ) {
   const pdf = await minimalPdf();
   const body = new FormData();
@@ -201,15 +202,21 @@ async function documentBody(
   body.set("signers", JSON.stringify(signers));
   body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
   if (webhookUrl) body.set("webhook_url", webhookUrl);
+  if (order) body.set("order", order);
   return body;
 }
 
-async function sendDocument(liveKey: string, signers: unknown, webhookUrl?: string) {
+async function sendDocument(
+  liveKey: string,
+  signers: unknown,
+  webhookUrl?: string,
+  order?: "sequential" | "parallel",
+) {
   const res = await postDocument(
     new Request("http://sign.test/v1/documents", {
       method: "POST",
       headers: { authorization: `Bearer ${liveKey}` },
-      body: await documentBody(signers, "shop@example.com", webhookUrl),
+      body: await documentBody(signers, "shop@example.com", webhookUrl, order),
     }),
   );
   expect(res.status).toBe(201);
@@ -801,7 +808,11 @@ describe("POST /v1/documents/:id/attest", () => {
     expect("sha256" in agentDonePayload).toBe(false);
     expect(String(agentDone[0]!.init.body)).not.toContain(agent.key);
 
-    const envDone = posts.filter((p) => p.url === "https://example.com/env-hook");
+    const envDone = posts.filter(
+      (p) =>
+        p.url === "https://example.com/env-hook" &&
+        String(p.init.body).includes("document.completed"),
+    );
     expect(envDone).toHaveLength(1);
     const envPayload = JSON.parse(String(envDone[0]!.init.body)) as Record<string, unknown>;
     expect(envPayload.event).toBe("document.completed");
@@ -814,6 +825,13 @@ describe("POST /v1/documents/:id/attest", () => {
       .update(`${envTs}.${String(envDone[0]!.init.body)}`)
       .digest("hex");
     expect(envSig).toBe(`sha256=${envExpected}`);
+    expect(
+      posts.some(
+        (p) =>
+          p.url === "https://example.com/env-hook" &&
+          String(p.init.body).includes("signer.completed"),
+      ),
+    ).toBe(true);
   });
 
   it("inviteNextHumanIfNeeded does not email when document is not pending", {
@@ -858,6 +876,195 @@ describe("POST /v1/documents/:id/attest", () => {
       .from(signersTable)
       .where(eq(signersTable.id, allSigners[1]!.id));
     expect(human!.sentAt).toBeNull();
+  });
+
+  it("sequential later agent cannot attest before the current party", {
+    timeout: 60_000,
+  }, async () => {
+    const { db, userFor } = await boot();
+    const { cookie } = await asPro(db, userFor);
+    const first = await createNamedAgent(cookie, "grok-legal", "Grok Legal");
+    const second = await createNamedAgent(cookie, "grok-ops", "Grok Ops");
+    const live = await mintLive(cookie);
+    const id = await sendDocument(live, [
+      {
+        name: "Grok Legal",
+        email: "shop@example.com",
+        kind: "agent",
+        agent: "grok-legal",
+      },
+      {
+        name: "Grok Ops",
+        email: "shop@example.com",
+        kind: "agent",
+        agent: "grok-ops",
+      },
+    ]);
+
+    const early = await postAttest(attestReq(id, second.key), envCtx(id));
+    expect(early.status).toBe(403);
+    expect(((await early.json()) as { code: string }).code).toBe("cannot_attest");
+    const rows = await db
+      .select()
+      .from(signersTable)
+      .where(eq(signersTable.documentId, id));
+    expect(rows.every((s) => s.attestedAt === null)).toBe(true);
+  });
+
+  it("parallel lets an unfinished agent attest before the first party", {
+    timeout: 60_000,
+  }, async () => {
+    const { db, userFor } = await boot();
+    const { cookie } = await asPro(db, userFor);
+    const agent = await createNamedAgent(cookie, "grok-legal", "Grok Legal");
+    const live = await mintLive(cookie);
+    const id = await sendDocument(
+      live,
+      [
+        { name: "Jane", email: "jane@example.com" },
+        {
+          name: "Grok Legal",
+          email: "shop@example.com",
+          kind: "agent",
+          agent: "grok-legal",
+        },
+      ],
+      undefined,
+      "parallel",
+    );
+
+    const res = await postAttest(attestReq(id, agent.key), envCtx(id));
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { status: string }).status).toBe("pending");
+    const rows = await db
+      .select()
+      .from(signersTable)
+      .where(eq(signersTable.documentId, id));
+    rows.sort((a, b) => a.signingOrder - b.signingOrder);
+    expect(rows[0]!.kind).toBe("human");
+    expect(rows[0]!.signedAt).toBeNull();
+    expect(rows[1]!.kind).toBe("agent");
+    expect(rows[1]!.attestedAt).not.toBeNull();
+  });
+
+  it("parallel last-two attest completes after the human has Finished", {
+    timeout: 60_000,
+  }, async () => {
+    const { db, store, sent, userFor } = await boot();
+    const { cookie } = await asPro(db, userFor);
+    const first = await createNamedAgent(cookie, "grok-legal", "Grok Legal");
+    const second = await createNamedAgent(cookie, "grok-ops", "Grok Ops");
+    const live = await mintLive(cookie);
+    const id = await sendDocument(
+      live,
+      [
+        { name: "Jane", email: "jane@example.com" },
+        {
+          name: "Grok Legal",
+          email: "shop@example.com",
+          kind: "agent",
+          agent: "grok-legal",
+        },
+        {
+          name: "Grok Ops",
+          email: "shop@example.com",
+          kind: "agent",
+          agent: "grok-ops",
+        },
+      ],
+      undefined,
+      "parallel",
+    );
+
+    const invite = sent.find((m) => m.to === "jane@example.com");
+    expect(invite).toBeTruthy();
+    const token = tokenFromUrl(invite!.text.match(/\/s\/([A-Za-z0-9_-]+)/)![1]!);
+    expect(
+      (
+        await postConsent(
+          new Request(`http://sign.test/s/${token}/consent`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ consent: true }),
+          }),
+          { params: Promise.resolve({ token }) },
+        )
+      ).status,
+    ).toBe(200);
+    const pngBody = new FormData();
+    pngBody.set("png", new Blob([png], { type: "image/png" }), "sig.png");
+    const signed = await postSign(
+      new Request(`http://sign.test/s/${token}/sign`, { method: "POST", body: pngBody }),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(signed.status).toBe(200);
+    expect(((await signed.json()) as { status: string }).status).toBe("pending");
+
+    let releaseA: () => void = () => {};
+    let releaseB: () => void = () => {};
+    const heldA = new Promise<void>((r) => {
+      releaseA = r;
+    });
+    const heldB = new Promise<void>((r) => {
+      releaseB = r;
+    });
+    const streamA = new ReadableStream({
+      async pull(controller) {
+        await heldA;
+        controller.enqueue(new TextEncoder().encode("{}"));
+        controller.close();
+      },
+    });
+    const streamB = new ReadableStream({
+      async pull(controller) {
+        await heldB;
+        controller.enqueue(new TextEncoder().encode("{}"));
+        controller.close();
+      },
+    });
+    const attestP = Promise.all([
+      postAttest(
+        new Request(`http://sign.test/v1/documents/${id}/attest`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${first.key}`,
+            "content-type": "application/json",
+          },
+          body: streamA,
+          duplex: "half",
+        } as RequestInit),
+        envCtx(id),
+      ),
+      postAttest(
+        new Request(`http://sign.test/v1/documents/${id}/attest`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${second.key}`,
+            "content-type": "application/json",
+          },
+          body: streamB,
+          duplex: "half",
+        } as RequestInit),
+        envCtx(id),
+      ),
+    ]);
+    releaseA();
+    releaseB();
+    const [a, b] = await attestP;
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
+
+    const [env] = await db.select().from(documents).where(eq(documents.id, id));
+    expect(env!.status).toBe("completed");
+    expect(await store.get(`${id}/sealed.pdf`)).not.toBeNull();
+    const rows = await db
+      .select()
+      .from(signersTable)
+      .where(eq(signersTable.documentId, id));
+    rows.sort((x, y) => x.signingOrder - y.signingOrder);
+    expect(rows[0]!.signedAt).not.toBeNull();
+    expect(rows[1]!.attestedAt).not.toBeNull();
+    expect(rows[2]!.attestedAt).not.toBeNull();
   });
 });
 

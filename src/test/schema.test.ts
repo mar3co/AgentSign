@@ -30,6 +30,23 @@ describe("schema", () => {
       .returning();
     expect(row.id).toBeTruthy();
     expect(row.status).toBe("pending_sender");
+    expect(row.fields).toEqual([]);
+    expect(row.signingMode).toBe("sequential");
+    expect(row.sendEmail).toBe(true);
+
+    const [signer] = await db
+      .insert(signers)
+      .values({
+        documentId: row.id,
+        name: "Alex",
+        email: "alex@example.com",
+        signingOrder: 1,
+        roleName: "Customer",
+        values: { Agree: true },
+      })
+      .returning();
+    expect(signer!.roleName).toBe("Customer");
+    expect(signer!.values).toEqual({ Agree: true });
   });
 
   it("inserts a template with a role", async () => {

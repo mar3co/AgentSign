@@ -2,7 +2,12 @@ import { createHmac, randomUUID } from "node:crypto";
 import { describe, it, expect } from "vitest";
 import { eq } from "drizzle-orm";
 import { createTestDb } from "./db.js";
-import { createFsStore, objectKey } from "../lib/storage.js";
+import {
+  appearanceKey,
+  createFsStore,
+  fieldAppearanceKey,
+  objectKey,
+} from "../lib/storage.js";
 import { setDeps } from "../lib/deps.js";
 import { POST as postDocument } from "../../app/v1/documents/route.js";
 import { POST as postOtp } from "../../app/v1/documents/[id]/otp/route.js";
@@ -59,6 +64,8 @@ async function startDocument(opts: {
   signers?: { name: string; email: string }[];
   title?: string;
   sender?: string;
+  sendEmail?: boolean;
+  fields?: unknown;
 }) {
   const db = await createTestDb();
   const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
@@ -81,6 +88,8 @@ async function startDocument(opts: {
     JSON.stringify(opts.signers ?? [{ name: "Jane", email: "jane@example.com" }]),
   );
   body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
+  if (opts.fields !== undefined) body.set("fields", JSON.stringify(opts.fields));
+  if (opts.sendEmail === false) body.set("send_email", "false");
   const res = await postDocument(
     new Request("http://sign.test/v1/documents", { method: "POST", body }),
   );
@@ -269,6 +278,24 @@ describe("remindDue and shredDue", () => {
     expect(reminderMails(pending.sent).some((m) => m.to === "jane@example.com")).toBe(true);
   });
 
+  it("send_email false skips reminders", { timeout: 60_000 }, async () => {
+    let at = new Date("2026-08-20T12:00:00Z");
+    const pending = await startDocument({ now: () => at, sendEmail: false });
+    const [doc] = await pending.db
+      .select()
+      .from(documents)
+      .where(eq(documents.id, pending.id));
+    expect(doc!.sendEmail).toBe(false);
+    expect(inviteMails(pending.sent)).toHaveLength(0);
+    const janeBefore = mailsTo(pending.sent, "jane@example.com").length;
+
+    at = new Date(at.getTime() + 3 * DAY);
+    await remindDue(pending.db, pending.mailer, at);
+
+    expect(reminderMails(pending.sent)).toHaveLength(0);
+    expect(mailsTo(pending.sent, "jane@example.com").length).toBe(janeBefore);
+  });
+
   it("sends at most two reminders", { timeout: 60_000 }, async () => {
     let at = new Date("2026-08-20T12:00:00Z");
     const pending = await startDocument({ now: () => at });
@@ -406,6 +433,68 @@ describe("remindDue and shredDue", () => {
       else process.env.CRON_SECRET = prev;
       resetEnvCache();
     }
+  });
+
+  it("purgeDocument deletes per-field signature PNGs", { timeout: 60_000 }, async () => {
+    const frozen = new Date("2026-08-20T12:00:00Z");
+    let at = frozen;
+    const ctx = await startDocument({
+      now: () => at,
+      fields: [
+        {
+          name: "sig",
+          type: "signature",
+          role: "Signer 1",
+          required: true,
+          readonly: false,
+          areas: [{ page: 1, x: 10, y: 80, w: 40, h: 10 }],
+        },
+        {
+          name: "ini",
+          type: "initials",
+          role: "Signer 1",
+          required: true,
+          readonly: false,
+          areas: [{ page: 1, x: 10, y: 60, w: 10, h: 10 }],
+        },
+      ],
+    });
+    const consent = await postConsent(
+      new Request(`http://sign.test/s/${ctx.token}/consent`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ consent: true }),
+      }),
+      { params: Promise.resolve({ token: ctx.token }) },
+    );
+    expect(consent.status).toBe(200);
+    const body = new FormData();
+    body.set("png", new Blob([png], { type: "image/png" }), "sig.png");
+    body.set("sig:ini", new Blob([png], { type: "image/png" }), "ini.png");
+    body.set("values", JSON.stringify({}));
+    const sign = await postSign(
+      new Request(`http://sign.test/s/${ctx.token}/sign`, { method: "POST", body }),
+      { params: Promise.resolve({ token: ctx.token }) },
+    );
+    expect(sign.status).toBe(200);
+
+    const [signer] = await ctx.db
+      .select()
+      .from(signersTable)
+      .where(eq(signersTable.documentId, ctx.id));
+    const sigKey = fieldAppearanceKey(ctx.id, signer!.id, "sig");
+    const iniKey = fieldAppearanceKey(ctx.id, signer!.id, "ini");
+    expect(await ctx.store.get(sigKey)).not.toBeNull();
+    expect(await ctx.store.get(iniKey)).not.toBeNull();
+    expect(await ctx.store.get(appearanceKey(ctx.id, signer!.id))).not.toBeNull();
+
+    const [before] = await ctx.db.select().from(documents).where(eq(documents.id, ctx.id));
+    at = before!.shredAt;
+    await shredDue(ctx.db, ctx.store, at);
+
+    expect(await ctx.store.get(sigKey)).toBeNull();
+    expect(await ctx.store.get(iniKey)).toBeNull();
+    expect(await ctx.store.get(appearanceKey(ctx.id, signer!.id))).toBeNull();
   });
 
   it("shredDue after shred_at purges blobs and tombstones", { timeout: 60_000 }, async () => {

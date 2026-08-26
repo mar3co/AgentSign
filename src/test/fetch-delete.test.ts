@@ -132,7 +132,9 @@ describe("GET/DELETE document", () => {
     expect(json.signers[0]!.email).toBe("jane@example.com");
     expect(json.audit.some((a) => a.event === "email_verified")).toBe(true);
     expect(JSON.stringify(json)).not.toMatch(/sign_tmp_/);
-    expect(JSON.stringify(json)).not.toMatch(/\/s\//);
+    expect(
+      (json.signers[0] as { sign_url?: string }).sign_url,
+    ).toMatch(/^\/s\//);
 
     const pdf = await getPdf(
       bearer(key, `http://sign.test/v1/documents/${id}.pdf`),

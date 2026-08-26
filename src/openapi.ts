@@ -53,12 +53,69 @@ const templateRoleSchema = {
   },
 } as const;
 
+const fieldAreaSchema = {
+  type: "object",
+  properties: {
+    page: { type: "integer", minimum: 1, description: "1-based page index" },
+    x: { type: "number", description: "Percent from left" },
+    y: { type: "number", description: "Percent from top" },
+    w: { type: "number" },
+    h: { type: "number" },
+  },
+} as const;
+
+const documentFieldSchema = {
+  type: "object",
+  properties: {
+    name: { type: "string" },
+    type: {
+      type: "string",
+      enum: ["signature", "initials", "date", "name", "text", "checkbox"],
+    },
+    role: { type: "string" },
+    required: { type: "boolean" },
+    readonly: { type: "boolean" },
+    default_value: { type: ["string", "boolean"] },
+    areas: { type: "array", items: fieldAreaSchema },
+  },
+} as const;
+
+const createExtrasProperties = {
+  fields: {
+    type: "string",
+    description:
+      "JSON array of DocumentField. page is 1-based; x/y/w/h are percent top-left. Merged with PDF {{sig}}/{{date}}/{{name}} tags.",
+  },
+  values: {
+    type: "string",
+    description: "JSON object of prefilled field values by field name.",
+  },
+  order: {
+    type: "string",
+    enum: ["sequential", "parallel"],
+    description: "Signing mode. Default sequential.",
+  },
+  send_email: {
+    type: "boolean",
+    description: "When false, mint sign URLs without sending invite email.",
+  },
+  completed_redirect_url: {
+    type: "string",
+    description: "Optional https redirect after the human ceremony.",
+  },
+  embed_origin: {
+    type: "string",
+    description: "Allowed iframe parent origin for ceremony postMessage/CSP.",
+  },
+} as const;
+
 const templateSchema = {
   type: "object",
   properties: {
     id: { type: "string", format: "uuid" },
     title: { type: "string" },
     roles: { type: "array", items: templateRoleSchema },
+    fields: { type: "array", items: documentFieldSchema },
     created_at: { type: "string", format: "date-time" },
   },
 } as const;
@@ -134,9 +191,9 @@ export const openapi = {
   openapi: "3.1.0",
   info: {
     title: "AgentSign",
-    version: "2.0.0",
+    version: "2.1.0",
     description:
-      "AgentSign is a signing primitive. Human always signs. Bearer keys authenticate the caller and never skip the signer. No sign tool. Humans Finish. Agents Attest. Branding, templates, and team are REST for logged-in Pro or SELF_HOST. Errors are JSON { error, code }.",
+      "AgentSign is a signing primitive. Human always signs. Bearer keys authenticate the caller and never skip the signer. No sign tool. Humans Finish. Agents Attest. On-page fields via PDF tags or fields JSON. Branding, templates, and team are REST for logged-in Pro or SELF_HOST. Errors are JSON { error, code }.",
   },
   components: {
     securitySchemes: {
@@ -151,6 +208,7 @@ export const openapi = {
       Error: errorSchema,
       Branding: brandingSchema,
       Template: templateSchema,
+      DocumentField: documentFieldSchema,
       Agent: agentSchema,
       Verify: verifySchema,
     },
@@ -160,7 +218,7 @@ export const openapi = {
       post: {
         summary: "Create and send a document",
         description:
-          "Multipart PDF bytes + signers. Optional Bearer. Omit Authorization to start a sender OTP one-off (pending_sender). Live key skips OTP. Human always signs.",
+          "Multipart PDF bytes + signers. Optional Bearer. Omit Authorization to start a sender OTP one-off (pending_sender). Live key skips OTP. Optional fields/values/order/send_email/completed_redirect_url/embed_origin. Free one-offs accept PDF {{sig}} tags. Human always signs.",
         security: optionalBearer,
         requestBody: {
           required: true,
@@ -175,9 +233,10 @@ export const openapi = {
                   signers: {
                     type: "string",
                     description:
-                      "JSON array of { name, email, kind?, agent? }. kind is human (default) or agent; agent is the team agent slug when kind is agent.",
+                      "JSON array of { name, email, kind?, agent?, role?, values? }. kind is human (default) or agent; agent is the team agent slug when kind is agent.",
                   },
                   file: { type: "string", format: "binary", description: "PDF bytes" },
+                  ...createExtrasProperties,
                 },
               },
             },
@@ -193,6 +252,7 @@ export const openapi = {
                   properties: {
                     id: { type: "string" },
                     status: { type: "string" },
+                    signers: { type: "array", items: { type: "object" } },
                   },
                 },
               },
@@ -242,7 +302,32 @@ export const openapi = {
                     title: { type: "string" },
                     expires_at: { type: "string" },
                     shred_at: { type: "string" },
-                    signers: { type: "array", items: { type: "object" } },
+                    fields: {
+                      type: "array",
+                      items: { $ref: "#/components/schemas/DocumentField" },
+                    },
+                    signing_mode: {
+                      type: "string",
+                      enum: ["sequential", "parallel"],
+                    },
+                    send_email: { type: "boolean" },
+                    current_party: { type: ["object", "null"] },
+                    signers: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          kind: { type: "string" },
+                          email: { type: "string" },
+                          role: { type: "string" },
+                          values: { type: "object" },
+                          sign_url: {
+                            type: "string",
+                            description: "Owner-only human ceremony path.",
+                          },
+                        },
+                      },
+                    },
                     audit: { type: "array", items: { type: "object" } },
                   },
                 },
@@ -785,7 +870,7 @@ export const openapi = {
     "/v1/templates/{id}/send": {
       post: {
         summary: "Send a template as a new document",
-        description: `${liveKeyNote} signers.length must equal role count; order is signing_order. Creates a normal document (same clocks, invite, cap). Human always signs.`,
+        description: `${liveKeyNote} signers.length must equal role count; order is signing_order. Copies template fields. Optional values, order, send_email, completed_redirect_url, embed_origin. Creates a normal document (same clocks, invite, cap). Human always signs.`,
         security: liveOrSession,
         parameters: [idParam],
         requestBody: {
@@ -804,9 +889,19 @@ export const openapi = {
                       properties: {
                         name: { type: "string" },
                         email: { type: "string", format: "email" },
+                        role: { type: "string" },
+                        values: { type: "object" },
                       },
                     },
                   },
+                  values: { type: "object" },
+                  order: {
+                    type: "string",
+                    enum: ["sequential", "parallel"],
+                  },
+                  send_email: { type: "boolean" },
+                  completed_redirect_url: { type: "string" },
+                  embed_origin: { type: "string" },
                 },
               },
             },
@@ -1079,6 +1174,24 @@ export const openapi = {
             },
           },
           "404": errorResponse,
+          "410": errorResponse,
+        },
+      },
+    },
+    "/s/{token}/preview": {
+      get: {
+        summary: "Original PDF preview for the ceremony",
+        description:
+          "Signing token only. Returns the original unsigned PDF while the signer may open the ceremony. 409 sequential_wait / 410 expired as the ceremony state GET.",
+        parameters: [tokenParam],
+        responses: {
+          "200": {
+            description: "Original PDF",
+            content: {
+              "application/pdf": { schema: { type: "string", format: "binary" } },
+            },
+          },
+          "409": errorResponse,
           "410": errorResponse,
         },
       },

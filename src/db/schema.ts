@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { sql } from "drizzle-orm";
 import {
+  boolean,
   integer,
   jsonb,
   pgTable,
@@ -8,6 +10,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import type { DocumentField } from "../lib/pdf/fields.js";
 
 export const documentStatus = [
   "pending_sender",
@@ -55,6 +58,9 @@ export type AttestMethod = (typeof attestMethodKind)[number];
 export const accountPlan = ["free", "pro"] as const;
 export type AccountPlan = (typeof accountPlan)[number];
 
+export const signingModes = ["sequential", "parallel"] as const;
+export type SigningMode = (typeof signingModes)[number];
+
 const timestamptz = (name: string) =>
   timestamp(name, { withTimezone: true, mode: "date" });
 
@@ -72,6 +78,16 @@ export const documents = pgTable("documents", {
   /** HMAC key shown once as webhook_secret. Column name is historical. */
   webhookSecretHash: text("webhook_secret_hash"),
   sha256: text("sha256"),
+  fields: jsonb("fields")
+    .$type<DocumentField[]>()
+    .notNull()
+    .default(sql`'[]'::jsonb`),
+  signingMode: text("signing_mode", { enum: signingModes })
+    .notNull()
+    .default("sequential"),
+  sendEmail: boolean("send_email").notNull().default(true),
+  completedRedirectUrl: text("completed_redirect_url"),
+  embedOrigin: text("embed_origin"),
   createdAt: timestamptz("created_at").notNull().defaultNow(),
 }).enableRLS();
 
@@ -102,6 +118,11 @@ export const signers = pgTable("signers", {
   ip: text("ip"),
   ua: text("ua"),
   consentUa: text("consent_ua"),
+  roleName: text("role_name"),
+  values: jsonb("values")
+    .$type<Record<string, string | boolean>>()
+    .notNull()
+    .default(sql`'{}'::jsonb`),
 }).enableRLS();
 
 export const files = pgTable("files", {
@@ -183,6 +204,10 @@ export const templates = pgTable("templates", {
   createdByUserId: uuid("created_by_user_id").notNull(),
   title: text("title").notNull(),
   storagePath: text("storage_path").notNull(),
+  fields: jsonb("fields")
+    .$type<DocumentField[]>()
+    .notNull()
+    .default(sql`'[]'::jsonb`),
   createdAt: timestamptz("created_at").notNull().defaultNow(),
 }).enableRLS();
 

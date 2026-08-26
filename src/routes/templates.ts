@@ -12,8 +12,18 @@ import { teamForUser, type Team } from "../lib/team.js";
 import { requireCaller } from "../lib/caller.js";
 import { getDeps, storeUnavailableResponse } from "../lib/deps.js";
 import { TEMPLATE_CAP } from "../lib/entitlement.js";
+import {
+  defaultRoleName,
+  mergeFields,
+  parseFieldsJson,
+  type DocumentField,
+} from "../lib/pdf/fields.js";
 import { objectKey } from "../lib/storage.js";
-import { sendPreparedPdf } from "./documents.js";
+import {
+  parseDocumentExtras,
+  parsePdfAndFields,
+  sendPreparedPdf,
+} from "./documents.js";
 
 const PDF_MAX_BYTES = 20 * 1024 * 1024;
 
@@ -47,8 +57,56 @@ function templateJson(template: TemplateRow, roles: RoleRow[]) {
       signing_order: r.signingOrder,
       role_name: r.roleName,
     })),
+    fields: template.fields ?? [],
     created_at: template.createdAt.toISOString(),
   };
+}
+
+function uniqueRoleNames(roleNames: string[]): Response | null {
+  if (new Set(roleNames).size !== roleNames.length) {
+    return jsonError(400, "Role names must be unique", "invalid_request");
+  }
+  return null;
+}
+
+function fieldsMatchRoles(
+  fields: DocumentField[],
+  roleNames: string[],
+): Response | null {
+  const uniqueErr = uniqueRoleNames(roleNames);
+  if (uniqueErr) return uniqueErr;
+  const roles = new Set(roleNames);
+  for (const field of fields) {
+    if (!roles.has(field.role)) {
+      return jsonError(400, "Field role does not match a template role", "invalid_fields");
+    }
+  }
+  return null;
+}
+
+function parseTemplateFieldsJson(
+  raw: unknown,
+): { ok: true; fields: DocumentField[] } | { ok: false; response: Response } {
+  if (raw == null || raw === "") return { ok: true, fields: [] };
+  let value = raw;
+  if (typeof raw === "string") {
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      return {
+        ok: false,
+        response: jsonError(400, "Invalid fields", "invalid_fields"),
+      };
+    }
+  }
+  const parsed = parseFieldsJson(value);
+  if (!parsed.ok) {
+    return {
+      ok: false,
+      response: jsonError(400, parsed.error, parsed.code),
+    };
+  }
+  return { ok: true, fields: parsed.fields };
 }
 
 async function requireEntitledTeam(req: Request) {
@@ -195,6 +253,7 @@ export async function createTemplate(req: Request): Promise<Response> {
   let title = "";
   let documentId = "";
   let rolesRaw: unknown;
+  let fieldsRaw: unknown;
   let file: Blob | null = null;
 
   if (ct.includes("multipart/form-data")) {
@@ -207,6 +266,7 @@ export async function createTemplate(req: Request): Promise<Response> {
     title = String(form.get("title") ?? "").trim();
     documentId = String(form.get("document_id") ?? "").trim();
     rolesRaw = form.has("roles") ? form.get("roles") : undefined;
+    fieldsRaw = form.has("fields") ? form.get("fields") : undefined;
     const uploaded = form.get("file");
     file = uploaded instanceof Blob ? uploaded : null;
   } else {
@@ -223,15 +283,18 @@ export async function createTemplate(req: Request): Promise<Response> {
       title?: unknown;
       document_id?: unknown;
       roles?: unknown;
+      fields?: unknown;
     };
     title = typeof json.title === "string" ? json.title.trim() : "";
     documentId =
       typeof json.document_id === "string" ? json.document_id.trim() : "";
     rolesRaw = json.roles;
+    fieldsRaw = json.fields;
   }
 
   let bytes: Uint8Array;
   let roleNames: string[];
+  let fields: DocumentField[] = [];
 
   if (documentId) {
     const [document] = await gate.caller.db
@@ -270,11 +333,18 @@ export async function createTemplate(req: Request): Promise<Response> {
         .from(signersTable)
         .where(eq(signersTable.documentId, documentId));
       signerRows.sort((a, b) => a.signingOrder - b.signingOrder);
-      roleNames = signerRows.map((s) => s.name.trim()).filter(Boolean);
+      roleNames = signerRows
+        .map((s) => (s.roleName || defaultRoleName(s.signingOrder)).trim())
+        .filter(Boolean);
       if (roleNames.length === 0) {
         return jsonError(400, "At least one role is required", "invalid_request");
       }
     }
+    const extra = parseTemplateFieldsJson(fieldsRaw);
+    if (!extra.ok) return extra.response;
+    const merged = mergeFields(document.fields ?? [], extra.fields);
+    if (!merged.ok) return jsonError(400, merged.error, merged.code);
+    fields = merged.fields;
   } else {
     if (!(file instanceof Blob)) {
       return jsonError(400, "A PDF file is required", "invalid_pdf");
@@ -289,9 +359,15 @@ export async function createTemplate(req: Request): Promise<Response> {
     const parsed = parseRoles(rolesRaw);
     if (!parsed.ok) return parsed.response;
     roleNames = parsed.names;
+    const tagged = await parsePdfAndFields(bytes, fieldsRaw);
+    if (!tagged.ok) return tagged.response;
+    bytes = tagged.storedBytes;
+    fields = tagged.fields;
   }
 
   if (!title) return jsonError(400, "Title is required", "invalid_request");
+  const roleErr = fieldsMatchRoles(fields, roleNames);
+  if (roleErr) return roleErr;
 
   const id = randomUUID();
   const storagePath = templateObjectKey(id);
@@ -304,6 +380,7 @@ export async function createTemplate(req: Request): Promise<Response> {
       createdByUserId: gate.caller.user.id,
       title,
       storagePath,
+      fields,
     })
     .returning();
   await insertRoles(gate.caller.db, template.id, roleNames);
@@ -338,24 +415,45 @@ export async function patchTemplate(
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     return jsonError(400, "Invalid JSON", "invalid_request");
   }
-  const json = body as { title?: unknown; roles?: unknown };
+  const json = body as { title?: unknown; roles?: unknown; fields?: unknown };
+
+  let title = loaded.template.title;
+  let roleNames = loaded.roles.map((r) => r.roleName);
+  let fields = loaded.template.fields ?? [];
 
   if ("title" in json) {
     if (typeof json.title !== "string" || !json.title.trim()) {
       return jsonError(400, "Title is required", "invalid_request");
     }
-    await gate.caller.db
-      .update(templates)
-      .set({ title: json.title.trim() })
-      .where(eq(templates.id, loaded.template.id));
+    title = json.title.trim();
   }
   if ("roles" in json) {
     const parsed = parseRoles(json.roles);
     if (!parsed.ok) return parsed.response;
+    roleNames = parsed.names;
+  }
+  if ("fields" in json) {
+    const parsed = parseTemplateFieldsJson(json.fields);
+    if (!parsed.ok) return parsed.response;
+    fields = parsed.fields;
+  }
+  const roleErr = fieldsMatchRoles(fields, roleNames);
+  if (roleErr) return roleErr;
+
+  if ("title" in json || "fields" in json) {
+    await gate.caller.db
+      .update(templates)
+      .set({
+        ...("title" in json ? { title } : {}),
+        ...("fields" in json ? { fields } : {}),
+      })
+      .where(eq(templates.id, loaded.template.id));
+  }
+  if ("roles" in json) {
     await gate.caller.db
       .delete(templateRoles)
       .where(eq(templateRoles.templateId, loaded.template.id));
-    await insertRoles(gate.caller.db, loaded.template.id, parsed.names);
+    await insertRoles(gate.caller.db, loaded.template.id, roleNames);
   }
 
   const [updated] = await gate.caller.db
@@ -413,20 +511,51 @@ export async function sendTemplate(
       "invalid_request",
     );
   }
-  const parsed: { name: string; email: string }[] = [];
-  for (const item of signers) {
+  const parsed: { name: string; email: string; role: string; values?: Record<string, string | boolean> }[] = [];
+  for (let i = 0; i < signers.length; i++) {
+    const item = signers[i];
     if (!item || typeof item !== "object" || Array.isArray(item)) {
       return jsonError(400, "Each signer needs name and email", "invalid_request");
     }
-    const name = String((item as { name?: unknown }).name ?? "").trim();
-    const email = String((item as { email?: unknown }).email ?? "")
+    const row = item as {
+      name?: unknown;
+      email?: unknown;
+      role?: unknown;
+      values?: unknown;
+    };
+    const name = String(row.name ?? "").trim();
+    const email = String(row.email ?? "")
       .trim()
       .toLowerCase();
     if (!name || !email) {
       return jsonError(400, "Each signer needs name and email", "invalid_request");
     }
-    parsed.push({ name, email });
+    const slotRole = loaded.roles[i]!.roleName;
+    const role =
+      row.role == null || row.role === ""
+        ? slotRole
+        : String(row.role).trim();
+    if (role !== slotRole) {
+      return jsonError(
+        400,
+        "Signer role must match the template role",
+        "invalid_fields",
+      );
+    }
+    const values = parseTemplateSignerValues(row.values);
+    if (!values.ok) return values.response;
+    parsed.push({ name, email, role, values: values.values });
   }
+
+  const extras = await parseDocumentExtras({
+    valuesRaw: (body as { values?: unknown }).values,
+    order: (body as { order?: unknown }).order,
+    sendEmail: (body as { send_email?: unknown }).send_email,
+    completedRedirectUrl: (body as { completed_redirect_url?: unknown })
+      .completed_redirect_url,
+    embedOrigin: (body as { embed_origin?: unknown }).embed_origin,
+  });
+  if (!extras.ok) return extras.response;
 
   const bytes = await store.get(loaded.template.storagePath);
   if (!bytes) return jsonError(404, "Template not found", "not_found");
@@ -437,5 +566,36 @@ export async function sendTemplate(
     userId: gate.caller.user.id,
     signers: parsed,
     bytes,
+    fields: loaded.template.fields ?? [],
+    values: extras.extras.docValues,
+    signingMode: extras.extras.signingMode,
+    sendEmail: extras.extras.sendEmail,
+    completedRedirectUrl: extras.extras.completedRedirectUrl,
+    embedOrigin: extras.extras.embedOrigin,
   });
+}
+
+function parseTemplateSignerValues(
+  raw: unknown,
+):
+  | { ok: true; values: Record<string, string | boolean> | undefined }
+  | { ok: false; response: Response } {
+  if (raw == null) return { ok: true, values: undefined };
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return {
+      ok: false,
+      response: jsonError(400, "Invalid values", "invalid_values"),
+    };
+  }
+  const values: Record<string, string | boolean> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v !== "string" && typeof v !== "boolean") {
+      return {
+        ok: false,
+        response: jsonError(400, "Invalid values", "invalid_values"),
+      };
+    }
+    values[k] = v;
+  }
+  return { ok: true, values };
 }

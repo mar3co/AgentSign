@@ -87,10 +87,10 @@ async function jsonOrText(res: Response): Promise<string> {
 export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer {
   const allowEnvKey = opts?.allowEnvKey === true;
   const server = new McpServer(
-    { name: "agentsign", version: "2.0.0" },
+    { name: "agentsign", version: "2.1.0" },
     {
       instructions:
-        "AgentSign is a signing primitive. Human always signs. Keys authenticate the caller and never sign. No sign tool. Humans Finish. Agents Attest. Tools: send, status, download, attest, reject, verify, list_templates, send_template.",
+        "AgentSign is a signing primitive. Human always signs. Keys authenticate the caller and never sign. No sign tool. Humans Finish. Agents Attest. Tools: send, status, download, attest, reject, verify, list_templates, send_template. Optional send fields (JSON); send/send_template values, order, send_email, completed_redirect_url, embed_origin. PDF {{sig}} tags work on Free one-offs.",
     },
   );
 
@@ -99,13 +99,19 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
     {
       title: "Send document",
       description:
-        "Create and send a signing document (POST /v1/documents). Pass PDF bytes as base64, not a public pdf_url. Optional Bearer sign_live_ key. Without a key, starts a sender OTP one-off — tell the operator to check sender email. sign_tmp_ cannot send or list. Signer objects may include kind (human|agent) and agent slug. No sign tool. Humans Finish. Agents Attest.",
+        "Create and send a signing document (POST /v1/documents). Pass PDF bytes as base64, not a public pdf_url. Optional Bearer sign_live_ key. Without a key, starts a sender OTP one-off — tell the operator to check sender email. sign_tmp_ cannot send or list. Signer objects may include kind (human|agent) and agent slug. Optional fields JSON, values, order, send_email, completed_redirect_url, embed_origin. No sign tool. Humans Finish. Agents Attest.",
       inputSchema: {
         title: z.string().min(1),
         sender_email: z.string().min(1),
         signers: z.array(signerSchema).min(1),
         pdf: z.string().describe("Base64-encoded PDF bytes. Not a URL."),
         api_key: z.string().optional(),
+        fields: z.string().optional().describe("JSON array of on-page fields."),
+        values: z.string().optional().describe("JSON object of prefilled field values."),
+        order: z.enum(["sequential", "parallel"]).optional(),
+        send_email: z.boolean().optional(),
+        completed_redirect_url: z.string().optional(),
+        embed_origin: z.string().optional(),
       },
     },
     async (args, extra) => {
@@ -123,6 +129,14 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
       form.set("sender_email", args.sender_email);
       form.set("signers", JSON.stringify(args.signers));
       form.set("file", new Blob([Buffer.from(bytes)], { type: "application/pdf" }), "document.pdf");
+      if (args.fields != null) form.set("fields", args.fields);
+      if (args.values != null) form.set("values", args.values);
+      if (args.order != null) form.set("order", args.order);
+      if (args.send_email != null) form.set("send_email", args.send_email ? "true" : "false");
+      if (args.completed_redirect_url != null) {
+        form.set("completed_redirect_url", args.completed_redirect_url);
+      }
+      if (args.embed_origin != null) form.set("embed_origin", args.embed_origin);
       const headers = new Headers();
       const key = resolveKey(args, extra, allowEnvKey);
       if (key) headers.set("authorization", `Bearer ${key}`);
@@ -331,11 +345,16 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
     {
       title: "Send a template",
       description:
-        "POST /v1/templates/{id}/send. Requires a session or sign_live_ Bearer. signers.length must equal template role count; order is signing_order. Each signer is { name, email } only — no kind/agent. Mixed parties use send. Human always signs.",
+        "POST /v1/templates/{id}/send. Requires a session or sign_live_ Bearer. signers.length must equal template role count; order is signing_order. Each signer is { name, email } only — no kind/agent. Mixed parties use send. Copies template fields. Optional values, order, send_email, completed_redirect_url, embed_origin. Human always signs.",
       inputSchema: {
         id: z.string().min(1),
         signers: z.array(templateSignerSchema).min(1),
         api_key: z.string().optional(),
+        values: z.string().optional().describe("JSON object of prefilled field values."),
+        order: z.enum(["sequential", "parallel"]).optional(),
+        send_email: z.boolean().optional(),
+        completed_redirect_url: z.string().optional(),
+        embed_origin: z.string().optional(),
       },
     },
     async (args, extra) => {
@@ -346,6 +365,20 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
           true,
         );
       }
+      const body: Record<string, unknown> = { signers: args.signers };
+      if (args.values != null) {
+        try {
+          body.values = JSON.parse(args.values);
+        } catch {
+          body.values = args.values;
+        }
+      }
+      if (args.order != null) body.order = args.order;
+      if (args.send_email != null) body.send_email = args.send_email;
+      if (args.completed_redirect_url != null) {
+        body.completed_redirect_url = args.completed_redirect_url;
+      }
+      if (args.embed_origin != null) body.embed_origin = args.embed_origin;
       const res = await sendTemplate(
         new Request(`http://sign.local/v1/templates/${args.id}/send`, {
           method: "POST",
@@ -353,7 +386,7 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
             authorization: `Bearer ${key}`,
             "content-type": "application/json",
           },
-          body: JSON.stringify({ signers: args.signers }),
+          body: JSON.stringify(body),
         }),
         args.id,
       );

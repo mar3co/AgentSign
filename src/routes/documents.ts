@@ -1,5 +1,6 @@
 import { and, count, eq, gte, inArray, ne, or } from "drizzle-orm";
 import { z } from "zod";
+import { PDFDocument } from "pdf-lib";
 import { getDb } from "../db/client.js";
 import {
   accounts,
@@ -35,11 +36,25 @@ import {
 } from "../lib/keys.js";
 import { accountForOauthGrant, lookupOauthGrant } from "../lib/oauth.js";
 import { newOtp } from "../lib/otp.js";
-import { objectKey, type BlobStore } from "../lib/storage.js";
+import { parseEmbedOrigin } from "../lib/embed.js";
+import {
+  defaultRoleName,
+  fieldsFitPageCount,
+  mergeFields,
+  parseFieldsJson,
+  type DocumentField,
+} from "../lib/pdf/fields.js";
+import { InvalidFieldsError, parsePdfTags } from "../lib/pdf/tags.js";
+import {
+  fieldAppearanceKey,
+  objectKey,
+  type BlobStore,
+} from "../lib/storage.js";
 import { newSigningToken, placeholderSigningTokenHash } from "../lib/tokens.js";
 import {
   fireAgentPartyReady,
   newWebhookSecret,
+  openWebhookSecret,
   sealWebhookSecret,
   webhookEncryptionReady,
   webhookUrlError,
@@ -55,15 +70,33 @@ const signerSchema = z.object({
   email: z.string().min(1),
   kind: z.enum(["human", "agent"]).optional(),
   agent: z.string().optional(),
+  role: z.string().max(80).optional(),
+  values: z.record(z.string(), z.union([z.string(), z.boolean()])).optional(),
 });
 const signersSchema = z.array(signerSchema).min(1);
 
 type ParsedSigner = z.infer<typeof signerSchema>;
+type FieldValues = Record<string, string | boolean>;
 type ResolvedParty = {
   name: string;
   email: string;
   kind: "human" | "agent";
   agentId: string | null;
+};
+type PreparedSigner = ResolvedParty & {
+  roleName: string;
+  values: FieldValues;
+};
+
+type InviteSigner = { email: string; role: string; sign_url: string };
+
+type DocumentExtras = {
+  fields: DocumentField[];
+  signingMode: "sequential" | "parallel";
+  sendEmail: boolean;
+  completedRedirectUrl: string | null;
+  embedOrigin: string | null;
+  docValues: FieldValues;
 };
 
 async function resolveSignerParties(
@@ -139,7 +172,7 @@ async function resolveSignerParties(
   return { ok: true, parties };
 }
 
-function signerInsertValues(documentId: string, parties: ResolvedParty[]) {
+function signerInsertValues(documentId: string, parties: PreparedSigner[]) {
   return parties.map((s, i) => ({
     documentId,
     name: s.name,
@@ -148,7 +181,330 @@ function signerInsertValues(documentId: string, parties: ResolvedParty[]) {
     kind: s.kind,
     agentId: s.agentId,
     tokenHash: s.kind === "agent" ? null : placeholderSigningTokenHash(),
+    roleName: s.roleName,
+    values: s.values,
   }));
+}
+
+function agentFieldForbidden(field: DocumentField): boolean {
+  if (
+    field.type === "signature" ||
+    field.type === "initials" ||
+    field.type === "checkbox"
+  ) {
+    return true;
+  }
+  if (
+    field.readonly &&
+    (field.type === "date" || field.type === "name" || field.type === "text")
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function parseJsonValue(
+  raw: unknown,
+): { ok: true; value: unknown } | { ok: false; response: Response } {
+  if (raw == null || raw === "") return { ok: true, value: undefined };
+  if (typeof raw !== "string") return { ok: true, value: raw };
+  try {
+    return { ok: true, value: JSON.parse(raw) };
+  } catch {
+    return {
+      ok: false,
+      response: jsonError(400, "Invalid JSON", "invalid_request"),
+    };
+  }
+}
+
+function parseValuesObject(
+  raw: unknown,
+  code: "invalid_values" | "invalid_request" = "invalid_values",
+): { ok: true; values: FieldValues } | { ok: false; response: Response } {
+  if (raw == null || raw === "") return { ok: true, values: {} };
+  let value = raw;
+  if (typeof raw === "string") {
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      return { ok: false, response: jsonError(400, "Invalid values", code) };
+    }
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { ok: false, response: jsonError(400, "Invalid values", code) };
+  }
+  const values: FieldValues = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof v !== "string" && typeof v !== "boolean") {
+      return { ok: false, response: jsonError(400, "Invalid values", code) };
+    }
+    values[k] = v;
+  }
+  return { ok: true, values };
+}
+
+function parseSendEmail(
+  raw: unknown,
+): { ok: true; value: boolean } | { ok: false; response: Response } {
+  if (raw == null || raw === "") return { ok: true, value: true };
+  if (raw === true || raw === "true") return { ok: true, value: true };
+  if (raw === false || raw === "false") return { ok: true, value: false };
+  return {
+    ok: false,
+    response: jsonError(400, "send_email must be true or false", "invalid_request"),
+  };
+}
+
+function parseSigningMode(
+  raw: unknown,
+):
+  | { ok: true; value: "sequential" | "parallel" }
+  | { ok: false; response: Response } {
+  if (raw == null || raw === "") return { ok: true, value: "sequential" };
+  if (raw === "sequential" || raw === "parallel") {
+    return { ok: true, value: raw };
+  }
+  return {
+    ok: false,
+    response: jsonError(400, "order must be sequential or parallel", "invalid_request"),
+  };
+}
+
+async function parseCompletedRedirectUrl(
+  raw: unknown,
+): Promise<{ ok: true; url: string | null } | { ok: false; response: Response }> {
+  if (raw == null || raw === "") return { ok: true, url: null };
+  if (typeof raw !== "string") {
+    return {
+      ok: false,
+      response: jsonError(400, "Invalid completed_redirect_url", "invalid_request"),
+    };
+  }
+  const url = raw.trim();
+  if (!url) return { ok: true, url: null };
+  if (url.length > 2048) {
+    return {
+      ok: false,
+      response: jsonError(400, "completed_redirect_url is too long", "invalid_request"),
+    };
+  }
+  const blocked = await webhookUrlError(url);
+  if (blocked) {
+    return { ok: false, response: jsonError(400, blocked, "invalid_request") };
+  }
+  return { ok: true, url };
+}
+
+function parseOriginField(
+  raw: unknown,
+): { ok: true; origin: string | null } | { ok: false; response: Response } {
+  if (raw == null || raw === "") return { ok: true, origin: null };
+  if (typeof raw !== "string") {
+    return {
+      ok: false,
+      response: jsonError(400, "Invalid embed origin", "embed_origin_invalid"),
+    };
+  }
+  const trimmed = raw.trim();
+  if (!trimmed) return { ok: true, origin: null };
+  const parsed = parseEmbedOrigin(trimmed);
+  if (!parsed.ok) {
+    return {
+      ok: false,
+      response: jsonError(400, "Invalid embed origin", "embed_origin_invalid"),
+    };
+  }
+  return { ok: true, origin: parsed.origin };
+}
+
+export async function parsePdfAndFields(
+  bytes: Uint8Array,
+  fieldsRaw: unknown,
+): Promise<
+  | { ok: true; fields: DocumentField[]; storedBytes: Uint8Array }
+  | { ok: false; response: Response }
+> {
+  let tagFields: DocumentField[] = [];
+  let storedBytes = bytes;
+  try {
+    const parsed = await parsePdfTags(bytes);
+    tagFields = parsed.fields;
+    storedBytes = parsed.pdf;
+  } catch (err) {
+    if (err instanceof InvalidFieldsError) {
+      return {
+        ok: false,
+        response: jsonError(400, err.message, "invalid_fields"),
+      };
+    }
+    return {
+      ok: false,
+      response: jsonError(400, "File must be a PDF", "invalid_pdf"),
+    };
+  }
+
+  let extra: DocumentField[] = [];
+  if (fieldsRaw != null && fieldsRaw !== "") {
+    const json = parseJsonValue(fieldsRaw);
+    if (!json.ok) {
+      return {
+        ok: false,
+        response: jsonError(400, "Invalid fields", "invalid_fields"),
+      };
+    }
+    if (json.value !== undefined) {
+      const parsed = parseFieldsJson(json.value);
+      if (!parsed.ok) {
+        return {
+          ok: false,
+          response: jsonError(400, parsed.error, parsed.code),
+        };
+      }
+      extra = parsed.fields;
+    }
+  }
+
+  const merged = mergeFields(tagFields, extra);
+  if (!merged.ok) {
+    return {
+      ok: false,
+      response: jsonError(400, merged.error, merged.code),
+    };
+  }
+  const pages = await fieldsMatchPdfPages(merged.fields, storedBytes);
+  if (!pages.ok) return pages;
+  return { ok: true, fields: merged.fields, storedBytes };
+}
+
+async function fieldsMatchPdfPages(
+  fields: DocumentField[],
+  bytes: Uint8Array,
+): Promise<
+  | { ok: true }
+  | { ok: false; response: Response }
+> {
+  if (fields.length === 0) return { ok: true };
+  let pageCount: number;
+  try {
+    const doc = await PDFDocument.load(bytes);
+    pageCount = doc.getPageCount();
+  } catch {
+    return {
+      ok: false,
+      response: jsonError(400, "File must be a PDF", "invalid_pdf"),
+    };
+  }
+  const fit = fieldsFitPageCount(fields, pageCount);
+  if (!fit.ok) {
+    return {
+      ok: false,
+      response: jsonError(400, fit.error, fit.code),
+    };
+  }
+  return { ok: true };
+}
+
+export async function parseDocumentExtras(input: {
+  valuesRaw?: unknown;
+  order?: unknown;
+  sendEmail?: unknown;
+  completedRedirectUrl?: unknown;
+  embedOrigin?: unknown;
+}): Promise<{ ok: true; extras: Omit<DocumentExtras, "fields"> } | { ok: false; response: Response }> {
+  const values = parseValuesObject(input.valuesRaw);
+  if (!values.ok) return values;
+  const order = parseSigningMode(input.order);
+  if (!order.ok) return order;
+  const sendEmail = parseSendEmail(input.sendEmail);
+  if (!sendEmail.ok) return sendEmail;
+  const redirect = await parseCompletedRedirectUrl(input.completedRedirectUrl);
+  if (!redirect.ok) return redirect;
+  const origin = parseOriginField(input.embedOrigin);
+  if (!origin.ok) return origin;
+  return {
+    ok: true,
+    extras: {
+      signingMode: order.value,
+      sendEmail: sendEmail.value,
+      completedRedirectUrl: redirect.url,
+      embedOrigin: origin.origin,
+      docValues: values.values,
+    },
+  };
+}
+
+function prepareParties(
+  parties: ResolvedParty[],
+  parsedSigners: ParsedSigner[],
+  fields: DocumentField[],
+  docValues: FieldValues,
+): { ok: true; prepared: PreparedSigner[] } | { ok: false; response: Response } {
+  const prepared: PreparedSigner[] = parties.map((p, i) => {
+    const given = parsedSigners[i]?.role?.trim() ?? "";
+    return {
+      ...p,
+      roleName: given || defaultRoleName(i + 1),
+      values: {},
+    };
+  });
+
+  if (fields.length > 0 && !prepared.some((p) => p.kind === "human")) {
+    return {
+      ok: false,
+      response: jsonError(400, "Fields require a human party", "invalid_fields"),
+    };
+  }
+
+  const roles = new Set(prepared.map((p) => p.roleName));
+  if (fields.length > 0 && roles.size !== prepared.length) {
+    return {
+      ok: false,
+      response: jsonError(400, "Signer roles must be unique", "invalid_fields"),
+    };
+  }
+  for (const field of fields) {
+    if (!roles.has(field.role)) {
+      return {
+        ok: false,
+        response: jsonError(400, "Field role does not match a signer", "invalid_fields"),
+      };
+    }
+    const owners = prepared.filter((p) => p.roleName === field.role);
+    if (owners.some((o) => o.kind === "agent") && agentFieldForbidden(field)) {
+      return {
+        ok: false,
+        response: jsonError(
+          400,
+          "Interactive fields cannot be assigned to an agent",
+          "invalid_fields",
+        ),
+      };
+    }
+  }
+
+  for (let i = 0; i < prepared.length; i++) {
+    const party = prepared[i]!;
+    const signerValues = parsedSigners[i]?.values ?? {};
+    const values: FieldValues = {};
+    for (const field of fields) {
+      if (field.role !== party.roleName) continue;
+      if (field.default_value !== undefined) values[field.name] = field.default_value;
+      if (docValues[field.name] !== undefined) values[field.name] = docValues[field.name]!;
+      if (signerValues[field.name] !== undefined) {
+        values[field.name] = signerValues[field.name]!;
+      }
+      if (field.readonly && values[field.name] === undefined) {
+        return {
+          ok: false,
+          response: jsonError(400, "Readonly field is missing a value", "invalid_values"),
+        };
+      }
+    }
+    party.values = values;
+  }
+
+  return { ok: true, prepared };
 }
 
 function jsonError(status: number, error: string, code: string): Response {
@@ -192,7 +548,27 @@ function bearerToken(req: Request): string | null {
   return token || null;
 }
 
-async function inviteFirstSigner(
+export async function mintHumanTokens(
+  db: AuditDb,
+  humans: { id: string; tokenEnc: string | null }[],
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  for (const human of humans) {
+    if (human.tokenEnc) {
+      map.set(human.id, openWebhookSecret(human.tokenEnc));
+      continue;
+    }
+    const token = newSigningToken();
+    await db
+      .update(signersTable)
+      .set({ tokenHash: token.hash, tokenEnc: sealWebhookSecret(token.raw) })
+      .where(eq(signersTable.id, human.id));
+    map.set(human.id, token.raw);
+  }
+  return map;
+}
+
+export async function inviteFirstSigner(
   db: AuditDb,
   mailer: Mailer,
   document: {
@@ -201,32 +577,119 @@ async function inviteFirstSigner(
     title: string;
     expiresAt: Date;
     userId: string | null;
+    sendEmail?: boolean;
+    signingMode?: "sequential" | "parallel";
   },
   at: Date,
-): Promise<string | null> {
+): Promise<{ signers: InviteSigner[] }> {
   const signerRows = await db
     .select()
     .from(signersTable)
     .where(eq(signersTable.documentId, document.id));
   signerRows.sort((a, b) => a.signingOrder - b.signingOrder);
+  const humans = signerRows.filter((s) => s.kind !== "agent");
+  const tokens = await mintHumanTokens(db, humans);
+  const signers: InviteSigner[] = humans.map((h) => ({
+    email: h.email,
+    role: h.roleName || defaultRoleName(h.signingOrder),
+    sign_url: `/s/${tokens.get(h.id)}`,
+  }));
+
+  const parallel = document.signingMode === "parallel";
+  if (parallel) {
+    for (const party of signerRows) {
+      if (party.kind === "agent") {
+        await fireAgentPartyReady(db, { id: document.id, status: "pending" }, party);
+      }
+    }
+    const brand =
+      document.sendEmail === false
+        ? null
+        : await loadBrand(db, document.userId, requireStore());
+    for (const human of humans) {
+      const raw = tokens.get(human.id);
+      if (!raw) continue;
+      if (document.sendEmail === false) {
+        await db
+          .update(signersTable)
+          .set({ sentAt: at })
+          .where(eq(signersTable.id, human.id));
+        await logEvent(db, {
+          documentId: document.id,
+          signerId: human.id,
+          event: "sent",
+        });
+        continue;
+      }
+      try {
+        await mailer.sendMail({
+          to: human.email,
+          ...inviteEmail({
+            signUrl: publicSignUrl(raw),
+            senderEmail: document.senderEmail,
+            title: document.title,
+            expiresAt: document.expiresAt,
+            brand: {
+              displayName: brand!.displayName,
+              hasLogo: Boolean(brand!.logoBytes),
+            },
+          }),
+          attachments: brandMailAttachments(brand!.logoBytes),
+        });
+        await db
+          .update(signersTable)
+          .set({ sentAt: at })
+          .where(eq(signersTable.id, human.id));
+        await logEvent(db, {
+          documentId: document.id,
+          signerId: human.id,
+          event: "sent",
+        });
+        await logEvent(db, {
+          documentId: document.id,
+          signerId: human.id,
+          event: "emailed",
+        });
+      } catch (err) {
+        await logEvent(db, {
+          documentId: document.id,
+          signerId: human.id,
+          event: "emailed_failed",
+          payload: { error: err instanceof Error ? err.message : "mail_failed" },
+        });
+      }
+    }
+    return { signers };
+  }
+
   const first = signerRows[0];
-  if (!first) return null;
+  if (!first) return { signers };
   if (first.kind === "agent") {
     await fireAgentPartyReady(db, { id: document.id, status: "pending" }, first);
-    return null;
+    return { signers };
   }
-  const token = newSigningToken();
-  const signUrl = `/s/${token.raw}`;
-  await db
-    .update(signersTable)
-    .set({ tokenHash: token.hash, tokenEnc: sealWebhookSecret(token.raw) })
-    .where(eq(signersTable.id, first.id));
+  const raw = tokens.get(first.id);
+  if (!raw) return { signers };
+
+  if (document.sendEmail === false) {
+    await db
+      .update(signersTable)
+      .set({ sentAt: at })
+      .where(eq(signersTable.id, first.id));
+    await logEvent(db, {
+      documentId: document.id,
+      signerId: first.id,
+      event: "sent",
+    });
+    return { signers };
+  }
+
   const brand = await loadBrand(db, document.userId, requireStore());
   try {
     await mailer.sendMail({
       to: first.email,
       ...inviteEmail({
-        signUrl: publicSignUrl(token.raw),
+        signUrl: publicSignUrl(raw),
         senderEmail: document.senderEmail,
         title: document.title,
         expiresAt: document.expiresAt,
@@ -259,7 +722,7 @@ async function inviteFirstSigner(
       payload: { error: err instanceof Error ? err.message : "mail_failed" },
     });
   }
-  return signUrl;
+  return { signers };
 }
 
 export async function sendPreparedPdf(opts: {
@@ -270,6 +733,12 @@ export async function sendPreparedPdf(opts: {
   bytes: Uint8Array;
   webhookUrl?: string | null;
   webhookSecret?: string | null;
+  fields?: DocumentField[];
+  values?: FieldValues;
+  signingMode?: "sequential" | "parallel";
+  sendEmail?: boolean;
+  completedRedirectUrl?: string | null;
+  embedOrigin?: string | null;
 }): Promise<Response> {
   const db = requireDb();
   const store = requireStore();
@@ -284,6 +753,16 @@ export async function sendPreparedPdf(opts: {
 
   const resolved = await resolveSignerParties(db, opts.signers, opts.userId);
   if (!resolved.ok) return resolved.response;
+  const fields = opts.fields ?? [];
+  const pages = await fieldsMatchPdfPages(fields, opts.bytes);
+  if (!pages.ok) return pages.response;
+  const prepared = prepareParties(
+    resolved.parties,
+    opts.signers,
+    fields,
+    opts.values ?? {},
+  );
+  if (!prepared.ok) return prepared.response;
 
   const team = await teamForUser(db, opts.userId);
   if (!team.entitled) {
@@ -342,6 +821,11 @@ export async function sendPreparedPdf(opts: {
       sha256: fileHash,
       webhookUrl,
       webhookSecretHash,
+      fields,
+      signingMode: opts.signingMode ?? "sequential",
+      sendEmail: opts.sendEmail ?? true,
+      completedRedirectUrl: opts.completedRedirectUrl ?? null,
+      embedOrigin: opts.embedOrigin ?? null,
       createdAt: at,
     })
     .returning();
@@ -354,14 +838,14 @@ export async function sendPreparedPdf(opts: {
     storagePath,
     fileHash,
   });
-  await db.insert(signersTable).values(signerInsertValues(document.id, resolved.parties));
+  await db.insert(signersTable).values(signerInsertValues(document.id, prepared.prepared));
 
-  const signUrl = await inviteFirstSigner(db, mailer, document, at);
+  const invited = await inviteFirstSigner(db, mailer, document, at);
   return Response.json(
     {
       id: document.id,
       status: "pending",
-      ...(signUrl ? { signers: [{ sign_url: signUrl }] } : {}),
+      signers: invited.signers,
       ...(webhookSecret ? { webhook_secret: webhookSecret } : {}),
     },
     { status: 201 },
@@ -413,6 +897,17 @@ export async function createDocument(req: Request): Promise<Response> {
   if (!isPdf(bytes, file.type)) {
     return jsonError(400, "File must be a PDF", "invalid_pdf");
   }
+
+  const tagged = await parsePdfAndFields(bytes, form.get("fields"));
+  if (!tagged.ok) return tagged.response;
+  const extras = await parseDocumentExtras({
+    valuesRaw: form.get("values"),
+    order: form.get("order"),
+    sendEmail: form.get("send_email"),
+    completedRedirectUrl: form.get("completed_redirect_url"),
+    embedOrigin: form.get("embed_origin"),
+  });
+  if (!extras.ok) return extras.response;
 
   const webhookField = String(form.get("webhook_url") ?? "").trim();
   let webhookUrl: string | null = null;
@@ -473,14 +968,27 @@ export async function createDocument(req: Request): Promise<Response> {
       senderEmail,
       userId: liveUserId,
       signers: parsedSigners,
-      bytes,
+      bytes: tagged.storedBytes,
       webhookUrl,
       webhookSecret,
+      fields: tagged.fields,
+      values: extras.extras.docValues,
+      signingMode: extras.extras.signingMode,
+      sendEmail: extras.extras.sendEmail,
+      completedRedirectUrl: extras.extras.completedRedirectUrl,
+      embedOrigin: extras.extras.embedOrigin,
     });
   }
 
   const resolved = await resolveSignerParties(db, parsedSigners, liveUserId);
   if (!resolved.ok) return resolved.response;
+  const prepared = prepareParties(
+    resolved.parties,
+    parsedSigners,
+    tagged.fields,
+    extras.extras.docValues,
+  );
+  if (!prepared.ok) return prepared.response;
 
   const [cap] = await db
     .select({ n: count() })
@@ -498,7 +1006,7 @@ export async function createDocument(req: Request): Promise<Response> {
 
   const signingDays = Number(env.SIGNING_WINDOW_DAYS);
   const expiresAt = new Date(at.getTime() + signingDays * 86_400_000);
-  const fileHash = sha256Hex(bytes);
+  const fileHash = sha256Hex(tagged.storedBytes);
 
   let webhookSecretHash: string | null = null;
   if (webhookSecret) {
@@ -521,12 +1029,17 @@ export async function createDocument(req: Request): Promise<Response> {
       sha256: fileHash,
       webhookUrl,
       webhookSecretHash,
+      fields: tagged.fields,
+      signingMode: extras.extras.signingMode,
+      sendEmail: extras.extras.sendEmail,
+      completedRedirectUrl: extras.extras.completedRedirectUrl,
+      embedOrigin: extras.extras.embedOrigin,
       createdAt: at,
     })
     .returning();
 
   const storagePath = objectKey(document.id, "original");
-  await store.put(storagePath, bytes);
+  await store.put(storagePath, tagged.storedBytes);
   await db.insert(files).values({
     documentId: document.id,
     kind: "original",
@@ -534,7 +1047,7 @@ export async function createDocument(req: Request): Promise<Response> {
     fileHash,
   });
 
-  await db.insert(signersTable).values(signerInsertValues(document.id, resolved.parties));
+  await db.insert(signersTable).values(signerInsertValues(document.id, prepared.prepared));
 
   const otp = await newOtp();
   await db.insert(otpChallenges).values({
@@ -740,6 +1253,31 @@ function iso(d: Date | null): string | null {
   return d ? d.toISOString() : null;
 }
 
+async function signerPublicValues(
+  store: BlobStore | null,
+  documentId: string,
+  signerId: string,
+  role: string,
+  fields: DocumentField[],
+  stored: FieldValues,
+): Promise<FieldValues> {
+  const values: FieldValues = { ...stored };
+  for (const field of fields) {
+    if (field.role !== role) continue;
+    if (field.type !== "signature" && field.type !== "initials") continue;
+    let signed = false;
+    if (store) {
+      const png = await store.get(
+        fieldAppearanceKey(documentId, signerId, field.name),
+      );
+      signed = Boolean(png);
+    }
+    if (signed) values[field.name] = "[signed]";
+    else delete values[field.name];
+  }
+  return values;
+}
+
 function agentSlugField(
   kind: "human" | "agent",
   agentId: string | null,
@@ -935,26 +1473,50 @@ export async function getDocument(req: Request, documentId: string): Promise<Res
     .where(eq(auditEvents.documentId, document.id));
   auditRows.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
 
+  const store = requireStore();
+  const fields = document.fields ?? [];
+  const signersJson = await Promise.all(
+    signerRows.map(async (s) => {
+      const role = s.roleName || defaultRoleName(s.signingOrder);
+      const values = await signerPublicValues(store, document.id, s.id, role, fields, s.values);
+      let sign_url: string | undefined;
+      if (authed.canDelete && s.kind !== "agent" && s.tokenEnc) {
+        try {
+          sign_url = `/s/${openWebhookSecret(s.tokenEnc)}`;
+        } catch {
+          sign_url = undefined;
+        }
+      }
+      return {
+        kind: s.kind,
+        email: s.email,
+        role,
+        values,
+        ...agentSlugField(s.kind, s.agentId, slugById),
+        sent_at: iso(s.sentAt),
+        opened_at: iso(s.openedAt),
+        consented_at: iso(s.consentedAt),
+        signed_at: iso(s.signedAt),
+        attested_at: iso(s.attestedAt),
+        declined_at: iso(s.declinedAt),
+        rejected_at: iso(s.rejectedAt),
+        reminded_at: iso(s.remindedAt),
+        ...(sign_url ? { sign_url } : {}),
+      };
+    }),
+  );
+
   return Response.json({
     id: document.id,
     status: document.status,
     title: document.title,
     expires_at: document.expiresAt.toISOString(),
     shred_at: document.shredAt.toISOString(),
+    fields,
+    signing_mode: document.signingMode,
+    send_email: document.sendEmail,
     current_party,
-    signers: signerRows.map((s) => ({
-      kind: s.kind,
-      email: s.email,
-      ...agentSlugField(s.kind, s.agentId, slugById),
-      sent_at: iso(s.sentAt),
-      opened_at: iso(s.openedAt),
-      consented_at: iso(s.consentedAt),
-      signed_at: iso(s.signedAt),
-      attested_at: iso(s.attestedAt),
-      declined_at: iso(s.declinedAt),
-      rejected_at: iso(s.rejectedAt),
-      reminded_at: iso(s.remindedAt),
-    })),
+    signers: signersJson,
     audit: auditRows.map((a) => ({ event: a.event, at: a.createdAt.toISOString() })),
   });
 }
