@@ -540,6 +540,7 @@ export async function inviteFirstSigner(
     title: string;
     expiresAt: Date;
     userId: string | null;
+    sendEmail?: boolean;
   },
   at: Date,
 ): Promise<{ signers: InviteSigner[] }> {
@@ -564,6 +565,20 @@ export async function inviteFirstSigner(
   }
   const raw = tokens.get(first.id);
   if (!raw) return { signers };
+
+  if (document.sendEmail === false) {
+    await db
+      .update(signersTable)
+      .set({ sentAt: at })
+      .where(eq(signersTable.id, first.id));
+    await logEvent(db, {
+      documentId: document.id,
+      signerId: first.id,
+      event: "sent",
+    });
+    return { signers };
+  }
+
   const brand = await loadBrand(db, document.userId, requireStore());
   try {
     await mailer.sendMail({

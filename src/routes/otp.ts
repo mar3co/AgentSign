@@ -155,6 +155,7 @@ export async function verifyDocumentOtp(
       title: document.title,
       expiresAt: document.expiresAt,
       userId: owner?.userId ?? document.userId,
+      sendEmail: document.sendEmail,
     },
     at,
   );

@@ -145,6 +145,27 @@ export function SigningCeremony({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
 
+  function notifyEmbed(event: "completed" | "declined", status: string) {
+    if (typeof window === "undefined") return;
+    if (window.parent === window) return;
+    const origin = state.embed_origin;
+    if (!origin) return;
+    window.parent.postMessage(
+      { source: "agentsign", event, id: state.id, status },
+      origin,
+    );
+  }
+
+  function maybeRedirect() {
+    const url = state.completed_redirect_url;
+    if (!url || typeof window === "undefined") return;
+    if (window.parent !== window && window.top) {
+      window.top.location.href = url;
+      return;
+    }
+    window.location.href = url;
+  }
+
   useEffect(() => {
     if (!hasFields) return;
     let cancelled = false;
@@ -407,9 +428,12 @@ export function SigningCeremony({
         return;
       }
       const json = (await signRes.json()) as { shred_at?: string; status?: string };
+      const status = json.status ?? "pending";
       if (json.shred_at) setShredAt(json.shred_at);
-      if (json.status === "completed") setCompleted(true);
+      if (status === "completed") setCompleted(true);
       setDone(true);
+      notifyEmbed("completed", status);
+      maybeRedirect();
     } catch {
       setError("Could not finish");
     } finally {
@@ -430,7 +454,11 @@ export function SigningCeremony({
         setError("Could not decline");
         return;
       }
+      const json = (await res.json().catch(() => ({}))) as { status?: string };
+      const status = json.status ?? "declined";
       setDeclined(true);
+      notifyEmbed("declined", status);
+      maybeRedirect();
     } catch {
       setError("Could not decline");
     } finally {

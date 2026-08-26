@@ -116,4 +116,101 @@ describe("SigningCeremony fields UI", () => {
     );
     await screen.findByText(/download this/i);
   });
+
+  it("framed with embed_origin posts completed and redirects", async () => {
+    const postMessage = vi.fn();
+    const parent = { postMessage };
+    const topLocation = { href: "http://sign.test/s/tok" };
+    Object.defineProperty(window, "parent", {
+      configurable: true,
+      value: parent,
+    });
+    Object.defineProperty(window, "top", {
+      configurable: true,
+      value: { location: topLocation },
+    });
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/consent")) return Response.json({ ok: true });
+      if (url.endsWith("/sign")) {
+        return Response.json({ status: "completed", shred_at: "2026-09-01" });
+      }
+      return new Response("no", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      createElement(SigningCeremony, {
+        token: "tok",
+        consentText: "I agree",
+        state: {
+          ...baseState,
+          id: "doc-1",
+          embed_origin: "https://app.example.com",
+          completed_redirect_url: "https://app.example.com/done",
+        },
+      }),
+    );
+
+    fireEvent.click(screen.getByText("I agree"));
+    fireEvent.click(screen.getByRole("button", { name: /finish/i }));
+
+    await waitFor(() => {
+      expect(postMessage).toHaveBeenCalledWith(
+        {
+          source: "agentsign",
+          event: "completed",
+          id: "doc-1",
+          status: "completed",
+        },
+        "https://app.example.com",
+      );
+    });
+    expect(topLocation.href).toBe("https://app.example.com/done");
+  });
+
+  it("framed with embed_origin posts declined", async () => {
+    const postMessage = vi.fn();
+    const parent = { postMessage };
+    Object.defineProperty(window, "parent", {
+      configurable: true,
+      value: parent,
+    });
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/decline")) {
+        return Response.json({ status: "declined" });
+      }
+      return new Response("no", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      createElement(SigningCeremony, {
+        token: "tok",
+        consentText: "I agree",
+        state: {
+          ...baseState,
+          id: "doc-1",
+          embed_origin: "https://app.example.com",
+        },
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /decline/i }));
+
+    await waitFor(() => {
+      expect(postMessage).toHaveBeenCalledWith(
+        {
+          source: "agentsign",
+          event: "declined",
+          id: "doc-1",
+          status: "declined",
+        },
+        "https://app.example.com",
+      );
+    });
+  });
 });

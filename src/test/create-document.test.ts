@@ -1171,4 +1171,54 @@ describe("POST /v1/documents on-page fields", () => {
     expect(ownerGot.signers[0]!.sign_url).toMatch(/^\/s\//);
     expect(ownerGot.signers[1]!.sign_url).toMatch(/^\/s\//);
   });
+
+  it("send_email false mints URLs and does not send invite mail", async () => {
+    const { db, sent } = await bootAuth();
+    const cookie = await magicCookie("shop@example.com");
+    const key = await mintLive(cookie);
+    const body = await documentBody([
+      { name: "Jane", email: "jane@example.com" },
+    ]);
+    body.set("send_email", "false");
+    const before = sent.length;
+    const res = await postDocument(
+      new Request("http://sign.test/v1/documents", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}` },
+        body,
+      }),
+    );
+    expect(res.status).toBe(201);
+    const json = (await res.json()) as {
+      id: string;
+      signers: { email: string; sign_url?: string }[];
+    };
+    expect(json.signers[0]!.sign_url).toMatch(/^\/s\//);
+    const after = sent.slice(before);
+    expect(after.some((m) => m.to === "jane@example.com")).toBe(false);
+    expect(after.some((m) => /please sign/i.test(m.subject))).toBe(false);
+    const rows = await db
+      .select()
+      .from(signersTable)
+      .where(eq(signersTable.documentId, json.id));
+    expect(rows[0]!.sentAt).toBeTruthy();
+  });
+
+  it("completed_redirect_url to http is 400", async () => {
+    await bootAuth();
+    const cookie = await magicCookie("shop@example.com");
+    const key = await mintLive(cookie);
+    const body = await documentBody([
+      { name: "Jane", email: "jane@example.com" },
+    ]);
+    body.set("completed_redirect_url", "http://app.example.com/done");
+    const res = await postDocument(
+      new Request("http://sign.test/v1/documents", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}` },
+        body,
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
 });

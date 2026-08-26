@@ -671,7 +671,6 @@ export async function inviteNextHumanIfNeeded(
     );
   }
 
-  const mailer = requireMailer();
   const store = requireStore();
   let raw: string;
   let tokenHash = next.tokenHash;
@@ -690,6 +689,17 @@ export async function inviteNextHumanIfNeeded(
     .where(and(eq(signersTable.id, next.id), isNull(signersTable.sentAt)))
     .returning();
   if (!slot) return null;
+
+  if (document.sendEmail === false) {
+    await logEvent(db, {
+      documentId: document.id,
+      signerId: next.id,
+      event: "sent",
+    });
+    return null;
+  }
+
+  const mailer = requireMailer();
   const brand = await loadBrand(db, document.userId, store);
   const invite = inviteEmail({
     signUrl: publicSignUrl(raw),

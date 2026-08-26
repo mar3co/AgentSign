@@ -25,3 +25,18 @@ export function parseEmbedOrigin(
 
   return { ok: true, origin: url.origin };
 }
+
+export function ceremonyCsp(embedOrigin: string | null): string {
+  if (!embedOrigin) return "frame-ancestors 'self'";
+  return `frame-ancestors 'self' ${embedOrigin}`;
+}
+
+export function ceremonyFrameHeaders(embedOrigin: string | null): HeadersInit {
+  const headers: Record<string, string> = {
+    "Content-Security-Policy": ceremonyCsp(embedOrigin),
+  };
+  if (!embedOrigin) {
+    headers["X-Frame-Options"] = "SAMEORIGIN";
+  }
+  return headers;
+}
