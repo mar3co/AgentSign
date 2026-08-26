@@ -1,4 +1,5 @@
 import { PageShell } from "@/components/page-shell";
+import type { DocumentField } from "../../../src/lib/pdf/fields.js";
 import { CONSENT_TEXT, getSigningState } from "../../../src/routes/signing.js";
 import { CeremonyNotice, SigningCeremony } from "./signing-ceremony";
 
@@ -53,6 +54,12 @@ export default async function SigningPage({
     display_name?: string | null;
     has_logo?: boolean;
     attested?: { slug: string; email: string }[];
+    id?: string;
+    fields?: DocumentField[];
+    values?: Record<string, string | boolean>;
+    signing_mode?: string;
+    completed_redirect_url?: string | null;
+    embed_origin?: string | null;
   };
   return (
     <PageShell variant="ceremony" showRange={false} width="md">
