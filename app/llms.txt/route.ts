@@ -17,6 +17,10 @@ AgentSign is a signing primitive. Human always signs. Bearer keys authenticate t
 
 There is no sign, complete, or create_template tool. Branding, agents, and team are REST only — not MCP tools.
 
+## On-page fields and embed
+
+Optional on POST /v1/documents: fields JSON (page 1-based, x/y/w/h percent top-left), values prefill, order=parallel, send_email=false, embed_origin, completed_redirect_url. PDF {{sig}} tags work on Free one-offs. Embed: iframe /s/:token and listen for postMessage { source: "agentsign", event }. No sign tool.
+
 ## REST
 
 POST /v1/documents
@@ -57,6 +61,7 @@ GET /v1/billing
 POST /v1/billing/portal
 
 GET /s/{token}/logo — ceremony token only; not a public account URL.
+GET /s/{token}/preview — original PDF for the ceremony overlay.
 
 Optional Bearer on POST /v1/documents. Branding, templates, agents, and team need a logged-in Pro session or sign_live_ key (self-host: SELF_HOST=1 is entitled). Tmp keys cannot call them. Attest/reject accept sign_agent_ or live/session naming agent. Verify needs no auth. Errors are JSON { error, code }.
 `;
