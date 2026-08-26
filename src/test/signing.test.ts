@@ -1084,4 +1084,67 @@ describe("signing ceremony", () => {
     expect(finish.status).toBe(200);
     expect(((await finish.json()) as { status: string }).status).toBe("completed");
   });
+
+  it("parallel last-two Finish completes instead of leaving pending", {
+    timeout: 60_000,
+  }, async () => {
+    const { db, store, id, tokens } = await startVerified({
+      order: "parallel",
+      signers: [
+        { name: "Jane", email: "jane@example.com" },
+        { name: "Bob", email: "bob@example.com" },
+      ],
+    });
+    const jane = tokens[0]!;
+    const bob = tokens[1]!;
+    expect(
+      (await postConsent(consentRequest(jane), { params: Promise.resolve({ token: jane }) }))
+        .status,
+    ).toBe(200);
+    expect(
+      (await postConsent(consentRequest(bob), { params: Promise.resolve({ token: bob }) }))
+        .status,
+    ).toBe(200);
+
+    const innerPut = store.put.bind(store);
+    let appearancePuts = 0;
+    let releasePair: () => void = () => {};
+    const pair = new Promise<void>((resolve) => {
+      releasePair = resolve;
+    });
+    setDeps({
+      p12: makeDevP12("test"),
+      p12Passphrase: "test",
+      store: {
+        get: store.get.bind(store),
+        delete: store.delete.bind(store),
+        async put(key: string, bytes: Uint8Array) {
+          await innerPut(key, bytes);
+          if (!key.includes("/appearance/")) return;
+          appearancePuts += 1;
+          if (appearancePuts === 2) releasePair();
+          if (appearancePuts <= 2) await pair;
+        },
+      },
+    });
+
+    const [a, b] = await Promise.all([
+      postSign(signRequest(jane), { params: Promise.resolve({ token: jane }) }),
+      postSign(signRequest(bob), { params: Promise.resolve({ token: bob }) }),
+    ]);
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
+    const statuses = [
+      ((await a.json()) as { status: string }).status,
+      ((await b.json()) as { status: string }).status,
+    ];
+    expect(statuses).toContain("completed");
+
+    const [env] = await db.select().from(documents).where(eq(documents.id, id));
+    expect(env!.status).toBe("completed");
+    expect(await store.get(objectKey(id, "sealed"))).not.toBeNull();
+    const rows = await db.select().from(signersTable).where(eq(signersTable.documentId, id));
+    expect(rows).toHaveLength(2);
+    expect(rows.every((s) => s.signedAt)).toBe(true);
+  });
 });

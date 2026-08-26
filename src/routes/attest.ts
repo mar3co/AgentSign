@@ -11,6 +11,7 @@ import { fireAgentPartyWebhooks } from "../lib/webhooks.js";
 import {
   buildCompleteAppearances,
   commitCompletedDocument,
+  completeIfAllPartiesDone,
   fireSignerCompletedWebhook,
   inviteNextHumanIfNeeded,
   partyDone,
@@ -182,17 +183,44 @@ async function loadAttestContext(req: Request, documentId: string): Promise<Load
     .from(signersTable)
     .where(eq(signersTable.documentId, document.id));
   allSigners.sort((a, b) => a.signingOrder - b.signingOrder);
-  const current = allSigners.find((s) => !partyDone(s));
-  if (!current || current.kind !== "agent") {
+  const unfinished = allSigners.filter((s) => !partyDone(s));
+  const party =
+    document.signingMode === "parallel"
+      ? unfinished.find(
+          (s) => s.kind === "agent" && s.agentId === named.agent.id,
+        )
+      : unfinished[0];
+  if (document.signingMode === "parallel") {
+    if (!party) {
+      if (unfinished.some((s) => s.kind === "agent")) {
+        return {
+          ok: false,
+          error: jsonError(403, "Cannot attest this document", "cannot_attest"),
+        };
+      }
+      return {
+        ok: false,
+        error: jsonError(409, "Document is not awaiting attestation", "invalid_state"),
+      };
+    }
+  } else {
+    if (!party || party.kind !== "agent") {
+      return {
+        ok: false,
+        error: jsonError(409, "Document is not awaiting attestation", "invalid_state"),
+      };
+    }
+    if (party.agentId !== named.agent.id) {
+      return {
+        ok: false,
+        error: jsonError(403, "Cannot attest this document", "cannot_attest"),
+      };
+    }
+  }
+  if (!party) {
     return {
       ok: false,
       error: jsonError(409, "Document is not awaiting attestation", "invalid_state"),
-    };
-  }
-  if (current.agentId !== named.agent.id) {
-    return {
-      ok: false,
-      error: jsonError(403, "Cannot attest this document", "cannot_attest"),
     };
   }
 
@@ -202,7 +230,7 @@ async function loadAttestContext(req: Request, documentId: string): Promise<Load
     caller,
     document,
     allSigners,
-    party: current,
+    party,
     agent: named.agent,
     attestMethod: named.attestMethod,
     attestLabel: named.attestLabel,
@@ -314,6 +342,33 @@ export async function attestDocument(req: Request, documentId: string): Promise<
     signerId: party.id,
     event: "attested",
   });
+  const live = await db
+    .select()
+    .from(signersTable)
+    .where(eq(signersTable.documentId, document.id));
+  if (
+    live.every(partyDone) &&
+    !live.some((s) => s.signedAt) &&
+    !allowAgentOnly
+  ) {
+    return jsonError(
+      400,
+      "A human electronic signature is required to complete this document",
+      "human_required",
+    );
+  }
+  const completed = await completeIfAllPartiesDone({
+    db,
+    document,
+    signer: party,
+    at,
+    ip: null,
+    ua: null,
+    claim: "attest",
+    attestMethod,
+    attestLabel,
+  });
+  if (completed) return completed;
   try {
     await fireSignerCompletedWebhook(db, document, claimed, "pending");
   } catch {

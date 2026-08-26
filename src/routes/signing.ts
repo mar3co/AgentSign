@@ -370,6 +370,7 @@ export async function commitCompletedDocument(opts: {
   claim: CompleteClaim;
   attestMethod?: "agent_key" | "oauth" | null;
   attestLabel?: string | null;
+  alreadyClaimed?: boolean;
 }): Promise<Response> {
   const {
     db,
@@ -383,6 +384,7 @@ export async function commitCompletedDocument(opts: {
     claim,
     attestMethod = null,
     attestLabel = null,
+    alreadyClaimed = false,
   } = opts;
   const store = requireStore();
   if (!store) return storeUnavailableResponse();
@@ -495,36 +497,38 @@ export async function commitCompletedDocument(opts: {
 
   try {
     await db.transaction(async (tx) => {
-      const [claimed] =
-        claim === "sign"
-          ? await tx
-              .update(signersTable)
-              .set({ signedAt: at, ip, ua })
-              .where(
-                and(
-                  eq(signersTable.id, signer.id),
-                  isNull(signersTable.signedAt),
-                  isNull(signersTable.declinedAt),
-                ),
-              )
-              .returning()
-          : await tx
-              .update(signersTable)
-              .set({
-                attestedAt: at,
-                attestMethod,
-                attestLabel,
-              })
-              .where(
-                and(
-                  eq(signersTable.id, signer.id),
-                  eq(signersTable.kind, "agent"),
-                  isNull(signersTable.attestedAt),
-                  isNull(signersTable.rejectedAt),
-                ),
-              )
-              .returning();
-      if (!claimed) throw new Error("complete_conflict");
+      if (!alreadyClaimed) {
+        const [claimed] =
+          claim === "sign"
+            ? await tx
+                .update(signersTable)
+                .set({ signedAt: at, ip, ua })
+                .where(
+                  and(
+                    eq(signersTable.id, signer.id),
+                    isNull(signersTable.signedAt),
+                    isNull(signersTable.declinedAt),
+                  ),
+                )
+                .returning()
+            : await tx
+                .update(signersTable)
+                .set({
+                  attestedAt: at,
+                  attestMethod,
+                  attestLabel,
+                })
+                .where(
+                  and(
+                    eq(signersTable.id, signer.id),
+                    eq(signersTable.kind, "agent"),
+                    isNull(signersTable.attestedAt),
+                    isNull(signersTable.rejectedAt),
+                  ),
+                )
+                .returning();
+        if (!claimed) throw new Error("complete_conflict");
+      }
       const [updated] = await tx
         .update(documents)
         .set({ status: "completed", sha256: result.sha256, shredAt })
@@ -547,6 +551,19 @@ export async function commitCompletedDocument(opts: {
       ]);
     });
   } catch {
+    if (alreadyClaimed) {
+      const [env] = await db
+        .select()
+        .from(documents)
+        .where(eq(documents.id, document.id));
+      if (env?.status === "completed" && env.sha256) {
+        return Response.json({
+          status: "completed",
+          shred_at: env.shredAt.toISOString(),
+          sha256: env.sha256,
+        });
+      }
+    }
     return jsonError(409, "Document is not awaiting signature", "invalid_state");
   }
   try {
@@ -569,26 +586,30 @@ export async function commitCompletedDocument(opts: {
           inArray(files.kind, ["sealed", "certificate"]),
         ),
       );
-    if (claim === "sign") {
-      await db
-        .update(signersTable)
-        .set({ signedAt: null })
-        .where(eq(signersTable.id, signer.id));
-    } else {
-      await db
-        .update(signersTable)
-        .set({ attestedAt: null, attestMethod: null, attestLabel: null })
-        .where(eq(signersTable.id, signer.id));
+    if (!alreadyClaimed) {
+      if (claim === "sign") {
+        await db
+          .update(signersTable)
+          .set({ signedAt: null })
+          .where(eq(signersTable.id, signer.id));
+      } else {
+        await db
+          .update(signersTable)
+          .set({ attestedAt: null, attestMethod: null, attestLabel: null })
+          .where(eq(signersTable.id, signer.id));
+      }
     }
     return jsonError(500, "Failed to complete document", "complete_failed");
   }
-  await logEvent(db, {
-    documentId: document.id,
-    signerId: signer.id,
-    event: claim === "sign" ? "signed" : "attested",
-    ip: claim === "sign" ? ip ?? undefined : undefined,
-    ua: claim === "sign" ? ua ?? undefined : undefined,
-  });
+  if (!alreadyClaimed) {
+    await logEvent(db, {
+      documentId: document.id,
+      signerId: signer.id,
+      event: claim === "sign" ? "signed" : "attested",
+      ip: claim === "sign" ? ip ?? undefined : undefined,
+      ua: claim === "sign" ? ua ?? undefined : undefined,
+    });
+  }
   try {
     await syncTmpKeyExpiry(db, document.id, shredAt);
   } catch {
@@ -708,6 +729,53 @@ export async function commitCompletedDocument(opts: {
     status: "completed",
     shred_at: shredAt.toISOString(),
     sha256: result.sha256,
+  });
+}
+
+/** After claiming a party, seal if every party is now done (parallel last-two race). */
+export async function completeIfAllPartiesDone(opts: {
+  db: AuditDb;
+  document: DocumentRow;
+  signer: SignerRow;
+  at: Date;
+  ip: string | null;
+  ua: string | null;
+  currentPng?: Uint8Array;
+  claim: CompleteClaim;
+  attestMethod?: "agent_key" | "oauth" | null;
+  attestLabel?: string | null;
+}): Promise<Response | null> {
+  const live = await opts.db
+    .select()
+    .from(signersTable)
+    .where(eq(signersTable.documentId, opts.document.id));
+  live.sort((a, b) => a.signingOrder - b.signingOrder);
+  if (!live.every(partyDone)) return null;
+  const store = requireStore();
+  if (!store) return storeUnavailableResponse();
+  const built = await buildCompleteAppearances(
+    store,
+    opts.document.id,
+    live,
+    opts.signer.id,
+    opts.at,
+    opts.currentPng,
+    (opts.document.fields ?? []).length === 0,
+  );
+  if (!built.ok) return built.error;
+  return commitCompletedDocument({
+    db: opts.db,
+    document: opts.document,
+    signer: opts.signer,
+    allSigners: live,
+    at: opts.at,
+    ip: opts.ip,
+    ua: opts.ua,
+    appearances: built.appearances,
+    claim: opts.claim,
+    attestMethod: opts.attestMethod,
+    attestLabel: opts.attestLabel,
+    alreadyClaimed: true,
   });
 }
 
@@ -1236,6 +1304,17 @@ export async function postSign(req: Request, token: string): Promise<Response> {
     ip: ip ?? undefined,
     ua: ua ?? undefined,
   });
+  const completed = await completeIfAllPartiesDone({
+    db,
+    document,
+    signer,
+    at,
+    ip,
+    ua,
+    currentPng,
+    claim: "sign",
+  });
+  if (completed) return completed;
   try {
     await fireSignerCompletedWebhook(db, document, claimed, "pending");
   } catch {

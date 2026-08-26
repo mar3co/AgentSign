@@ -15,7 +15,12 @@ import {
   reminderEmail,
   type Mailer,
 } from "../lib/email.js";
-import { appearanceKey, objectKey, type BlobStore } from "../lib/storage.js";
+import {
+  appearanceKey,
+  fieldAppearanceKey,
+  objectKey,
+  type BlobStore,
+} from "../lib/storage.js";
 import {
   fireAgentPartyWebhooks,
   openWebhookSecret,
@@ -55,8 +60,13 @@ export async function purgeDocument(
     .select()
     .from(signersTable)
     .where(eq(signersTable.documentId, documentId));
+  const fields = claimed.fields ?? [];
   for (const signer of signerRows) {
     await store.delete(appearanceKey(documentId, signer.id));
+    for (const field of fields) {
+      if (field.type !== "signature" && field.type !== "initials") continue;
+      await store.delete(fieldAppearanceKey(documentId, signer.id, field.name));
+    }
   }
   await db
     .update(files)
