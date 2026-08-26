@@ -90,7 +90,7 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
     { name: "agentsign", version: "2.1.0" },
     {
       instructions:
-        "AgentSign is a signing primitive. Human always signs. Keys authenticate the caller and never sign. No sign tool. Humans Finish. Agents Attest. Tools: send, status, download, attest, reject, verify, list_templates, send_template. Optional send/send_template fields (JSON), values, order, send_email, completed_redirect_url, embed_origin. PDF {{sig}} tags work on Free one-offs.",
+        "AgentSign is a signing primitive. Human always signs. Keys authenticate the caller and never sign. No sign tool. Humans Finish. Agents Attest. Tools: send, status, download, attest, reject, verify, list_templates, send_template. Optional send fields (JSON); send/send_template values, order, send_email, completed_redirect_url, embed_origin. PDF {{sig}} tags work on Free one-offs.",
     },
   );
 
@@ -345,12 +345,11 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
     {
       title: "Send a template",
       description:
-        "POST /v1/templates/{id}/send. Requires a session or sign_live_ Bearer. signers.length must equal template role count; order is signing_order. Each signer is { name, email } only — no kind/agent. Mixed parties use send. Optional fields, values, order, send_email, completed_redirect_url, embed_origin. Human always signs.",
+        "POST /v1/templates/{id}/send. Requires a session or sign_live_ Bearer. signers.length must equal template role count; order is signing_order. Each signer is { name, email } only — no kind/agent. Mixed parties use send. Copies template fields. Optional values, order, send_email, completed_redirect_url, embed_origin. Human always signs.",
       inputSchema: {
         id: z.string().min(1),
         signers: z.array(templateSignerSchema).min(1),
         api_key: z.string().optional(),
-        fields: z.string().optional().describe("JSON array of on-page fields."),
         values: z.string().optional().describe("JSON object of prefilled field values."),
         order: z.enum(["sequential", "parallel"]).optional(),
         send_email: z.boolean().optional(),
@@ -367,7 +366,6 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
         );
       }
       const body: Record<string, unknown> = { signers: args.signers };
-      if (args.fields != null) body.fields = args.fields;
       if (args.values != null) {
         try {
           body.values = JSON.parse(args.values);

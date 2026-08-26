@@ -146,7 +146,8 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
     const templateSchema = JSON.stringify(template?.inputSchema);
     expect(templateSchema).not.toMatch(/"kind"/);
     expect(templateSchema).not.toMatch(/"agent"/);
-    expect(templateSchema).toMatch(/"fields"/);
+    expect(templateSchema).not.toMatch(/"fields"/);
+    expect(templateSchema).toMatch(/"values"/);
     expect(templateSchema).toMatch(/"send_email"/);
     expect(templateSchema).toMatch(/"embed_origin"/);
     const sendSchema = JSON.stringify(send?.inputSchema);
