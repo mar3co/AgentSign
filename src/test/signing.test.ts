@@ -13,6 +13,7 @@ import { POST as postSign } from "../../app/s/[token]/sign/route.js";
 import { POST as postDecline } from "../../app/s/[token]/decline/route.js";
 import { GET as getPdf } from "../../app/v1/documents/[id]/pdf/route.js";
 import { GET as getCeremonyPdf } from "../../app/s/[token]/pdf/route.js";
+import { GET as getPreview } from "../../app/s/[token]/preview/route.js";
 import { getSigningState, inviteNextHumanIfNeeded } from "../routes/signing.js";
 import { SigningCeremony } from "../../app/s/[token]/signing-ceremony.js";
 import { PDFDocument } from "pdf-lib";
@@ -40,6 +41,7 @@ function tokenFromUrl(signUrl: string) {
 async function startVerified(opts?: {
   signers?: { name: string; email: string }[];
   now?: () => Date;
+  fields?: unknown;
 }) {
   const db = await createTestDb();
   const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
@@ -62,6 +64,9 @@ async function startVerified(opts?: {
     ),
   );
   body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
+  if (opts?.fields !== undefined) {
+    body.set("fields", JSON.stringify(opts.fields));
+  }
   const res = await postDocument(
     new Request("http://sign.test/v1/documents", { method: "POST", body }),
   );
@@ -794,5 +799,177 @@ describe("signing ceremony", () => {
       .from(signersTable)
       .where(eq(signersTable.id, allSigners[1]!.id));
     expect(bob!.sentAt).not.toBeNull();
+  });
+
+  it("preview returns the original PDF while pending", { timeout: 30_000 }, async () => {
+    const { store, id, token } = await startVerified();
+    const res = await getPreview(
+      new Request(`http://sign.test/s/${token}/preview`),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toMatch(/pdf/);
+    expect(res.headers.get("content-disposition")).toMatch(/inline/i);
+    const original = await store.get(objectKey(id, "original"));
+    expect(original).not.toBeNull();
+    expect(Buffer.from(await res.arrayBuffer())).toEqual(Buffer.from(original!));
+  });
+
+  it("Finish with a signature field completes without an extra page", {
+    timeout: 60_000,
+  }, async () => {
+    const frozen = new Date("2026-08-20T12:00:00Z");
+    const { id, token, key } = await startVerified({
+      now: () => frozen,
+      fields: [
+        {
+          name: "sig",
+          type: "signature",
+          role: "Signer 1",
+          required: true,
+          readonly: false,
+          areas: [{ page: 1, x: 10, y: 80, w: 40, h: 10 }],
+        },
+      ],
+    });
+    setDeps({ p12: makeDevP12("test"), p12Passphrase: "test" });
+
+    const state = await getSigningState(token);
+    expect(state.status).toBe(200);
+    const json = (await state.json()) as {
+      id: string;
+      fields: { name: string; type: string }[];
+      values: Record<string, string | boolean>;
+      signing_mode: string;
+    };
+    expect(json.id).toBe(id);
+    expect(json.fields).toEqual([
+      expect.objectContaining({ name: "sig", type: "signature" }),
+    ]);
+    expect(json.signing_mode).toBe("sequential");
+
+    expect(
+      (await postConsent(consentRequest(token), { params: Promise.resolve({ token }) })).status,
+    ).toBe(200);
+    const body = new FormData();
+    body.set("png", new Blob([png], { type: "image/png" }), "sig.png");
+    body.set("values", JSON.stringify({}));
+    const sign = await postSign(
+      new Request(`http://sign.test/s/${token}/sign`, {
+        method: "POST",
+        headers: { "user-agent": "test-ua", "x-forwarded-for": "1.2.3.4" },
+        body,
+      }),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(sign.status).toBe(200);
+
+    const pdf = await getPdf(
+      new Request(`http://sign.test/v1/documents/${id}/pdf`, {
+        headers: { authorization: `Bearer ${key}` },
+      }),
+      { params: Promise.resolve({ id }) },
+    );
+    expect(pdf.status).toBe(200);
+    const sealedDoc = await PDFDocument.load(await pdf.arrayBuffer());
+    expect(sealedDoc.getPageCount()).toBe(1);
+  });
+
+  it("required checkbox false returns 400 invalid_values", { timeout: 30_000 }, async () => {
+    const { token, db } = await startVerified({
+      fields: [
+        {
+          name: "agree",
+          type: "checkbox",
+          role: "Signer 1",
+          required: true,
+          readonly: false,
+          areas: [{ page: 1, x: 10, y: 80, w: 5, h: 5 }],
+        },
+      ],
+    });
+    expect(
+      (await postConsent(consentRequest(token), { params: Promise.resolve({ token }) })).status,
+    ).toBe(200);
+    const body = new FormData();
+    body.set("png", new Blob([png], { type: "image/png" }), "sig.png");
+    body.set("values", JSON.stringify({ agree: false }));
+    const sign = await postSign(
+      new Request(`http://sign.test/s/${token}/sign`, {
+        method: "POST",
+        headers: { "user-agent": "test-ua" },
+        body,
+      }),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(sign.status).toBe(400);
+    expect(((await sign.json()) as { code: string }).code).toBe("invalid_values");
+    const [row] = await db.select().from(signersTable);
+    expect(row!.signedAt).toBeNull();
+  });
+
+  it("consent is still required when fields exist", { timeout: 30_000 }, async () => {
+    const { token } = await startVerified({
+      fields: [
+        {
+          name: "sig",
+          type: "signature",
+          role: "Signer 1",
+          required: true,
+          readonly: false,
+          areas: [{ page: 1, x: 10, y: 80, w: 40, h: 10 }],
+        },
+      ],
+    });
+    const body = new FormData();
+    body.set("png", new Blob([png], { type: "image/png" }), "sig.png");
+    body.set("values", JSON.stringify({}));
+    const sign = await postSign(
+      new Request(`http://sign.test/s/${token}/sign`, {
+        method: "POST",
+        body,
+      }),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(sign.status).toBe(400);
+    expect(((await sign.json()) as { code: string }).code).toBe("consent_required");
+  });
+
+  it("sequential wait still 409 for signer 2", { timeout: 30_000 }, async () => {
+    const seq = await startVerified({
+      signers: [
+        { name: "Jane", email: "jane@example.com" },
+        { name: "Bob", email: "bob@example.com" },
+      ],
+      fields: [
+        {
+          name: "sig",
+          type: "signature",
+          role: "Signer 1",
+          required: true,
+          readonly: false,
+          areas: [{ page: 1, x: 10, y: 80, w: 40, h: 10 }],
+        },
+        {
+          name: "sig",
+          type: "signature",
+          role: "Signer 2",
+          required: true,
+          readonly: false,
+          areas: [{ page: 1, x: 10, y: 60, w: 40, h: 10 }],
+        },
+      ],
+    });
+    const bob = tokenFromUrl(seq.signers[1]!.sign_url!);
+    const wait = await getSigningState(bob);
+    expect(wait.status).toBe(409);
+    expect(((await wait.json()) as { error: string }).error).toBe(
+      "Waiting on previous signer.",
+    );
+    const preview = await getPreview(
+      new Request(`http://sign.test/s/${bob}/preview`),
+      { params: Promise.resolve({ token: bob }) },
+    );
+    expect(preview.status).toBe(409);
   });
 });
