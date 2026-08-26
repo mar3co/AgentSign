@@ -58,6 +58,9 @@ export type AttestMethod = (typeof attestMethodKind)[number];
 export const accountPlan = ["free", "pro"] as const;
 export type AccountPlan = (typeof accountPlan)[number];
 
+export const signingModes = ["sequential", "parallel"] as const;
+export type SigningMode = (typeof signingModes)[number];
+
 const timestamptz = (name: string) =>
   timestamp(name, { withTimezone: true, mode: "date" });
 
@@ -79,7 +82,9 @@ export const documents = pgTable("documents", {
     .$type<DocumentField[]>()
     .notNull()
     .default(sql`'[]'::jsonb`),
-  signingMode: text("signing_mode").notNull().default("sequential"),
+  signingMode: text("signing_mode", { enum: signingModes })
+    .notNull()
+    .default("sequential"),
   sendEmail: boolean("send_email").notNull().default(true),
   completedRedirectUrl: text("completed_redirect_url"),
   embedOrigin: text("embed_origin"),
