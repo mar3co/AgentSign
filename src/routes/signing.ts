@@ -165,9 +165,9 @@ async function webhookFieldValues(
     if (field.type === "signature" || field.type === "initials") {
       let signed = false;
       if (store) {
-        const png =
-          (await store.get(fieldAppearanceKey(documentId, party.id, field.name))) ??
-          (await store.get(appearanceKey(documentId, party.id)));
+        const png = await store.get(
+          fieldAppearanceKey(documentId, party.id, field.name),
+        );
         signed = Boolean(png);
       }
       value = signed ? "[signed]" : "";
@@ -198,9 +198,9 @@ async function buildFieldParties(
     for (const field of fields) {
       if (field.role !== role) continue;
       if (field.type !== "signature" && field.type !== "initials") continue;
-      const bytes =
-        (await store.get(fieldAppearanceKey(documentId, s.id, field.name))) ??
-        (await store.get(appearanceKey(documentId, s.id)));
+      const bytes = await store.get(
+        fieldAppearanceKey(documentId, s.id, field.name),
+      );
       if (bytes) pngs[field.name] = bytes;
     }
     const signedAt =

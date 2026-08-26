@@ -11,6 +11,7 @@ import { POST as postOtp } from "../../app/v1/documents/[id]/otp/route.js";
 import { POST as postConsent } from "../../app/s/[token]/consent/route.js";
 import { POST as postSign } from "../../app/s/[token]/sign/route.js";
 import { POST as postDecline } from "../../app/s/[token]/decline/route.js";
+import { GET as getDocument } from "../../app/v1/documents/[id]/route.js";
 import { GET as getPdf } from "../../app/v1/documents/[id]/pdf/route.js";
 import { GET as getCeremonyPdf } from "../../app/s/[token]/pdf/route.js";
 import { GET as getPreview } from "../../app/s/[token]/preview/route.js";
@@ -877,6 +878,71 @@ describe("signing ceremony", () => {
     expect(pdf.status).toBe(200);
     const sealedDoc = await PDFDocument.load(await pdf.arrayBuffer());
     expect(sealedDoc.getPageCount()).toBe(1);
+  });
+
+  it("unsigned optional initials stay empty when a sibling signature is drawn", {
+    timeout: 60_000,
+  }, async () => {
+    const { id, token, key } = await startVerified({
+      fields: [
+        {
+          name: "sig",
+          type: "signature",
+          role: "Signer 1",
+          required: true,
+          readonly: false,
+          areas: [{ page: 1, x: 10, y: 80, w: 40, h: 10 }],
+        },
+        {
+          name: "ini",
+          type: "initials",
+          role: "Signer 1",
+          required: false,
+          readonly: false,
+          areas: [{ page: 1, x: 10, y: 60, w: 15, h: 8 }],
+        },
+      ],
+    });
+    setDeps({ p12: makeDevP12("test"), p12Passphrase: "test" });
+    expect(
+      (await postConsent(consentRequest(token), { params: Promise.resolve({ token }) })).status,
+    ).toBe(200);
+    const body = new FormData();
+    body.set("png", new Blob([png], { type: "image/png" }), "sig.png");
+    body.set("values", JSON.stringify({}));
+    const sign = await postSign(
+      new Request(`http://sign.test/s/${token}/sign`, {
+        method: "POST",
+        headers: { "user-agent": "test-ua", "x-forwarded-for": "1.2.3.4" },
+        body,
+      }),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(sign.status).toBe(200);
+
+    const status = await getDocument(
+      new Request(`http://sign.test/v1/documents/${id}`, {
+        headers: { authorization: `Bearer ${key}` },
+      }),
+      { params: Promise.resolve({ id }) },
+    );
+    expect(status.status).toBe(200);
+    const got = (await status.json()) as {
+      signers: { values?: Record<string, string | boolean> }[];
+    };
+    expect(got.signers[0]!.values?.sig).toBe("[signed]");
+    expect(got.signers[0]!.values?.ini).toBeUndefined();
+
+    const cert = await getPdf(
+      new Request(`http://sign.test/v1/documents/${id}/pdf?kind=certificate`, {
+        headers: { authorization: `Bearer ${key}` },
+      }),
+      { params: Promise.resolve({ id }) },
+    );
+    expect(cert.status).toBe(200);
+    const bytes = Buffer.from(await cert.arrayBuffer());
+    expect(bytes.includes(Buffer.from("Signer 1 sig (signature): drawn"))).toBe(true);
+    expect(bytes.includes(Buffer.from("Signer 1 ini (initials): drawn"))).toBe(false);
   });
 
   it("required checkbox false returns 400 invalid_values", { timeout: 30_000 }, async () => {

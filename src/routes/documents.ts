@@ -44,7 +44,6 @@ import {
 } from "../lib/pdf/fields.js";
 import { InvalidFieldsError, parsePdfTags } from "../lib/pdf/tags.js";
 import {
-  appearanceKey,
   fieldAppearanceKey,
   objectKey,
   type BlobStore,
@@ -1233,9 +1232,9 @@ async function signerPublicValues(
     if (field.type !== "signature" && field.type !== "initials") continue;
     let signed = false;
     if (store) {
-      const png =
-        (await store.get(fieldAppearanceKey(documentId, signerId, field.name))) ??
-        (await store.get(appearanceKey(documentId, signerId)));
+      const png = await store.get(
+        fieldAppearanceKey(documentId, signerId, field.name),
+      );
       signed = Boolean(png);
     }
     if (signed) values[field.name] = "[signed]";
