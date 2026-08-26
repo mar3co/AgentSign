@@ -165,6 +165,66 @@ describe("completeDocumentPdf", () => {
     expect(sealedDoc.getPageCount()).toBe(2);
   });
 
+  it("does not append a page for an agent on the fields path", async () => {
+    const p12 = makeDevP12("test");
+    const original = await minimalPdf();
+    const at = new Date("2026-08-21T12:00:00.000Z");
+    const fields = [{
+      name: "sig", type: "signature" as const, role: "Signer 1",
+      required: true, readonly: false,
+      areas: [{ page: 1, x: 10, y: 80, w: 40, h: 10 }],
+    }];
+    const result = await completeDocumentPdf({
+      original,
+      appearances: [
+        { png, name: "Jane", email: "jane@example.com", signedAt: new Date() },
+        {
+          kind: "agent",
+          name: "Grok Legal",
+          email: "shop@example.com",
+          signedAt: at,
+        },
+      ],
+      fields,
+      fieldParties: [
+        {
+          role: "Signer 1", kind: "human", name: "Jane", email: "jane@example.com",
+          signedAt: new Date(), values: {}, pngs: { sig: png },
+        },
+        {
+          role: "Agent", kind: "agent", name: "Grok Legal", email: "shop@example.com",
+          signedAt: at, values: {}, pngs: {},
+        },
+      ],
+      p12, passphrase: "test",
+      meta: {
+        documentId: "00000000-0000-0000-0000-0000000000f3",
+        title: "Repair authorization",
+        senderEmail: "shop@example.com",
+        consentText: "I agree.",
+        signers: [
+          {
+            name: "Jane", email: "jane@example.com",
+            sentAt: new Date(), openedAt: new Date(), consentedAt: new Date(),
+            signedAt: new Date(), declinedAt: null, ip: "1.2.3.4", ua: "test",
+          },
+          {
+            name: "Grok Legal", email: "shop@example.com", kind: "agent",
+            sentAt: null, openedAt: null, consentedAt: null, signedAt: null,
+            declinedAt: null, attestedAt: at, attestMethod: "agent_key",
+            attestLabel: "agent_key:sign_agent_xxxx", agentSlug: "grok-legal",
+            ip: null, ua: null,
+          },
+        ],
+        fields: [{ role: "Signer 1", name: "sig", type: "signature", value: "drawn" }],
+      },
+    });
+    const sealedDoc = await PDFDocument.load(result.sealed);
+    expect(sealedDoc.getPageCount()).toBe(1);
+    const latin1 = Buffer.from(result.sealed).toString("latin1");
+    expect(latin1).not.toContain("Attested by Grok Legal");
+  });
+
   it("seals an agent appearance without a PNG", async () => {
     const p12 = makeDevP12("test");
     const original = await minimalPdf();

@@ -79,9 +79,12 @@ export async function completeDocumentPdf({
     for (const party of parties) {
       if (party.kind !== "human") continue;
       if (rolesWithSignature.has(party.role)) continue;
-      const matched =
-        pages.find((p) => p.email === party.email) ??
-        pages.find((p) => (p.kind ?? "human") !== "agent");
+      const matched = pages.find(
+        (p) =>
+          (p.kind ?? "human") !== "agent" &&
+          p.email === party.email &&
+          p.name === party.name,
+      );
       const next: SignatureAppearance = {
         png: matched?.png,
         name: party.name,
