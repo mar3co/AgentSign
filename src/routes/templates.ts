@@ -62,10 +62,19 @@ function templateJson(template: TemplateRow, roles: RoleRow[]) {
   };
 }
 
+function uniqueRoleNames(roleNames: string[]): Response | null {
+  if (new Set(roleNames).size !== roleNames.length) {
+    return jsonError(400, "Role names must be unique", "invalid_request");
+  }
+  return null;
+}
+
 function fieldsMatchRoles(
   fields: DocumentField[],
   roleNames: string[],
 ): Response | null {
+  const uniqueErr = uniqueRoleNames(roleNames);
+  if (uniqueErr) return uniqueErr;
   const roles = new Set(roleNames);
   for (const field of fields) {
     if (!roles.has(field.role)) {

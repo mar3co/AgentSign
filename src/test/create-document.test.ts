@@ -1076,6 +1076,76 @@ describe("POST /v1/documents on-page fields", () => {
     expect(json.code).toBe("invalid_fields");
   });
 
+  it("rejects duplicate signer roles when fields exist", { timeout: 60_000 }, async () => {
+    await bootAuth();
+    const cookie = await magicCookie("shop@example.com");
+    const key = await mintLive(cookie);
+    const body = await documentBody([
+      { name: "Jane", email: "jane@example.com", role: "Customer" },
+      { name: "Bob", email: "bob@example.com", role: "Customer" },
+    ]);
+    body.set(
+      "fields",
+      JSON.stringify([
+        {
+          name: "sig",
+          type: "signature",
+          role: "Customer",
+          required: true,
+          readonly: false,
+          areas: [area()],
+        },
+      ]),
+    );
+    const res = await postDocument(
+      new Request("http://sign.test/v1/documents", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}` },
+        body,
+      }),
+    );
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as { error: string; code: string };
+    expect(json.error).toBeTruthy();
+    expect(json.code).toBe("invalid_fields");
+  });
+
+  it("rejects a default role that collides with another signer when fields exist", {
+    timeout: 60_000,
+  }, async () => {
+    await bootAuth();
+    const cookie = await magicCookie("shop@example.com");
+    const key = await mintLive(cookie);
+    const body = await documentBody([
+      { name: "Jane", email: "jane@example.com", role: "Signer 2" },
+      { name: "Bob", email: "bob@example.com" },
+    ]);
+    body.set(
+      "fields",
+      JSON.stringify([
+        {
+          name: "sig",
+          type: "signature",
+          role: "Signer 2",
+          required: true,
+          readonly: false,
+          areas: [area()],
+        },
+      ]),
+    );
+    const res = await postDocument(
+      new Request("http://sign.test/v1/documents", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}` },
+        body,
+      }),
+    );
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as { error: string; code: string };
+    expect(json.error).toBeTruthy();
+    expect(json.code).toBe("invalid_fields");
+  });
+
   it("applies per-signer prefill over document values", { timeout: 60_000 }, async () => {
     await bootAuth();
     const cookie = await magicCookie("shop@example.com");

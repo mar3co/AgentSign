@@ -226,6 +226,30 @@ describe("templates API", () => {
     });
   });
 
+  it("pro POST rejects duplicate role_names", { timeout: 60_000 }, async () => {
+    const { db, userFor } = await boot();
+    const { cookie } = await asPro(db, userFor);
+    const pdf = await minimalPdf();
+    const body = new FormData();
+    body.set("title", "Repair template");
+    body.set(
+      "roles",
+      JSON.stringify([{ role_name: "Customer" }, { role_name: "Customer" }]),
+    );
+    body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
+    const res = await postTemplate(
+      new Request("http://sign.test/v1/templates", {
+        method: "POST",
+        headers: { cookie },
+        body,
+      }),
+    );
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as { error: string; code: string };
+    expect(json.error).toBeTruthy();
+    expect(json.code).toBe("invalid_request");
+  });
+
   it("PATCH title and DELETE 204 then GET 404", { timeout: 60_000 }, async () => {
     const { db, store, userFor } = await boot();
     const { cookie } = await asPro(db, userFor);

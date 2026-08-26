@@ -426,6 +426,12 @@ function prepareParties(
   }
 
   const roles = new Set(prepared.map((p) => p.roleName));
+  if (fields.length > 0 && roles.size !== prepared.length) {
+    return {
+      ok: false,
+      response: jsonError(400, "Signer roles must be unique", "invalid_fields"),
+    };
+  }
   for (const field of fields) {
     if (!roles.has(field.role)) {
       return {
