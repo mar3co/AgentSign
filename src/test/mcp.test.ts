@@ -2,6 +2,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { GET as getLlms } from "../../app/llms.txt/route.js";
@@ -17,6 +18,7 @@ import { createFsStore } from "../lib/storage.js";
 import { createSignMcpServer } from "../mcp/server.js";
 import { createTestDb } from "./db.js";
 import { minimalPdf } from "./pdf.js";
+import { documents } from "../db/schema.js";
 
 const png = Uint8Array.from(
   Buffer.from(
@@ -223,6 +225,41 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
       );
       const statusJson = JSON.parse(statusText) as { fields: { name: string }[] };
       expect(statusJson.fields.some((f) => f.name === "sig")).toBe(true);
+    },
+  );
+
+  it(
+    "send passes message through to the document",
+    { timeout: 60_000 },
+    async () => {
+      const db = await createTestDb();
+      const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+      const sent: { to: string; subject: string; text: string }[] = [];
+      setDeps({
+        db,
+        store,
+        mailer: { sendMail: async (m) => { sent.push(m); } },
+        p12: makeDevP12("test"),
+        p12Passphrase: "test",
+      });
+
+      const { client } = await connectMcp();
+      const pdf = await minimalPdf();
+      const sendResult = await client.callTool({
+        name: "send",
+        arguments: {
+          title: "Authorization with message",
+          sender_email: "shop@example.com",
+          signers: [{ name: "Jane", email: "jane@example.com" }],
+          pdf: Buffer.from(pdf).toString("base64"),
+          message: "Please sign before Friday.",
+        },
+      });
+      expect(sendResult.isError).toBeFalsy();
+      const sendText = textOf(sendResult as { content: Array<{ type: string; text?: string }> });
+      const { id } = JSON.parse(sendText) as { id: string };
+      const [row] = await db.select().from(documents).where(eq(documents.id, id));
+      expect(row!.message).toBe("Please sign before Friday.");
     },
   );
 

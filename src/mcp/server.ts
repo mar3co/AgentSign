@@ -90,7 +90,7 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
     { name: "agentsign", version: "2.1.0" },
     {
       instructions:
-        "AgentSign is a signing primitive. Human always signs. Keys authenticate the caller and never sign. No sign tool. Humans Finish. Agents Attest. Tools: send, status, download, attest, reject, verify, list_templates, send_template. Optional send fields (JSON); send/send_template values, order, send_email, completed_redirect_url, embed_origin. PDF {{sig}} tags work on Free one-offs.",
+        "AgentSign is a signing primitive. Human always signs. Keys authenticate the caller and never sign. No sign tool. Humans Finish. Agents Attest. Tools: send, status, download, attest, reject, verify, list_templates, send_template. Optional send fields (JSON); message, send/send_template values, order, send_email, completed_redirect_url, embed_origin. PDF {{sig}} tags work on Free one-offs.",
     },
   );
 
@@ -99,7 +99,7 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
     {
       title: "Send document",
       description:
-        "Create and send a signing document (POST /v1/documents). Pass PDF bytes as base64, not a public pdf_url. Optional Bearer sign_live_ key. Without a key, starts a sender OTP one-off — tell the operator to check sender email. sign_tmp_ cannot send or list. Signer objects may include kind (human|agent) and agent slug. Optional fields JSON, values, order, send_email, completed_redirect_url, embed_origin. No sign tool. Humans Finish. Agents Attest.",
+        "Create and send a signing document (POST /v1/documents). Pass PDF bytes as base64, not a public pdf_url. Optional Bearer sign_live_ key. Without a key, starts a sender OTP one-off — tell the operator to check sender email. sign_tmp_ cannot send or list. Signer objects may include kind (human|agent) and agent slug. Optional fields JSON, message, values, order, send_email, completed_redirect_url, embed_origin. No sign tool. Humans Finish. Agents Attest.",
       inputSchema: {
         title: z.string().min(1),
         sender_email: z.string().min(1),
@@ -107,6 +107,7 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
         pdf: z.string().describe("Base64-encoded PDF bytes. Not a URL."),
         api_key: z.string().optional(),
         fields: z.string().optional().describe("JSON array of on-page fields."),
+        message: z.string().max(1000).optional().describe("Message shown to signers in the invite email."),
         values: z.string().optional().describe("JSON object of prefilled field values."),
         order: z.enum(["sequential", "parallel"]).optional(),
         send_email: z.boolean().optional(),
@@ -130,6 +131,7 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
       form.set("signers", JSON.stringify(args.signers));
       form.set("file", new Blob([Buffer.from(bytes)], { type: "application/pdf" }), "document.pdf");
       if (args.fields != null) form.set("fields", args.fields);
+      if (args.message != null) form.set("message", args.message);
       if (args.values != null) form.set("values", args.values);
       if (args.order != null) form.set("order", args.order);
       if (args.send_email != null) form.set("send_email", args.send_email ? "true" : "false");
