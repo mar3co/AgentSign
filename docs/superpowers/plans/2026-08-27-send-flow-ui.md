@@ -1204,7 +1204,7 @@ git commit -m "Overlay tag-detected fields read-only on the send preview"
 
 ---
 
-### Task 10: Full verification
+### Task 13: Full verification
 
 **Files:** none new.
 

@@ -113,6 +113,27 @@ The one new backend feature.
   rendered as text (no links made clickable), and capped, to keep the
   spam/abuse surface minimal.
 
+## 4b. File replacement and whiteout patches
+
+Two correction affordances on the send page, both pre-send only:
+
+- **Replace the file:** removing the chosen PDF and dropping a new one keeps
+  everything else — signers, message, order, and placed fields (percent
+  coordinates transfer). If the new PDF has fewer pages than some fields
+  reference, those fields are dropped after a confirm dialog. Detected tag
+  overlays re-parse from the new file.
+- **Whiteout patch tool:** a sender-side "Whiteout" tool in the palette.
+  The sender drags a rectangle over content to cover it with white and may
+  type replacement text (Helvetica, adjustable size — the UI notes it will
+  not match the document's font). Patches render live in the preview
+  overlay. At submit, patches are burned into the PDF client-side with
+  pdf-lib (white rectangle + text via the existing percent→PDF-rect math),
+  and the patched bytes are what upload. The server, seal, hash, and audit
+  trail see only the final document; no backend changes.
+
+Post-send correction ("correct and resend": void + reopen `/send`
+pre-filled) is explicitly a follow-up round, not this one.
+
 ## 5. Send confirmation
 
 The existing post-submit card (OTP step for logged-out/free senders, "Sent."
