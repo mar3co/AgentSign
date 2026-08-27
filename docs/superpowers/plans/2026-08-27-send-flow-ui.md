@@ -1204,6 +1204,239 @@ git commit -m "Overlay tag-detected fields read-only on the send preview"
 
 ---
 
+### Task 10: Whiteout patch model and burner
+
+**Files:**
+- Create: `app/send/patch-model.ts`
+- Test: `src/test/patch-model.test.ts`
+
+**Interfaces:**
+- Consumes: `areaToPdfRect` from `@/src/lib/pdf/fields`; `pdf-lib` (`PDFDocument`, `StandardFonts`, `rgb`) — browser-capable, also runs in node for tests.
+- Produces (used by Tasks 11 and 12):
+
+```ts
+export type PatchBox = {
+  id: string;        // client-only id
+  page: number;      // 1-based
+  x: number; y: number; w: number; h: number; // percent of page
+  text: string;      // "" = whiteout only
+  fontSize: number;  // pt, default 11
+};
+export function makePatch(page: number, x: number, y: number, w: number, h: number): PatchBox;
+export function clampPatch(p: PatchBox): PatchBox;
+export function dropOutOfRangePatches(patches: PatchBox[], pageCount: number): PatchBox[];
+export async function applyPatches(bytes: Uint8Array, patches: PatchBox[]): Promise<Uint8Array>;
+```
+
+`applyPatches` loads the PDF, and per patch: gets the page, converts the percent rect with `areaToPdfRect(pageWidth, pageHeight, patch)`, draws a white rectangle (`rgb(1, 1, 1)`), then when `text` is non-empty embeds Helvetica once and draws the text in near-black (`rgb(0.1, 0.1, 0.1)`) at `x + 2`, vertically centered on the rect (`y + (h - fontSize) / 2` in PDF coords, clamped >= y). Returns `doc.save()`. With zero patches it returns the input bytes unchanged (no re-save).
+
+- [ ] **Step 1: Write failing unit tests**
+
+Create `src/test/patch-model.test.ts` (node env). Use `minimalPdf` from `./pdf.js` (same helper `create-document.test.ts` imports) for input bytes:
+
+```ts
+import { describe, expect, it } from "vitest";
+import { PDFDocument } from "pdf-lib";
+import {
+  applyPatches,
+  clampPatch,
+  dropOutOfRangePatches,
+  makePatch,
+} from "../../app/send/patch-model.js";
+import { minimalPdf } from "./pdf.js";
+
+describe("patch model", () => {
+  it("makePatch defaults to whiteout-only with 11pt text size", () => {
+    const p = makePatch(1, 10, 20, 30, 5);
+    expect(p.text).toBe("");
+    expect(p.fontSize).toBe(11);
+    expect(p.page).toBe(1);
+  });
+
+  it("clamps patches to the page", () => {
+    const p = clampPatch({ ...makePatch(1, 0, 0, 30, 5), x: -10, y: 99 });
+    expect(p.x).toBeGreaterThanOrEqual(0);
+    expect(p.y + p.h).toBeLessThanOrEqual(100);
+  });
+
+  it("drops patches on out-of-range pages", () => {
+    const kept = dropOutOfRangePatches(
+      [makePatch(1, 10, 10, 10, 5), makePatch(3, 10, 10, 10, 5)],
+      2,
+    );
+    expect(kept).toHaveLength(1);
+    expect(kept[0]!.page).toBe(1);
+  });
+
+  it("returns input bytes unchanged when there are no patches", async () => {
+    const bytes = await minimalPdf();
+    const out = await applyPatches(bytes, []);
+    expect(out).toBe(bytes);
+  });
+
+  it("burns a whiteout and text into the PDF", async () => {
+    const bytes = await minimalPdf();
+    const patch = { ...makePatch(1, 10, 10, 40, 6), text: "Corrected" };
+    const out = await applyPatches(bytes, [patch]);
+    expect(out).not.toBe(bytes);
+    const doc = await PDFDocument.load(out);
+    expect(doc.getPageCount()).toBeGreaterThanOrEqual(1);
+    expect(out.byteLength).toBeGreaterThan(0);
+  });
+});
+```
+
+(Adapt to `minimalPdf`'s real signature — read `src/test/pdf.js`/`.ts` first; if it is sync, drop the await.)
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `pnpm vitest run src/test/patch-model.test.ts`
+Expected: FAIL (module not found).
+
+- [ ] **Step 3: Implement `app/send/patch-model.ts`**
+
+Per the interface block above. `makePatch` assigns a local id (same counter pattern as `field-model.ts` but prefixed `patch_`), `clampPatch` mirrors `clampToPage` from field-model. Reuse `areaToPdfRect` — do not reimplement the coordinate flip.
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `pnpm vitest run src/test/patch-model.test.ts`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add app/send/patch-model.ts src/test/patch-model.test.ts
+git commit -m "Add whiteout patch model and client-side PDF burner"
+```
+
+---
+
+### Task 11: Whiteout tool in the editor
+
+**Files:**
+- Modify: `app/send/field-editor/palette.tsx`
+- Modify: `app/send/field-editor/overlay.tsx`
+- Test: `src/test/field-editor-ui.test.ts`
+
+**Interfaces:**
+- Consumes: `PatchBox`, `makePatch`, `clampPatch` from Task 10.
+- Produces:
+  - `FieldPalette` gains a "Whiteout" tool button: new props `whiteoutActive: boolean; onWhiteoutChange: (active: boolean) => void;`. Arming Whiteout disarms field placement (`onTypeChange(null)`) and vice versa. Next to the button, muted caption: `Covers content with white; typed text uses a standard font.`
+  - `FieldOverlay` gains props `patches: PatchBox[]; drawingPatch: boolean; onPatchAdd: (p: PatchBox) => void; onPatchChange: (p: PatchBox) => void; onPatchDelete: (id: string) => void;`.
+
+Interaction contract: with `drawingPatch` true, pointer-down on empty layer space starts a drag-rectangle (pointer capture, live preview rect while dragging); pointer-up calls `onPatchAdd(clampPatch(makePatch(page, x, y, w, h)))` using the dragged percent rect, minimum 1% x 1% (smaller drags are discarded). A click without meaningful drag in whiteout mode does nothing. Patch boxes render solid white with a light gray border, above the page image and below field boxes; each shows its `text` centered (or nothing), a delete button (`aria-label="Delete patch"`), and on click opens a small inline editor: text `<input>` (`aria-label="Patch text"`) and a font-size `<input type="number">` (`aria-label="Patch text size"`, min 6, max 48), committing on blur/Enter via `onPatchChange`. Patches are NOT tied to signers — no color tint.
+
+- [ ] **Step 1: Write failing component tests**
+
+Add to `src/test/field-editor-ui.test.ts` (extend the Harness with patch state; drag = `pointerDown` at 100,100 then `pointerMove` to 250,150 then `pointerUp` on the layer):
+
+```ts
+it("palette shows the whiteout tool and its font caveat", () => {
+  /* render FieldPalette with whiteoutActive:false; assert: */
+  expect(screen.getByRole("button", { name: /whiteout/i })).toBeTruthy();
+  expect(screen.getByText(/standard font/i)).toBeTruthy();
+});
+
+it("drag draws a patch when whiteout is armed", () => {
+  /* Harness with drawingPatch: true; fire pointerDown/Move/Up on field-layer; assert a patch box exists: */
+  expect(screen.getByRole("button", { name: /delete patch/i })).toBeTruthy();
+});
+
+it("typing patch text stores it on the patch", () => {
+  /* after drawing, click the patch box, type "Fixed" into Patch text, blur; assert: */
+  expect(screen.getByText("Fixed")).toBeTruthy();
+});
+
+it("delete removes the patch", () => {
+  /* click Delete patch; assert queryByRole delete-patch is null */
+});
+```
+
+Note happy-dom zero-rect: the drag math must guard division by zero exactly like field placement does; with a zero rect the patch lands at 0,0 with the minimum size — the tests only assert existence, not position.
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `pnpm vitest run src/test/field-editor-ui.test.ts`
+Expected: new tests FAIL.
+
+- [ ] **Step 3: Implement**
+
+Per the interaction contract. Keep pointer math shared with the move/resize logic (extract to `app/send/field-editor/pointer.ts` if not already done in Task 7).
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `pnpm vitest run src/test/field-editor-ui.test.ts`
+Expected: PASS, pre-existing tests included.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add app/send/field-editor src/test/field-editor-ui.test.ts
+git commit -m "Add whiteout patch tool to the field editor"
+```
+
+---
+
+### Task 12: File replacement and patch burn on submit
+
+**Files:**
+- Modify: `app/send/send-client.tsx` and `app/send/send-form.tsx` (wherever Task 8 put `file`/`placed` state and `onSubmit`)
+- Test: `src/test/send-ui.test.ts`
+
+**Interfaces:**
+- Consumes: `applyPatches`, `dropOutOfRangePatches` from Task 10; `PdfPreview.onPagesRendered` page count from Task 6; the palette/overlay patch props from Task 11.
+- Produces: final submit behavior — patched bytes replace the file part.
+
+Behavior contract:
+1. **Replace file:** choosing a different file (dropzone change or remove+re-add) keeps signers, message, order, `placed` fields, and `patches`. When the new file's page count (from `onPagesRendered`) is lower than the highest placed field/patch page, drop the out-of-range fields and patches (`dropOutOfRangePatches` and an equivalent filter for fields) and show a non-blocking notice: `Removed N fields and M corrections that were on pages the new PDF doesn't have.` Dismiss the notice on the next file change. No confirm dialog (the old file is no longer available to revert to).
+2. **Patch burn:** in `onSubmit`, before `fetch`, when `patches.length > 0`: read the chosen file's bytes, `const burned = await applyPatches(bytes, patches)`, then `data.set("file", new Blob([burned], { type: "application/pdf" }), file.name)`. Tag preview (Task 9) keeps parsing the ORIGINAL bytes — patches don't affect tags.
+3. Summary line (confirm step) appends `· N corrections` when patches exist.
+
+- [ ] **Step 1: Write failing UI tests**
+
+Add to `src/test/send-ui.test.ts`, mocking `../../app/send/patch-model.js` so `applyPatches` returns a sentinel `Uint8Array([9, 9, 9])` and records its call (keep the real `makePatch`/`clampPatch`/`dropOutOfRangePatches` via `importOriginal`):
+
+```ts
+it("keeps signers and placed fields when the file is replaced", async () => {
+  /* select pdf A, fill signer, place a field via the overlay stub, select pdf B; assert the
+     signer name input still has its value and the placed field box still renders */
+});
+
+it("burns patches into the uploaded file on submit", async () => {
+  /* draw a patch via the overlay, submit; assert applyPatches was called once and
+     the posted FormData "file" Blob has size 3 (the sentinel) */
+  const blob = bodies[0]!.get("file") as Blob;
+  expect(blob.size).toBe(3);
+});
+
+it("does not touch the file when there are no patches", async () => {
+  /* submit without patches; assert applyPatches not called */
+});
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `pnpm vitest run src/test/send-ui.test.ts`
+Expected: new tests FAIL.
+
+- [ ] **Step 3: Implement**
+
+Per the behavior contract. The out-of-range notice reuses the form's existing `Alert` styling (non-destructive variant).
+
+- [ ] **Step 4: Run tests + typecheck**
+
+Run: `pnpm vitest run src/test/send-ui.test.ts src/test/field-editor-ui.test.ts src/test/patch-model.test.ts && pnpm typecheck`
+Expected: PASS, clean.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add app/send src/test/send-ui.test.ts
+git commit -m "Keep state across file replacement and burn patches on submit"
+```
+
+---
+
 ### Task 13: Full verification
 
 **Files:** none new.
