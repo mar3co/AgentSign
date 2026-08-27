@@ -1,5 +1,6 @@
 import {
   defaultRequired,
+  defaultRoleName,
   type DocumentField,
   type FieldType,
 } from "@/src/lib/pdf/fields";
@@ -85,7 +86,7 @@ export function serializeFields(placed: PlacedField[]): DocumentField[] {
     return {
       name: `${f.type}_${n}`,
       type: f.type,
-      role: `Signer ${f.signerIndex + 1}`,
+      role: defaultRoleName(f.signerIndex + 1),
       required: f.required,
       readonly: false,
       areas: [{ page: f.page, x: f.x, y: f.y, w: f.w, h: f.h }],

@@ -312,6 +312,7 @@ describe("SendClient", () => {
   });
 
   it("overlays tag-detected fields read-only after choosing a file", async () => {
+    stubDocumentsFetch();
     render(createElement(SendClient));
     await selectPdf();
     expect(await screen.findByText(/from tags/i)).toBeTruthy();

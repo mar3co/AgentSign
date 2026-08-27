@@ -161,7 +161,7 @@ export function SendClient() {
       setPlaced(keptFields);
       setPatches(keptPatches);
       setReplaceNotice(
-        `Removed ${removedFields} fields and ${removedPatches} corrections that were on pages the new PDF doesn't have.`,
+        `Removed ${removedFields} field${removedFields === 1 ? "" : "s"} and ${removedPatches} correction${removedPatches === 1 ? "" : "s"} that were on pages the new PDF doesn't have.`,
       );
     }
   }, []);
@@ -187,16 +187,16 @@ export function SendClient() {
       data.set("fields", JSON.stringify(serializeFields(placed)));
     }
     if (order === "parallel") data.set("order", "parallel");
-    if (patches.length > 0 && file) {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const burned = await applyPatches(bytes, patches);
-      data.set(
-        "file",
-        new Blob([new Uint8Array(burned)], { type: "application/pdf" }),
-        file.name,
-      );
-    }
     try {
+      if (patches.length > 0 && file) {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const burned = await applyPatches(bytes, patches);
+        data.set(
+          "file",
+          new Blob([new Uint8Array(burned)], { type: "application/pdf" }),
+          file.name,
+        );
+      }
       const res = await fetch("/v1/documents", {
         method: "POST",
         credentials: "include",

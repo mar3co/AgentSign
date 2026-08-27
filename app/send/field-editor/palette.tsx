@@ -81,7 +81,7 @@ export function FieldPalette(props: {
         </button>
       </div>
       <p className="text-xs text-muted-foreground">
-        Covers content with white; typed text uses a standard font.
+        Covers content with white; typed text uses a standard font. The original text remains in the file.
       </p>
     </div>
   );

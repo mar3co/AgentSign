@@ -88,7 +88,7 @@ export function SendForm(props: {
     const count = placed.filter((f) => f.signerIndex === i).length;
     if (count > 0) {
       const ok = window.confirm(
-        `Removing this signer also removes their ${count} placed fields.`,
+        `Removing this signer also removes their ${count} placed field${count === 1 ? "" : "s"}.`,
       );
       if (!ok) return;
     }
