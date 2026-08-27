@@ -18,9 +18,18 @@ export function FieldPalette(props: {
   onSignerChange: (index: number) => void;
   activeType: FieldType | null;
   onTypeChange: (type: FieldType | null) => void;
+  whiteoutActive: boolean;
+  onWhiteoutChange: (active: boolean) => void;
 }) {
-  const { signers, activeSigner, onSignerChange, activeType, onTypeChange } =
-    props;
+  const {
+    signers,
+    activeSigner,
+    onSignerChange,
+    activeType,
+    onTypeChange,
+    whiteoutActive,
+    onWhiteoutChange,
+  } = props;
 
   return (
     <div className="flex flex-col gap-3">
@@ -48,14 +57,32 @@ export function FieldPalette(props: {
             key={type}
             type="button"
             aria-pressed={activeType === type}
-            onClick={() => onTypeChange(activeType === type ? null : type)}
+            onClick={() => {
+              if (activeType !== type) onWhiteoutChange(false);
+              onTypeChange(activeType === type ? null : type);
+            }}
             className="rounded-md border px-2.5 py-1 text-sm data-[active=true]:border-foreground data-[active=true]:bg-muted"
             data-active={activeType === type}
           >
             {TYPE_LABELS[type]}
           </button>
         ))}
+        <button
+          type="button"
+          aria-pressed={whiteoutActive}
+          onClick={() => {
+            if (!whiteoutActive) onTypeChange(null);
+            onWhiteoutChange(!whiteoutActive);
+          }}
+          className="rounded-md border px-2.5 py-1 text-sm data-[active=true]:border-foreground data-[active=true]:bg-muted"
+          data-active={whiteoutActive}
+        >
+          Whiteout
+        </button>
       </div>
+      <p className="text-xs text-muted-foreground">
+        Covers content with white; typed text uses a standard font.
+      </p>
     </div>
   );
 }

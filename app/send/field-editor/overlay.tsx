@@ -1,6 +1,10 @@
 "use client";
 
-import { useRef, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import type { DocumentField, FieldType } from "@/src/lib/pdf/fields";
 import {
   clampToPage,
@@ -8,7 +12,13 @@ import {
   signerColor,
   type PlacedField,
 } from "@/app/send/field-model";
-import { clickToPercent, deltaToPercent } from "@/app/send/field-editor/pointer";
+import { clampPatch, makePatch, type PatchBox } from "@/app/send/patch-model";
+import {
+  clickToPercent,
+  commitDragRect,
+  deltaToPercent,
+  percentRectFromDrag,
+} from "@/app/send/field-editor/pointer";
 
 const TYPE_LABELS: Record<FieldType, string> = {
   signature: "Signature",
@@ -140,6 +150,91 @@ function FieldBox({
   );
 }
 
+function PatchBoxView({
+  patch,
+  onChange,
+  onDelete,
+}: {
+  patch: PatchBox;
+  onChange: (p: PatchBox) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(patch.text);
+  const [fontSize, setFontSize] = useState(patch.fontSize);
+
+  function commit() {
+    const size = Math.min(48, Math.max(6, fontSize || 6));
+    onChange({ ...patch, text, fontSize: size });
+    setEditing(false);
+  }
+
+  function commitOnEnter(e: React.KeyboardEvent) {
+    if (e.key === "Enter") commit();
+  }
+
+  return (
+    <div
+      className="absolute flex items-center justify-center overflow-hidden border border-gray-300 bg-white text-[10px] text-gray-800"
+      style={{
+        left: patch.x + "%",
+        top: patch.y + "%",
+        width: patch.w + "%",
+        height: patch.h + "%",
+      }}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (editing) return;
+        setText(patch.text);
+        setFontSize(patch.fontSize);
+        setEditing(true);
+      }}
+    >
+      {editing ? (
+        <div
+          className="flex w-full flex-col gap-1 p-1"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <input
+            aria-label="Patch text"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onBlur={commit}
+            onKeyDown={commitOnEnter}
+            className="w-full rounded border px-1 text-[10px]"
+          />
+          <input
+            aria-label="Patch text size"
+            type="number"
+            min={6}
+            max={48}
+            value={fontSize}
+            onChange={(e) => setFontSize(Number(e.target.value))}
+            onBlur={commit}
+            onKeyDown={commitOnEnter}
+            className="w-full rounded border px-1 text-[10px]"
+          />
+        </div>
+      ) : (
+        <span className="truncate px-1">{patch.text}</span>
+      )}
+      <button
+        type="button"
+        aria-label="Delete patch"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete(patch.id);
+        }}
+        className="absolute right-0 top-0 rounded border bg-white px-1 text-[10px] leading-none"
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
 export function FieldOverlay(props: {
   pageIndex: number;
   fields: PlacedField[];
@@ -148,12 +243,37 @@ export function FieldOverlay(props: {
   onPlace: (f: PlacedField) => void;
   onChange: (f: PlacedField) => void;
   onDelete: (id: string) => void;
+  patches: PatchBox[];
+  drawingPatch: boolean;
+  onPatchAdd: (p: PatchBox) => void;
+  onPatchChange: (p: PatchBox) => void;
+  onPatchDelete: (id: string) => void;
 }) {
-  const { pageIndex, fields, tagFields, placing, onPlace, onChange, onDelete } =
-    props;
+  const {
+    pageIndex,
+    fields,
+    tagFields,
+    placing,
+    onPlace,
+    onChange,
+    onDelete,
+    patches,
+    drawingPatch,
+    onPatchAdd,
+    onPatchChange,
+    onPatchDelete,
+  } = props;
   const layerRef = useRef<HTMLDivElement>(null);
+  const patchDragRef = useRef<{ x: number; y: number } | null>(null);
+  const [patchPreview, setPatchPreview] = useState<{
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  } | null>(null);
   const page = pageIndex + 1;
   const pageFields = fields.filter((f) => f.page === page);
+  const pagePatches = patches.filter((p) => p.page === page);
 
   function handlePlaceClick(e: React.MouseEvent<HTMLDivElement>) {
     if (!placing) return;
@@ -165,13 +285,49 @@ export function FieldOverlay(props: {
     onPlace(makePlacedField(placing.type, placing.signerIndex, page, x, y));
   }
 
+  function onPatchPointerDown(e: ReactPointerEvent<HTMLDivElement>) {
+    if (!drawingPatch) return;
+    if (e.target !== e.currentTarget) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    patchDragRef.current = { x: e.clientX, y: e.clientY };
+    setPatchPreview({ x: 0, y: 0, w: 0, h: 0 });
+  }
+
+  function onPatchPointerMove(e: ReactPointerEvent<HTMLDivElement>) {
+    const start = patchDragRef.current;
+    if (!start) return;
+    const rect = layerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setPatchPreview(
+      percentRectFromDrag(rect, start.x, start.y, e.clientX, e.clientY),
+    );
+  }
+
+  function onPatchPointerUp(e: ReactPointerEvent<HTMLDivElement>) {
+    const start = patchDragRef.current;
+    patchDragRef.current = null;
+    setPatchPreview(null);
+    if (!start) return;
+    const rect = layerRef.current?.getBoundingClientRect();
+    const dragRect = rect
+      ? commitDragRect(rect, start.x, start.y, e.clientX, e.clientY)
+      : null;
+    if (!dragRect) return;
+    onPatchAdd(
+      clampPatch(makePatch(page, dragRect.x, dragRect.y, dragRect.w, dragRect.h)),
+    );
+  }
+
   return (
     <div
       ref={layerRef}
       data-testid="field-layer"
       className="absolute inset-0"
-      style={{ cursor: placing ? "crosshair" : undefined }}
+      style={{ cursor: placing || drawingPatch ? "crosshair" : undefined }}
       onClick={handlePlaceClick}
+      onPointerDown={onPatchPointerDown}
+      onPointerMove={onPatchPointerMove}
+      onPointerUp={onPatchPointerUp}
     >
       {tagFields?.map((tf, i) =>
         tf.areas
@@ -191,6 +347,25 @@ export function FieldOverlay(props: {
             </div>
           )),
       )}
+      {pagePatches.map((p) => (
+        <PatchBoxView
+          key={p.id}
+          patch={p}
+          onChange={onPatchChange}
+          onDelete={onPatchDelete}
+        />
+      ))}
+      {patchPreview ? (
+        <div
+          className="pointer-events-none absolute border border-dashed border-gray-400 bg-white/60"
+          style={{
+            left: patchPreview.x + "%",
+            top: patchPreview.y + "%",
+            width: patchPreview.w + "%",
+            height: patchPreview.h + "%",
+          }}
+        />
+      ) : null}
       {pageFields.map((f) => (
         <FieldBox
           key={f.id}

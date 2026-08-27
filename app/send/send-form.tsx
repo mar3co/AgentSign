@@ -289,6 +289,8 @@ export function SendForm(props: {
             onSignerChange={setActiveSigner}
             activeType={activeType}
             onTypeChange={setActiveType}
+            whiteoutActive={false}
+            onWhiteoutChange={() => {}}
           />
           <PdfPreview
             file={file}
@@ -312,6 +314,11 @@ export function SendForm(props: {
                 onDelete={(id) =>
                   setPlaced((prev) => prev.filter((x) => x.id !== id))
                 }
+                patches={[]}
+                drawingPatch={false}
+                onPatchAdd={() => {}}
+                onPatchChange={() => {}}
+                onPatchDelete={() => {}}
               />
             )}
           />
