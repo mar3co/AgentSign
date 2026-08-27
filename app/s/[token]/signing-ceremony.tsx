@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { loadPdfjs } from "@/app/lib/load-pdfjs";
 import type { DocumentField, FieldArea } from "@/src/lib/pdf/fields";
 
 export type CeremonyAttested = {
@@ -175,7 +176,7 @@ export function SigningCeremony({
         if (!res.ok || cancelled) return;
         const bytes = new Uint8Array(await res.arrayBuffer());
         try {
-          const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+          const pdfjs = await loadPdfjs();
           const doc = await (
             pdfjs.getDocument({
               data: bytes,

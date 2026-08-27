@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
+import { loadPdfjs } from "@/app/lib/load-pdfjs";
 
 export type PreviewPage = { dataUrl: string; aspect: number }; // aspect = height/width
 
@@ -23,7 +24,7 @@ export function PdfPreview({
     (async () => {
       try {
         const bytes = new Uint8Array(await file.arrayBuffer());
-        const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+        const pdfjs = await loadPdfjs();
         const doc = await (
           pdfjs.getDocument({
             data: bytes,

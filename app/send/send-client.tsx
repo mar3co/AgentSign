@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { loadPdfjs } from "@/app/lib/load-pdfjs";
 import { serializeFields, type PlacedField } from "@/app/send/field-model";
 import { SendForm, type Order, type SignerRow } from "@/app/send/send-form";
 import type { DocumentField } from "@/src/lib/pdf/fields";
@@ -98,6 +99,7 @@ export function SendClient() {
     let cancelled = false;
     (async () => {
       try {
+        await loadPdfjs();
         const { parsePdfTags } = await import("@/src/lib/pdf/tags");
         const bytes = new Uint8Array(await file.arrayBuffer());
         const parsed = await parsePdfTags(bytes);
