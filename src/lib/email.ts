@@ -132,9 +132,14 @@ export function inviteEmail(input: {
   title: string;
   expiresAt: Date;
   brand?: MailBrand;
+  message?: string | null;
 }): Pick<MailMessage, "subject" | "text" | "html"> {
+  const messageLines = input.message
+    ? [``, `Message from ${input.senderEmail}:`, input.message]
+    : [];
   const text = [
     `${senderWho(input.senderEmail, input.brand)} asked you to sign "${input.title}".`,
+    ...messageLines,
     ``,
     `Sign here: ${absoluteUrl(input.signUrl)}`,
     ``,

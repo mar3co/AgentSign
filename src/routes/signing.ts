@@ -888,6 +888,7 @@ export async function inviteNextHumanIfNeeded(
     senderEmail: document.senderEmail,
     title: document.title,
     expiresAt: document.expiresAt,
+    message: document.message,
     brand: {
       displayName: brand.displayName,
       hasLogo: Boolean(brand.logoBytes),

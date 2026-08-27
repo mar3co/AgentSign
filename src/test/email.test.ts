@@ -13,7 +13,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { auditEvents, signers as signersTable } from "../db/schema.js";
-import { createMailer, type MailMessage } from "../lib/email.js";
+import { createMailer, inviteEmail, type MailMessage } from "../lib/email.js";
 import { resetEnvCache } from "../env.js";
 import { getSigningState } from "../routes/signing.js";
 
@@ -124,6 +124,41 @@ describe("email templates", () => {
     expect(invite.text).not.toMatch(/create an account/i);
     expect(invite.text).not.toMatch(/sign up/i);
     expect(invite.text).not.toMatch(/\/login/i);
+  });
+
+  it("renders the sender message in text and html", () => {
+    const mail = inviteEmail({
+      signUrl: "/s/tok123",
+      senderEmail: "shop@example.com",
+      title: "Repair authorization",
+      expiresAt: new Date("2026-09-03T00:00:00Z"),
+      message: "Please sign before Friday.",
+    });
+    expect(mail.text).toContain("Message from shop@example.com:");
+    expect(mail.text).toContain("Please sign before Friday.");
+    expect(mail.html).toContain("Please sign before Friday.");
+  });
+
+  it("escapes html in the sender message", () => {
+    const mail = inviteEmail({
+      signUrl: "/s/tok123",
+      senderEmail: "shop@example.com",
+      title: "T",
+      expiresAt: new Date("2026-09-03T00:00:00Z"),
+      message: `<script>alert("x")</script>`,
+    });
+    expect(mail.html).not.toContain("<script>");
+    expect(mail.html).toContain("&lt;script&gt;");
+  });
+
+  it("omits the message block when message is absent", () => {
+    const mail = inviteEmail({
+      signUrl: "/s/tok123",
+      senderEmail: "shop@example.com",
+      title: "T",
+      expiresAt: new Date("2026-09-03T00:00:00Z"),
+    });
+    expect(mail.text).not.toContain("Message from");
   });
 
   it(

@@ -611,6 +611,7 @@ export async function inviteFirstSigner(
     userId: string | null;
     sendEmail?: boolean;
     signingMode?: "sequential" | "parallel";
+    message?: string | null;
   },
   at: Date,
 ): Promise<{ signers: InviteSigner[] }> {
@@ -661,6 +662,7 @@ export async function inviteFirstSigner(
             senderEmail: document.senderEmail,
             title: document.title,
             expiresAt: document.expiresAt,
+            message: document.message,
             brand: {
               displayName: brand!.displayName,
               hasLogo: Boolean(brand!.logoBytes),
@@ -725,6 +727,7 @@ export async function inviteFirstSigner(
         senderEmail: document.senderEmail,
         title: document.title,
         expiresAt: document.expiresAt,
+        message: document.message,
         brand: {
           displayName: brand.displayName,
           hasLogo: Boolean(brand.logoBytes),
