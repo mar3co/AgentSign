@@ -20,7 +20,7 @@ import { FieldOverlay } from "@/app/send/field-editor/overlay";
 import { FieldPalette } from "@/app/send/field-editor/palette";
 import { removeSignerFields, type PlacedField } from "@/app/send/field-model";
 import { PdfPreview } from "@/app/send/pdf-preview";
-import type { FieldType } from "@/src/lib/pdf/fields";
+import type { DocumentField, FieldType } from "@/src/lib/pdf/fields";
 
 export type SignerRow = { name: string; email: string };
 export type Order = "sequential" | "parallel";
@@ -38,6 +38,7 @@ export function SendForm(props: {
   setSigners: Dispatch<SetStateAction<SignerRow[]>>;
   placed: PlacedField[];
   setPlaced: Dispatch<SetStateAction<PlacedField[]>>;
+  tagFields: DocumentField[];
   order: Order;
   setOrder: (o: Order) => void;
   message: string;
@@ -58,6 +59,7 @@ export function SendForm(props: {
     setSigners,
     placed,
     setPlaced,
+    tagFields,
     order,
     setOrder,
     message,
@@ -295,6 +297,7 @@ export function SendForm(props: {
               <FieldOverlay
                 pageIndex={pageIndex}
                 fields={placed}
+                tagFields={tagFields}
                 placing={
                   activeType
                     ? { signerIndex: activeSigner, type: activeType }

@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { serializeFields, type PlacedField } from "@/app/send/field-model";
 import { SendForm, type Order, type SignerRow } from "@/app/send/send-form";
+import type { DocumentField } from "@/src/lib/pdf/fields";
 
 type Done = {
   key: string;
@@ -58,6 +59,7 @@ export function SendClient() {
     { name: "", email: "" },
   ]);
   const [placed, setPlaced] = useState<PlacedField[]>([]);
+  const [tagFields, setTagFields] = useState<DocumentField[]>([]);
   const [order, setOrder] = useState<Order>("sequential");
   const [message, setMessage] = useState("");
   const [pageCount, setPageCount] = useState<number | null>(null);
@@ -87,6 +89,27 @@ export function SendClient() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!file) {
+      setTagFields([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { parsePdfTags } = await import("@/src/lib/pdf/tags");
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const parsed = await parsePdfTags(bytes);
+        if (!cancelled) setTagFields(parsed.fields);
+      } catch {
+        if (!cancelled) setTagFields([]); // tags preview is best-effort
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [file]);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -274,6 +297,7 @@ export function SendClient() {
       setSigners={setSigners}
       placed={placed}
       setPlaced={setPlaced}
+      tagFields={tagFields}
       order={order}
       setOrder={setOrder}
       message={message}

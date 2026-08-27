@@ -23,6 +23,22 @@ vi.mock("../../app/send/pdf-preview.js", () => ({
   },
 }));
 
+vi.mock("../../src/lib/pdf/tags.js", () => ({
+  parsePdfTags: async () => ({
+    fields: [
+      {
+        name: "sig",
+        type: "signature",
+        role: "Signer 1",
+        required: true,
+        readonly: false,
+        areas: [{ page: 1, x: 10, y: 80, w: 20, h: 5 }],
+      },
+    ],
+    pdf: new Uint8Array(),
+  }),
+}));
+
 import { SendClient } from "../../app/send/send-client.js";
 import { UploadDropzone } from "../../components/upload-dropzone.js";
 
@@ -280,5 +296,13 @@ describe("SendClient", () => {
     render(createElement(SendClient));
     await fillAndSubmit();
     expect(await screen.findByText(/1 signer/i)).toBeTruthy();
+  });
+
+  it("overlays tag-detected fields read-only after choosing a file", async () => {
+    render(createElement(SendClient));
+    await selectPdf();
+    expect(await screen.findByText(/from tags/i)).toBeTruthy();
+    // read-only: no delete button on tag boxes
+    expect(screen.queryByRole("button", { name: /delete field/i })).toBeNull();
   });
 });
