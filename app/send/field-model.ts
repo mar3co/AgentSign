@@ -93,6 +93,13 @@ export function serializeFields(placed: PlacedField[]): DocumentField[] {
   });
 }
 
+export function dropOutOfRangeFields(
+  placed: PlacedField[],
+  pageCount: number,
+): PlacedField[] {
+  return placed.filter((f) => f.page >= 1 && f.page <= pageCount);
+}
+
 export function removeSignerFields(
   placed: PlacedField[],
   signerIndex: number,

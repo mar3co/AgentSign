@@ -3,6 +3,16 @@ import { createElement, useEffect, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
+const { applyPatchesMock } = vi.hoisted(() => ({
+  applyPatchesMock: vi.fn(async () => new Uint8Array([9, 9, 9])),
+}));
+
+vi.mock("../../app/send/patch-model.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../app/send/patch-model.js")>();
+  return { ...actual, applyPatches: applyPatchesMock };
+});
+
 vi.mock("../../app/send/pdf-preview.js", () => ({
   PdfPreview: ({
     overlay,
@@ -304,5 +314,59 @@ describe("SendClient", () => {
     expect(await screen.findByText(/from tags/i)).toBeTruthy();
     // read-only: no delete button on tag boxes
     expect(screen.queryByRole("button", { name: /delete field/i })).toBeNull();
+  });
+
+  it("keeps signers and placed fields when the file is replaced", async () => {
+    stubDocumentsFetch();
+    render(createElement(SendClient));
+    await selectPdf();
+    fireEvent.change(screen.getByLabelText(/^signer name$/i), {
+      target: { value: "Jane" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Signature" }));
+    fireEvent.click(screen.getByTestId("field-layer"), {
+      clientX: 100,
+      clientY: 100,
+    });
+    expect(screen.getByRole("button", { name: /delete field/i })).toBeTruthy();
+
+    const input = document.querySelector(
+      "input[type=file]",
+    ) as HTMLInputElement;
+    Object.defineProperty(input, "files", { value: [pdfFile()] });
+    fireEvent.change(input);
+
+    expect(
+      (screen.getByLabelText(/^signer name$/i) as HTMLInputElement).value,
+    ).toBe("Jane");
+    expect(screen.getByRole("button", { name: /delete field/i })).toBeTruthy();
+  });
+
+  it("burns patches into the uploaded file on submit", async () => {
+    applyPatchesMock.mockClear();
+    const bodies = stubDocumentsFetch();
+    render(createElement(SendClient));
+    await selectPdf();
+    fireEvent.click(screen.getByRole("button", { name: /whiteout/i }));
+    const layer = screen.getByTestId("field-layer");
+    fireEvent.pointerDown(layer, { clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(layer, { clientX: 250, clientY: 150 });
+    fireEvent.pointerUp(layer, { clientX: 250, clientY: 150 });
+    expect(screen.getByRole("button", { name: /delete patch/i })).toBeTruthy();
+
+    await fillAndSubmit();
+    await screen.findByText(/confirm to send/i);
+    expect(applyPatchesMock).toHaveBeenCalledTimes(1);
+    const blob = bodies[0]!.get("file") as Blob;
+    expect(blob.size).toBe(3);
+  });
+
+  it("does not touch the file when there are no patches", async () => {
+    applyPatchesMock.mockClear();
+    stubDocumentsFetch();
+    render(createElement(SendClient));
+    await fillAndSubmit();
+    await screen.findByText(/confirm to send/i);
+    expect(applyPatchesMock).not.toHaveBeenCalled();
   });
 });

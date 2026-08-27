@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   clampToPage,
+  dropOutOfRangeFields,
   makePlacedField,
   removeSignerFields,
   serializeFields,
@@ -59,5 +60,17 @@ describe("field model", () => {
   it("cycles signer colors", () => {
     expect(signerColor(0)).toBe(SIGNER_COLORS[0]);
     expect(signerColor(SIGNER_COLORS.length)).toBe(SIGNER_COLORS[0]);
+  });
+
+  it("drops fields on out-of-range pages", () => {
+    const kept = dropOutOfRangeFields(
+      [
+        makePlacedField("signature", 0, 1, 30, 80),
+        makePlacedField("signature", 0, 3, 30, 80),
+      ],
+      2,
+    );
+    expect(kept).toHaveLength(1);
+    expect(kept[0]!.page).toBe(1);
   });
 });

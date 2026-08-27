@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  useCallback,
-  useState,
-  type Dispatch,
-  type FormEvent,
-  type SetStateAction,
-} from "react";
+import { useState, type Dispatch, type FormEvent, type SetStateAction } from "react";
 import { Plus, X } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -19,6 +13,7 @@ import { UploadDropzone } from "@/components/upload-dropzone";
 import { FieldOverlay } from "@/app/send/field-editor/overlay";
 import { FieldPalette } from "@/app/send/field-editor/palette";
 import { removeSignerFields, type PlacedField } from "@/app/send/field-model";
+import type { PatchBox } from "@/app/send/patch-model";
 import { PdfPreview } from "@/app/send/pdf-preview";
 import type { DocumentField, FieldType } from "@/src/lib/pdf/fields";
 
@@ -33,17 +28,22 @@ export function SendForm(props: {
   title: string;
   setTitle: (v: string) => void;
   file: File | null;
-  setFile: (f: File | null) => void;
+  onFileChange: (f: File | null) => void;
   signers: SignerRow[];
   setSigners: Dispatch<SetStateAction<SignerRow[]>>;
   placed: PlacedField[];
   setPlaced: Dispatch<SetStateAction<PlacedField[]>>;
   tagFields: DocumentField[];
+  patches: PatchBox[];
+  setPatches: Dispatch<SetStateAction<PatchBox[]>>;
+  whiteoutActive: boolean;
+  setWhiteoutActive: (v: boolean) => void;
+  replaceNotice: string | null;
   order: Order;
   setOrder: (o: Order) => void;
   message: string;
   setMessage: (v: string) => void;
-  setPageCount: (n: number | null) => void;
+  onPagesRendered: (n: number) => void;
   error: string | null;
   busy: boolean;
   onSubmit: (e: FormEvent<HTMLFormElement>) => void;
@@ -54,17 +54,22 @@ export function SendForm(props: {
     title,
     setTitle,
     file,
-    setFile,
+    onFileChange,
     signers,
     setSigners,
     placed,
     setPlaced,
     tagFields,
+    patches,
+    setPatches,
+    whiteoutActive,
+    setWhiteoutActive,
+    replaceNotice,
     order,
     setOrder,
     message,
     setMessage,
-    setPageCount,
+    onPagesRendered,
     error,
     busy,
     onSubmit,
@@ -94,17 +99,6 @@ export function SendForm(props: {
     );
   }
 
-  const handleFileChange = useCallback(
-    (f: File | null) => {
-      setFile(f);
-      if (!f) {
-        setPlaced([]);
-        setPageCount(null);
-      }
-    },
-    [setFile, setPlaced, setPageCount],
-  );
-
   const formFields = (
     <>
       <UploadDropzone
@@ -114,8 +108,14 @@ export function SendForm(props: {
         required
         prompt="Drag & Drop or Choose a PDF to upload"
         hint="Your signer gets an email link in seconds."
-        onFileChange={handleFileChange}
+        onFileChange={onFileChange}
       />
+
+      {replaceNotice ? (
+        <Alert>
+          <AlertDescription>{replaceNotice}</AlertDescription>
+        </Alert>
+      ) : null}
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="flex flex-col gap-2">
@@ -289,12 +289,12 @@ export function SendForm(props: {
             onSignerChange={setActiveSigner}
             activeType={activeType}
             onTypeChange={setActiveType}
-            whiteoutActive={false}
-            onWhiteoutChange={() => {}}
+            whiteoutActive={whiteoutActive}
+            onWhiteoutChange={setWhiteoutActive}
           />
           <PdfPreview
             file={file}
-            onPagesRendered={setPageCount}
+            onPagesRendered={onPagesRendered}
             overlay={(pageIndex) => (
               <FieldOverlay
                 pageIndex={pageIndex}
@@ -314,11 +314,17 @@ export function SendForm(props: {
                 onDelete={(id) =>
                   setPlaced((prev) => prev.filter((x) => x.id !== id))
                 }
-                patches={[]}
-                drawingPatch={false}
-                onPatchAdd={() => {}}
-                onPatchChange={() => {}}
-                onPatchDelete={() => {}}
+                patches={patches}
+                drawingPatch={whiteoutActive}
+                onPatchAdd={(p) => setPatches((prev) => [...prev, p])}
+                onPatchChange={(p) =>
+                  setPatches((prev) =>
+                    prev.map((x) => (x.id === p.id ? p : x)),
+                  )
+                }
+                onPatchDelete={(id) =>
+                  setPatches((prev) => prev.filter((x) => x.id !== id))
+                }
               />
             )}
           />

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { LinkButton } from "@/components/link-button";
 import { LoadingList } from "@/components/loading-list";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -15,7 +15,16 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { loadPdfjs } from "@/app/lib/load-pdfjs";
-import { serializeFields, type PlacedField } from "@/app/send/field-model";
+import {
+  dropOutOfRangeFields,
+  serializeFields,
+  type PlacedField,
+} from "@/app/send/field-model";
+import {
+  applyPatches,
+  dropOutOfRangePatches,
+  type PatchBox,
+} from "@/app/send/patch-model";
 import { SendForm, type Order, type SignerRow } from "@/app/send/send-form";
 import type { DocumentField } from "@/src/lib/pdf/fields";
 
@@ -31,6 +40,7 @@ function summaryLine(s: {
   fieldCount: number;
   hasMessage: boolean;
   pageCount: number | null;
+  patchCount: number;
 }): string {
   const parts: string[] = [s.title];
   if (s.pageCount != null) {
@@ -49,6 +59,9 @@ function summaryLine(s: {
       : "no placed fields — signers review and sign",
   );
   if (s.hasMessage) parts.push("message included");
+  if (s.patchCount > 0) {
+    parts.push(`${s.patchCount} correction${s.patchCount === 1 ? "" : "s"}`);
+  }
   return parts.join(" · ");
 }
 
@@ -60,14 +73,22 @@ export function SendClient() {
     { name: "", email: "" },
   ]);
   const [placed, setPlaced] = useState<PlacedField[]>([]);
+  const [patches, setPatches] = useState<PatchBox[]>([]);
+  const [whiteoutActive, setWhiteoutActive] = useState(false);
   const [tagFields, setTagFields] = useState<DocumentField[]>([]);
   const [order, setOrder] = useState<Order>("sequential");
   const [message, setMessage] = useState("");
   const [pageCount, setPageCount] = useState<number | null>(null);
+  const [replaceNotice, setReplaceNotice] = useState<string | null>(null);
   const [documentId, setDocumentId] = useState<string | null>(null);
   const [done, setDone] = useState<Done | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const placedRef = useRef(placed);
+  placedRef.current = placed;
+  const patchesRef = useRef(patches);
+  patchesRef.current = patches;
 
   useEffect(() => {
     let cancelled = false;
@@ -113,6 +134,38 @@ export function SendClient() {
     };
   }, [file]);
 
+  // Replacing the file keeps signers, message, order, placed fields, and
+  // patches — the old file isn't recoverable client-side, so there's no
+  // confirm dialog, just this reset of file-derived state.
+  const handleFileChange = useCallback((f: File | null) => {
+    setReplaceNotice(null);
+    setFile(f);
+    if (!f) {
+      setPlaced([]);
+      setPatches([]);
+      setPageCount(null);
+    }
+  }, []);
+
+  // Stable identity (via refs) so PdfPreview's effect only re-runs when the
+  // file itself changes, not on every render.
+  const handlePagesRendered = useCallback((n: number) => {
+    setPageCount(n);
+    const currentPlaced = placedRef.current;
+    const currentPatches = patchesRef.current;
+    const keptFields = dropOutOfRangeFields(currentPlaced, n);
+    const keptPatches = dropOutOfRangePatches(currentPatches, n);
+    const removedFields = currentPlaced.length - keptFields.length;
+    const removedPatches = currentPatches.length - keptPatches.length;
+    if (removedFields > 0 || removedPatches > 0) {
+      setPlaced(keptFields);
+      setPatches(keptPatches);
+      setReplaceNotice(
+        `Removed ${removedFields} fields and ${removedPatches} corrections that were on pages the new PDF doesn't have.`,
+      );
+    }
+  }, []);
+
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
@@ -134,6 +187,15 @@ export function SendClient() {
       data.set("fields", JSON.stringify(serializeFields(placed)));
     }
     if (order === "parallel") data.set("order", "parallel");
+    if (patches.length > 0 && file) {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const burned = await applyPatches(bytes, patches);
+      data.set(
+        "file",
+        new Blob([new Uint8Array(burned)], { type: "application/pdf" }),
+        file.name,
+      );
+    }
     try {
       const res = await fetch("/v1/documents", {
         method: "POST",
@@ -248,6 +310,7 @@ export function SendClient() {
       fieldCount: placed.length,
       hasMessage: message.trim().length > 0,
       pageCount,
+      patchCount: patches.length,
     });
     return (
       <Card>
@@ -294,17 +357,22 @@ export function SendClient() {
       title={title}
       setTitle={setTitle}
       file={file}
-      setFile={setFile}
+      onFileChange={handleFileChange}
       signers={signers}
       setSigners={setSigners}
       placed={placed}
       setPlaced={setPlaced}
       tagFields={tagFields}
+      patches={patches}
+      setPatches={setPatches}
+      whiteoutActive={whiteoutActive}
+      setWhiteoutActive={setWhiteoutActive}
+      replaceNotice={replaceNotice}
       order={order}
       setOrder={setOrder}
       message={message}
       setMessage={setMessage}
-      setPageCount={setPageCount}
+      onPagesRendered={handlePagesRendered}
       error={error}
       busy={busy}
       onSubmit={onSubmit}
