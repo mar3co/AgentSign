@@ -23,6 +23,7 @@ export function UploadDropzone({
   prompt = "Drag & Drop or Choose file to upload",
   hint,
   className,
+  onFileChange,
 }: {
   id: string;
   name: string;
@@ -31,24 +32,29 @@ export function UploadDropzone({
   prompt?: string;
   hint?: string;
   className?: string;
+  onFileChange?: (file: File | null) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<{ name: string; size: number } | null>(null);
   const [dragging, setDragging] = useState(false);
 
   const readInput = () => {
-    const f = inputRef.current?.files?.[0];
+    const f = inputRef.current?.files?.[0] ?? null;
     setFile(f ? { name: f.name, size: f.size } : null);
+    onFileChange?.(f);
   };
 
   // form.reset() clears the native input; clear the file row with it.
   useEffect(() => {
     const form = inputRef.current?.form;
     if (!form) return;
-    const onReset = () => setFile(null);
+    const onReset = () => {
+      setFile(null);
+      onFileChange?.(null);
+    };
     form.addEventListener("reset", onReset);
     return () => form.removeEventListener("reset", onReset);
-  }, []);
+  }, [onFileChange]);
 
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
@@ -108,6 +114,7 @@ export function UploadDropzone({
             onClick={() => {
               if (inputRef.current) inputRef.current.value = "";
               setFile(null);
+              onFileChange?.(null);
             }}
             aria-label="Remove file"
           >

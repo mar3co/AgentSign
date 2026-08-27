@@ -3,6 +3,7 @@ import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { SendClient } from "../../app/send/send-client.js";
+import { UploadDropzone } from "../../components/upload-dropzone.js";
 
 function whoamiOk() {
   return new Response(JSON.stringify({ email: "shop@example.com" }), {
@@ -133,5 +134,24 @@ describe("SendClient", () => {
     expect(
       screen.getByRole("link", { name: /open documents/i }).getAttribute("href"),
     ).toBe("/documents");
+  });
+
+  it("notifies when a file is chosen", async () => {
+    const seen: (File | null)[] = [];
+    render(
+      createElement(UploadDropzone, {
+        id: "f",
+        name: "f",
+        accept: "application/pdf",
+        onFileChange: (f: File | null) => seen.push(f),
+      }),
+    );
+    const input = document.querySelector("input[type=file]") as HTMLInputElement;
+    const file = new File([new Uint8Array([0x25, 0x50, 0x44, 0x46])], "a.pdf", {
+      type: "application/pdf",
+    });
+    Object.defineProperty(input, "files", { value: [file] });
+    fireEvent.change(input);
+    expect(seen).toEqual([file]);
   });
 });
