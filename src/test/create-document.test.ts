@@ -498,6 +498,71 @@ describe("POST /v1/documents", () => {
     const [row] = await db.select().from(documents).where(eq(documents.id, ids[20]!));
     expect(row!.status).toBe("pending_sender");
   });
+
+  it("stores a trimmed sender message on the OTP path", async () => {
+    const db = await createTestDb();
+    const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+    setDeps({
+      db,
+      store,
+      mailer: { sendMail: async () => {} },
+    });
+    const pdf = await minimalPdf();
+    const body = new FormData();
+    body.set("title", "Repair authorization");
+    body.set("sender_email", "shop@example.com");
+    body.set("signers", JSON.stringify([{ name: "Jane", email: "jane@example.com" }]));
+    body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
+    body.set("message", "  Please sign before Friday.  ");
+    const res = await postDocument(new Request("http://sign.test/v1/documents", { method: "POST", body }));
+    expect(res.status).toBe(201);
+    const { id } = (await res.json()) as { id: string };
+    const [row] = await db.select().from(documents).where(eq(documents.id, id));
+    expect(row!.message).toBe("Please sign before Friday.");
+  });
+
+  it("rejects a message over 1000 characters", async () => {
+    const db = await createTestDb();
+    const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+    setDeps({
+      db,
+      store,
+      mailer: { sendMail: async () => {} },
+    });
+    const pdf = await minimalPdf();
+    const body = new FormData();
+    body.set("title", "Repair authorization");
+    body.set("sender_email", "shop@example.com");
+    body.set("signers", JSON.stringify([{ name: "Jane", email: "jane@example.com" }]));
+    body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
+    body.set("message", "x".repeat(1001));
+    const res = await postDocument(new Request("http://sign.test/v1/documents", { method: "POST", body }));
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as { code?: string };
+    expect(json.code).toBe("invalid_request");
+  });
+
+  it("stores null when message is blank", async () => {
+    const db = await createTestDb();
+    const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+    setDeps({
+      db,
+      store,
+      mailer: { sendMail: async () => {} },
+    });
+    const pdf = await minimalPdf();
+    const body = new FormData();
+    body.set("title", "Repair authorization");
+    body.set("sender_email", "shop@example.com");
+    body.set("signers", JSON.stringify([{ name: "Jane", email: "jane@example.com" }]));
+    body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
+    body.set("message", "   ");
+    const res = await postDocument(new Request("http://sign.test/v1/documents", { method: "POST", body }));
+    expect(res.status).toBe(201);
+    const { id } = (await res.json()) as { id: string };
+    const [row] = await db.select().from(documents).where(eq(documents.id, id));
+    expect(row!.message).toBeNull();
+  });
 });
 
 type DocumentStatusJson = {
@@ -1391,5 +1456,24 @@ describe("POST /v1/documents on-page fields", () => {
       }),
     );
     expect(res.status).toBe(400);
+  });
+
+  it("stores a trimmed sender message on the live-key path", async () => {
+    const { db } = await bootAuth();
+    const cookie = await magicCookie("shop@example.com");
+    const key = await mintLive(cookie);
+    const body = await documentBody([{ name: "Jane", email: "jane@example.com" }]);
+    body.set("message", "  Please sign before Friday.  ");
+    const res = await postDocument(
+      new Request("http://sign.test/v1/documents", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}` },
+        body,
+      }),
+    );
+    expect(res.status).toBe(201);
+    const { id } = (await res.json()) as { id: string };
+    const [row] = await db.select().from(documents).where(eq(documents.id, id));
+    expect(row!.message).toBe("Please sign before Friday.");
   });
 });
