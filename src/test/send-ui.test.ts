@@ -92,7 +92,10 @@ async function selectPdf() {
   const input = document.querySelector(
     "input[type=file]",
   ) as HTMLInputElement;
-  Object.defineProperty(input, "files", { value: [pdfFile()] });
+  Object.defineProperty(input, "files", {
+    value: [pdfFile()],
+    configurable: true,
+  });
   fireEvent.change(input);
   await screen.findByRole("button", { name: "Signature" });
 }
@@ -368,5 +371,18 @@ describe("SendClient", () => {
     await fillAndSubmit();
     await screen.findByText(/confirm to send/i);
     expect(applyPatchesMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the same file input mounted across the remount into the preview layout", async () => {
+    stubDocumentsFetch();
+    render(createElement(SendClient));
+    await screen.findByLabelText(/sender email/i);
+    const inputBefore = document.querySelector("input[type=file]");
+    Object.defineProperty(inputBefore as HTMLInputElement, "files", {
+      value: [pdfFile()],
+    });
+    fireEvent.change(inputBefore as HTMLInputElement);
+    await screen.findByRole("button", { name: /whiteout/i });
+    expect(document.querySelector("input[type=file]")).toBe(inputBefore);
   });
 });

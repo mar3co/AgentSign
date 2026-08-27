@@ -267,69 +267,68 @@ export function SendForm(props: {
     </>
   );
 
-  if (!file) {
-    return (
-      <form className="flex flex-col gap-6" onSubmit={onSubmit}>
-        <Card>
-          <CardContent className="flex flex-col gap-6">
-            {formFields}
-          </CardContent>
-        </Card>
-      </form>
-    );
-  }
-
   return (
     <form onSubmit={onSubmit}>
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_420px]">
-        <div className="flex flex-col gap-4">
-          <FieldPalette
-            signers={signers}
-            activeSigner={activeSigner}
-            onSignerChange={setActiveSigner}
-            activeType={activeType}
-            onTypeChange={setActiveType}
-            whiteoutActive={whiteoutActive}
-            onWhiteoutChange={setWhiteoutActive}
-          />
-          <PdfPreview
-            file={file}
-            onPagesRendered={onPagesRendered}
-            overlay={(pageIndex) => (
-              <FieldOverlay
-                pageIndex={pageIndex}
-                fields={placed}
-                tagFields={tagFields}
-                placing={
-                  activeType
-                    ? { signerIndex: activeSigner, type: activeType }
-                    : null
-                }
-                onPlace={(f) => setPlaced((prev) => [...prev, f])}
-                onChange={(f) =>
-                  setPlaced((prev) =>
-                    prev.map((x) => (x.id === f.id ? f : x)),
-                  )
-                }
-                onDelete={(id) =>
-                  setPlaced((prev) => prev.filter((x) => x.id !== id))
-                }
-                patches={patches}
-                drawingPatch={whiteoutActive}
-                onPatchAdd={(p) => setPatches((prev) => [...prev, p])}
-                onPatchChange={(p) =>
-                  setPatches((prev) =>
-                    prev.map((x) => (x.id === p.id ? p : x)),
-                  )
-                }
-                onPatchDelete={(id) =>
-                  setPatches((prev) => prev.filter((x) => x.id !== id))
-                }
-              />
-            )}
-          />
-        </div>
-        <Card className="lg:sticky lg:top-6 self-start">
+      <div
+        className={
+          file
+            ? "grid gap-6 lg:grid-cols-[minmax(0,1fr)_420px]"
+            : "flex flex-col gap-6"
+        }
+      >
+        {file ? (
+          <div key="preview" className="flex flex-col gap-4">
+            <FieldPalette
+              signers={signers}
+              activeSigner={activeSigner}
+              onSignerChange={setActiveSigner}
+              activeType={activeType}
+              onTypeChange={setActiveType}
+              whiteoutActive={whiteoutActive}
+              onWhiteoutChange={setWhiteoutActive}
+            />
+            <PdfPreview
+              file={file}
+              onPagesRendered={onPagesRendered}
+              overlay={(pageIndex) => (
+                <FieldOverlay
+                  pageIndex={pageIndex}
+                  fields={placed}
+                  tagFields={tagFields}
+                  placing={
+                    activeType
+                      ? { signerIndex: activeSigner, type: activeType }
+                      : null
+                  }
+                  onPlace={(f) => setPlaced((prev) => [...prev, f])}
+                  onChange={(f) =>
+                    setPlaced((prev) =>
+                      prev.map((x) => (x.id === f.id ? f : x)),
+                    )
+                  }
+                  onDelete={(id) =>
+                    setPlaced((prev) => prev.filter((x) => x.id !== id))
+                  }
+                  patches={patches}
+                  drawingPatch={whiteoutActive}
+                  onPatchAdd={(p) => setPatches((prev) => [...prev, p])}
+                  onPatchChange={(p) =>
+                    setPatches((prev) =>
+                      prev.map((x) => (x.id === p.id ? p : x)),
+                    )
+                  }
+                  onPatchDelete={(id) =>
+                    setPatches((prev) => prev.filter((x) => x.id !== id))
+                  }
+                />
+              )}
+            />
+          </div>
+        ) : null}
+        <Card
+          key="form"
+          className={file ? "lg:sticky lg:top-6 self-start" : undefined}
+        >
           <CardContent className="flex flex-col gap-6">
             {formFields}
           </CardContent>
