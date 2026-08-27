@@ -170,7 +170,9 @@ function PatchBoxView({
   }
 
   function commitOnEnter(e: React.KeyboardEvent) {
-    if (e.key === "Enter") commit();
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    commit();
   }
 
   return (
