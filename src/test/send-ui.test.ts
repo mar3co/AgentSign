@@ -1,7 +1,28 @@
 // @vitest-environment happy-dom
-import { createElement } from "react";
+import { createElement, useEffect, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+
+vi.mock("../../app/send/pdf-preview.js", () => ({
+  PdfPreview: ({
+    overlay,
+    onPagesRendered,
+  }: {
+    overlay?: (pageIndex: number) => ReactNode;
+    onPagesRendered?: (pageCount: number) => void;
+  }) => {
+    useEffect(() => {
+      onPagesRendered?.(1);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+    return createElement(
+      "div",
+      { "data-page": 1, style: { position: "relative" } },
+      overlay?.(0),
+    );
+  },
+}));
+
 import { SendClient } from "../../app/send/send-client.js";
 import { UploadDropzone } from "../../components/upload-dropzone.js";
 
@@ -9,6 +30,12 @@ function whoamiOk() {
   return new Response(JSON.stringify({ email: "shop@example.com" }), {
     status: 200,
     headers: { "content-type": "application/json" },
+  });
+}
+
+function pdfFile() {
+  return new File([new Uint8Array([0x25, 0x50, 0x44, 0x46])], "a.pdf", {
+    type: "application/pdf",
   });
 }
 
@@ -32,6 +59,48 @@ async function fillAndSubmit() {
     target: { value: "jane@example.com" },
   });
   submitForm();
+}
+
+async function selectPdf() {
+  await screen.findByLabelText(/sender email/i);
+  const input = document.querySelector(
+    "input[type=file]",
+  ) as HTMLInputElement;
+  Object.defineProperty(input, "files", { value: [pdfFile()] });
+  fireEvent.change(input);
+  await screen.findByRole("button", { name: "Signature" });
+}
+
+async function fillAndSubmitTwoSigners() {
+  fireEvent.change(screen.getByLabelText(/^title$/i), {
+    target: { value: "Repair authorization" },
+  });
+  fireEvent.change(screen.getByLabelText(/signer 1 name/i), {
+    target: { value: "Jane" },
+  });
+  fireEvent.change(screen.getByLabelText(/signer 1 email/i), {
+    target: { value: "jane@example.com" },
+  });
+  fireEvent.change(screen.getByLabelText(/signer 2 name/i), {
+    target: { value: "Bob" },
+  });
+  fireEvent.change(screen.getByLabelText(/signer 2 email/i), {
+    target: { value: "bob@example.com" },
+  });
+  submitForm();
+}
+
+function stubDocumentsFetch() {
+  const bodies: FormData[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).includes("whoami")) return whoamiOk();
+      bodies.push(init!.body as FormData);
+      return new Response(JSON.stringify({ id: "d1" }), { status: 201 });
+    }),
+  );
+  return bodies;
 }
 
 describe("SendClient", () => {
@@ -85,7 +154,7 @@ describe("SendClient", () => {
     expect(post).toBeTruthy();
     const body = post?.init?.body as FormData;
     expect(JSON.parse(String(body.get("signers")))).toEqual([
-      { name: "Jane", email: "jane@example.com" },
+      { name: "Jane", email: "jane@example.com", role: "Signer 1" },
     ]);
     expect(String(body.get("sender_email"))).toBe("shop@example.com");
     expect(screen.getByText(/shop@example\.com/)).toBeTruthy();
@@ -153,5 +222,63 @@ describe("SendClient", () => {
     Object.defineProperty(input, "files", { value: [file] });
     fireEvent.change(input);
     expect(seen).toEqual([file]);
+  });
+
+  it("posts order=parallel when All at once is chosen", async () => {
+    const bodies = stubDocumentsFetch();
+    render(createElement(SendClient));
+    await selectPdf();
+    fireEvent.click(screen.getByRole("button", { name: /add signer/i }));
+    fireEvent.click(screen.getByRole("radio", { name: /all at once/i }));
+    await fillAndSubmitTwoSigners();
+    expect(bodies[0]!.get("order")).toBe("parallel");
+  });
+
+  it("omits order and fields by default and includes roles on signers", async () => {
+    const bodies = stubDocumentsFetch();
+    render(createElement(SendClient));
+    await selectPdf();
+    fireEvent.click(screen.getByRole("button", { name: /add signer/i }));
+    await fillAndSubmitTwoSigners();
+    expect(bodies[0]!.get("order")).toBeNull();
+    expect(bodies[0]!.get("fields")).toBeNull();
+    const signers = JSON.parse(String(bodies[0]!.get("signers")));
+    expect(signers[0].role).toBe("Signer 1");
+    expect(signers[1].role).toBe("Signer 2");
+  });
+
+  it("sends the message field when filled", async () => {
+    const bodies = stubDocumentsFetch();
+    render(createElement(SendClient));
+    await screen.findByLabelText(/sender email/i);
+    fireEvent.change(
+      screen.getByLabelText(/message to signers/i),
+      { target: { value: "Please sign." } },
+    );
+    await fillAndSubmit();
+    expect(bodies[0]!.get("message")).toBe("Please sign.");
+  });
+
+  it("serializes placed fields into the fields param", async () => {
+    const bodies = stubDocumentsFetch();
+    render(createElement(SendClient));
+    await selectPdf();
+    fireEvent.click(screen.getByRole("button", { name: "Signature" }));
+    fireEvent.click(screen.getByTestId("field-layer"), {
+      clientX: 100,
+      clientY: 100,
+    });
+    await fillAndSubmit();
+    const fields = JSON.parse(String(bodies[0]!.get("fields")));
+    expect(fields).toHaveLength(1);
+    expect(fields[0].type).toBe("signature");
+    expect(fields[0].role).toBe("Signer 1");
+  });
+
+  it("shows a summary line on the confirm step", async () => {
+    stubDocumentsFetch();
+    render(createElement(SendClient));
+    await fillAndSubmit();
+    expect(await screen.findByText(/1 signer/i)).toBeTruthy();
   });
 });

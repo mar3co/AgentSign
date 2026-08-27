@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { Plus, X } from "lucide-react";
 import { LinkButton } from "@/components/link-button";
 import { LoadingList } from "@/components/loading-list";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -15,22 +14,53 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
-import { UploadDropzone } from "@/components/upload-dropzone";
-
-type SignerRow = { name: string; email: string };
+import { serializeFields, type PlacedField } from "@/app/send/field-model";
+import { SendForm, type Order, type SignerRow } from "@/app/send/send-form";
 
 type Done = {
   key: string;
   signers: { email: string; sign_url: string | null }[];
 };
 
+function summaryLine(s: {
+  title: string;
+  signerCount: number;
+  order: Order;
+  fieldCount: number;
+  hasMessage: boolean;
+  pageCount: number | null;
+}): string {
+  const parts: string[] = [s.title];
+  if (s.pageCount != null) {
+    parts.push(`${s.pageCount} page${s.pageCount === 1 ? "" : "s"}`);
+  }
+  parts.push(
+    s.signerCount === 1
+      ? "1 signer"
+      : `${s.signerCount} signers, ${
+          s.order === "parallel" ? "all at once" : "in order"
+        }`,
+  );
+  parts.push(
+    s.fieldCount > 0
+      ? `${s.fieldCount} field${s.fieldCount === 1 ? "" : "s"}`
+      : "no placed fields — signers review and sign",
+  );
+  if (s.hasMessage) parts.push("message included");
+  return parts.join(" · ");
+}
+
 export function SendClient() {
   const [senderEmail, setSenderEmail] = useState<string | null>(null);
   const [title, setTitle] = useState("");
+  const [file, setFile] = useState<File | null>(null);
   const [signers, setSigners] = useState<SignerRow[]>([
     { name: "", email: "" },
   ]);
+  const [placed, setPlaced] = useState<PlacedField[]>([]);
+  const [order, setOrder] = useState<Order>("sequential");
+  const [message, setMessage] = useState("");
+  const [pageCount, setPageCount] = useState<number | null>(null);
   const [documentId, setDocumentId] = useState<string | null>(null);
   const [done, setDone] = useState<Done | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -58,12 +88,6 @@ export function SendClient() {
     };
   }, []);
 
-  function setSigner(i: number, patch: Partial<SignerRow>) {
-    setSigners((prev) =>
-      prev.map((row, j) => (j === i ? { ...row, ...patch } : row)),
-    );
-  }
-
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
@@ -74,9 +98,17 @@ export function SendClient() {
     data.set(
       "signers",
       JSON.stringify(
-        signers.map((s) => ({ name: s.name.trim(), email: s.email.trim() })),
+        signers.map((s, i) => ({
+          name: s.name.trim(),
+          email: s.email.trim(),
+          role: `Signer ${i + 1}`,
+        })),
       ),
     );
+    if (placed.length > 0) {
+      data.set("fields", JSON.stringify(serializeFields(placed)));
+    }
+    if (order === "parallel") data.set("order", "parallel");
     try {
       const res = await fetch("/v1/documents", {
         method: "POST",
@@ -184,6 +216,14 @@ export function SendClient() {
   }
 
   if (documentId) {
+    const summary = summaryLine({
+      title,
+      signerCount: signers.length,
+      order,
+      fieldCount: placed.length,
+      hasMessage: message.trim().length > 0,
+      pageCount,
+    });
     return (
       <Card>
         <CardHeader>
@@ -195,6 +235,7 @@ export function SendClient() {
         </CardHeader>
         <CardContent>
           <form className="flex flex-col gap-4" onSubmit={onConfirm}>
+            <p className="text-xs text-muted-foreground">{summary}</p>
             <div className="flex max-w-xs flex-col gap-2">
               <Label htmlFor="code">Verification code</Label>
               <Input
@@ -222,127 +263,25 @@ export function SendClient() {
   }
 
   return (
-    <Card>
-      <CardContent>
-        <form className="flex flex-col gap-6" onSubmit={onSubmit}>
-          <UploadDropzone
-            id="file"
-            name="file"
-            accept="application/pdf,.pdf"
-            required
-            prompt="Drag & Drop or Choose a PDF to upload"
-            hint="Your signer gets an email link in seconds."
-          />
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="title">Title</Label>
-              <Input
-                id="title"
-                name="title"
-                required
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Repair authorization"
-              />
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="sender_email">Sender email</Label>
-              <Input
-                id="sender_email"
-                name="sender_email"
-                type="email"
-                required
-                autoComplete="email"
-                value={senderEmail}
-                onChange={(e) => setSenderEmail(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <Separator />
-
-          <div className="flex flex-col gap-1">
-            <h3 className="text-sm font-semibold">Signers</h3>
-            <p className="text-xs text-muted-foreground">
-              They sign in the order listed.
-            </p>
-          </div>
-
-          {signers.map((row, i) => (
-            <div
-              key={i}
-              className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
-            >
-              <div className="flex flex-col gap-2">
-                <Label htmlFor={`signer-name-${i}`}>
-                  {signers.length > 1 ? `Signer ${i + 1} name` : "Signer name"}
-                </Label>
-                <Input
-                  id={`signer-name-${i}`}
-                  name="signer_name"
-                  required
-                  value={row.name}
-                  onChange={(e) => setSigner(i, { name: e.target.value })}
-                  placeholder="Jane"
-                />
-              </div>
-              <div className="flex flex-col gap-2">
-                <Label htmlFor={`signer-email-${i}`}>
-                  {signers.length > 1
-                    ? `Signer ${i + 1} email`
-                    : "Signer email"}
-                </Label>
-                <Input
-                  id={`signer-email-${i}`}
-                  name="signer_email"
-                  type="email"
-                  required
-                  autoComplete="off"
-                  value={row.email}
-                  onChange={(e) => setSigner(i, { email: e.target.value })}
-                  placeholder="jane@example.com"
-                />
-              </div>
-              {signers.length > 1 ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  aria-label={`Remove signer ${i + 1}`}
-                  onClick={() =>
-                    setSigners((prev) => prev.filter((_, j) => j !== i))
-                  }
-                >
-                  <X />
-                </Button>
-              ) : null}
-            </div>
-          ))}
-
-          <Button
-            type="button"
-            variant="outline"
-            className="self-start"
-            onClick={() =>
-              setSigners((prev) => [...prev, { name: "", email: "" }])
-            }
-          >
-            <Plus />
-            Add signer
-          </Button>
-
-          {error ? (
-            <Alert variant="destructive">
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          ) : null}
-
-          <Button className="self-start px-8" type="submit" disabled={busy}>
-            Send
-          </Button>
-        </form>
-      </CardContent>
-    </Card>
+    <SendForm
+      senderEmail={senderEmail}
+      setSenderEmail={setSenderEmail}
+      title={title}
+      setTitle={setTitle}
+      file={file}
+      setFile={setFile}
+      signers={signers}
+      setSigners={setSigners}
+      placed={placed}
+      setPlaced={setPlaced}
+      order={order}
+      setOrder={setOrder}
+      message={message}
+      setMessage={setMessage}
+      setPageCount={setPageCount}
+      error={error}
+      busy={busy}
+      onSubmit={onSubmit}
+    />
   );
 }
