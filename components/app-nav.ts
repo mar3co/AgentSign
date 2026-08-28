@@ -28,7 +28,7 @@ export const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
       {
         href: "/send",
         label: "Send",
-        subtitle: "Send a PDF for signature.",
+        subtitle: "Send a document for signature.",
         icon: Send,
       },
       {

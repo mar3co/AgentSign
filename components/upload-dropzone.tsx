@@ -13,6 +13,8 @@ function formatBytes(bytes: number): string {
   return `${value < 10 && i > 0 ? value.toFixed(1) : Math.round(value)} ${units[i]}`;
 }
 
+const TEXT_FILE_RE = /\.(md|markdown|txt)$/i;
+
 /* Dropzone styled after shadcn studio's file-upload-02 block, but backed by a
    real form input so plain FormData submits keep working. Single file. */
 export function UploadDropzone({
@@ -25,6 +27,7 @@ export function UploadDropzone({
   className,
   collapseWhenFilled = false,
   onFileChange,
+  onTextFile,
 }: {
   id: string;
   name: string;
@@ -36,6 +39,9 @@ export function UploadDropzone({
   /** Hide the drop target once a file is chosen, leaving only the file row. */
   collapseWhenFilled?: boolean;
   onFileChange?: (file: File | null) => void;
+  /** When set, .md/.txt files are read client-side and handed here
+      instead of staying in the file input. */
+  onTextFile?: (file: { name: string; text: string }) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<{ name: string; size: number } | null>(null);
@@ -43,6 +49,14 @@ export function UploadDropzone({
 
   const readInput = () => {
     const f = inputRef.current?.files?.[0] ?? null;
+    if (f && onTextFile && (TEXT_FILE_RE.test(f.name) || f.type.startsWith("text/"))) {
+      void f.text().then((text) => {
+        if (inputRef.current) inputRef.current.value = "";
+        setFile(null);
+        onTextFile({ name: f.name, text });
+      });
+      return;
+    }
     setFile(f ? { name: f.name, size: f.size } : null);
     onFileChange?.(f);
   };

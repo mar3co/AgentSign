@@ -72,7 +72,7 @@ describe("DocumentsList", () => {
     );
     expect(screen.getByRole("button", { name: /void/i })).toBeTruthy();
     expect(document.querySelector('input[type="file"]')).toBeNull();
-    expect(screen.queryByRole("heading", { name: /send a pdf/i })).toBeNull();
+    expect(screen.queryByRole("heading", { name: /send a document/i })).toBeNull();
     expect(screen.queryByLabelText(/email me a link/i)).toBeNull();
   });
 
@@ -113,7 +113,7 @@ describe("DocumentsList", () => {
   it("shows empty state copy when there are no documents", () => {
     render(createElement(DocumentsList, { documents: [] }));
     expect(screen.getByText(/no documents yet/i)).toBeTruthy();
-    expect(screen.getByRole("link", { name: /send a pdf/i }).getAttribute("href")).toBe(
+    expect(screen.getByRole("link", { name: /send a document/i }).getAttribute("href")).toBe(
       "/send",
     );
     expect(document.querySelector('input[type="file"]')).toBeNull();

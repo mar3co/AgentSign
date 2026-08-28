@@ -523,4 +523,54 @@ describe("SendClient", () => {
         .getAttribute("aria-expanded"),
     ).toBe("true");
   });
+
+  it("toggles between the dropzone and the write view", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => whoamiOk()));
+    render(createElement(SendClient));
+    await railReady();
+    fireEvent.click(
+      screen.getByRole("button", { name: /write the document instead/i }),
+    );
+    expect(screen.getByLabelText(/document text/i)).toBeTruthy();
+    expect(document.querySelector("input[type=file]")).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: /upload a file instead/i }),
+    );
+    expect(document.querySelector("input[type=file]")).toBeTruthy();
+  });
+
+  it("posts written text as the markdown field, without a file", async () => {
+    const bodies = stubDocumentsFetch();
+    render(createElement(SendClient));
+    await railReady();
+    fireEvent.click(
+      screen.getByRole("button", { name: /write the document instead/i }),
+    );
+    fireEvent.change(screen.getByLabelText(/document text/i), {
+      target: { value: "# Deal\n\n{{sig}}" },
+    });
+    await fillAndSubmit();
+    await screen.findByText(/confirm to send/i);
+    const body = bodies[0]!;
+    expect(String(body.get("markdown"))).toBe("# Deal\n\n{{sig}}");
+    expect(body.get("file")).toBeNull();
+  });
+
+  it("loads a chosen .md file into the write view", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => whoamiOk()));
+    render(createElement(SendClient));
+    await railReady();
+    const input = document.querySelector(
+      "input[type=file]",
+    ) as HTMLInputElement;
+    const md = new File(["# NDA\n\n{{sig}}"], "nda.md", {
+      type: "text/markdown",
+    });
+    Object.defineProperty(input, "files", { value: [md], configurable: true });
+    fireEvent.change(input);
+    const textarea = (await screen.findByLabelText(
+      /document text/i,
+    )) as HTMLTextAreaElement;
+    expect(textarea.value).toBe("# NDA\n\n{{sig}}");
+  });
 });

@@ -75,14 +75,14 @@ describe("AppShell", () => {
     expect(mark?.querySelector("rect[fill='var(--brand-wax)']")).toBeNull();
   });
 
-  it("has no color band; Send a PDF is the wax CTA on a quiet canvas", () => {
+  it("has no color band; Send a document is the wax CTA on a quiet canvas", () => {
     const { container } = render(createElement(AppShell, null, "content"));
     expect(container.querySelector(".app-band")).toBeNull();
     expect(container.querySelector("header")?.className).not.toContain(
       "text-primary-foreground",
     );
     expect(
-      screen.getByRole("link", { name: /send a pdf/i }).className,
+      screen.getByRole("link", { name: /send a document/i }).className,
     ).toContain("bg-brand-wax");
   });
 });

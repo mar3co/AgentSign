@@ -220,7 +220,7 @@ export function DashboardClient() {
           <CardContent className="flex flex-col gap-4">
             {byStatus.length === 0 ? (
               <p className="text-muted-foreground text-sm">
-                Send a PDF to see the breakdown.
+                Send a document to see the breakdown.
               </p>
             ) : (
               byStatus.map(([status, count]) => (

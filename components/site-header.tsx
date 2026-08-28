@@ -69,7 +69,7 @@ export function SiteHeader({
           className="text-sm text-muted-foreground underline-offset-4 hover:underline"
           href="/"
         >
-          Send a PDF
+          Send a document
         </a>
       ) : null}
     </header>
