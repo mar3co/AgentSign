@@ -1,13 +1,76 @@
 // @vitest-environment happy-dom
-import { createElement } from "react";
+import { createElement, useEffect, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+
+const { applyPatchesMock, previewControls } = vi.hoisted(() => ({
+  applyPatchesMock: vi.fn(async () => new Uint8Array([9, 9, 9])),
+  previewControls: {
+    auto: true,
+    onPagesRendered: undefined as ((n: number) => void) | undefined,
+    onRenderFailed: undefined as (() => void) | undefined,
+  },
+}));
+
+vi.mock("../../app/send/patch-model.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../app/send/patch-model.js")>();
+  return { ...actual, applyPatches: applyPatchesMock };
+});
+
+vi.mock("../../app/send/pdf-preview.js", () => ({
+  PdfPreview: ({
+    overlay,
+    onPagesRendered,
+    onRenderFailed,
+  }: {
+    overlay?: (pageIndex: number) => ReactNode;
+    onPagesRendered?: (pageCount: number) => void;
+    onRenderFailed?: () => void;
+  }) => {
+    useEffect(() => {
+      previewControls.onPagesRendered = onPagesRendered;
+      previewControls.onRenderFailed = onRenderFailed;
+      if (previewControls.auto) onPagesRendered?.(1);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+    return createElement(
+      "div",
+      { "data-page": 1, style: { position: "relative" } },
+      overlay?.(0),
+    );
+  },
+}));
+
+vi.mock("../../src/lib/pdf/tags.js", () => ({
+  parsePdfTags: async () => ({
+    fields: [
+      {
+        name: "sig",
+        type: "signature",
+        role: "Signer 1",
+        required: true,
+        readonly: false,
+        areas: [{ page: 1, x: 10, y: 80, w: 20, h: 5 }],
+      },
+    ],
+    pdf: new Uint8Array(),
+  }),
+}));
+
 import { SendClient } from "../../app/send/send-client.js";
+import { UploadDropzone } from "../../components/upload-dropzone.js";
 
 function whoamiOk() {
   return new Response(JSON.stringify({ email: "shop@example.com" }), {
     status: 200,
     headers: { "content-type": "application/json" },
+  });
+}
+
+function pdfFile() {
+  return new File([new Uint8Array([0x25, 0x50, 0x44, 0x46])], "a.pdf", {
+    type: "application/pdf",
   });
 }
 
@@ -33,10 +96,56 @@ async function fillAndSubmit() {
   submitForm();
 }
 
+async function selectPdf() {
+  await screen.findByLabelText(/sender email/i);
+  const input = document.querySelector(
+    "input[type=file]",
+  ) as HTMLInputElement;
+  Object.defineProperty(input, "files", {
+    value: [pdfFile()],
+    configurable: true,
+  });
+  fireEvent.change(input);
+  await screen.findByRole("button", { name: "Signature" });
+}
+
+async function fillAndSubmitTwoSigners() {
+  fireEvent.change(screen.getByLabelText(/^title$/i), {
+    target: { value: "Repair authorization" },
+  });
+  fireEvent.change(screen.getByLabelText(/signer 1 name/i), {
+    target: { value: "Jane" },
+  });
+  fireEvent.change(screen.getByLabelText(/signer 1 email/i), {
+    target: { value: "jane@example.com" },
+  });
+  fireEvent.change(screen.getByLabelText(/signer 2 name/i), {
+    target: { value: "Bob" },
+  });
+  fireEvent.change(screen.getByLabelText(/signer 2 email/i), {
+    target: { value: "bob@example.com" },
+  });
+  submitForm();
+}
+
+function stubDocumentsFetch() {
+  const bodies: FormData[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).includes("whoami")) return whoamiOk();
+      bodies.push(init!.body as FormData);
+      return new Response(JSON.stringify({ id: "d1" }), { status: 201 });
+    }),
+  );
+  return bodies;
+}
+
 describe("SendClient", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    previewControls.auto = true;
   });
 
   it("prefills sender email from whoami and starts with one signer", async () => {
@@ -84,7 +193,7 @@ describe("SendClient", () => {
     expect(post).toBeTruthy();
     const body = post?.init?.body as FormData;
     expect(JSON.parse(String(body.get("signers")))).toEqual([
-      { name: "Jane", email: "jane@example.com" },
+      { name: "Jane", email: "jane@example.com", role: "Signer 1" },
     ]);
     expect(String(body.get("sender_email"))).toBe("shop@example.com");
     expect(screen.getByText(/shop@example\.com/)).toBeTruthy();
@@ -133,5 +242,191 @@ describe("SendClient", () => {
     expect(
       screen.getByRole("link", { name: /open documents/i }).getAttribute("href"),
     ).toBe("/documents");
+  });
+
+  it("notifies when a file is chosen", async () => {
+    const seen: (File | null)[] = [];
+    render(
+      createElement(UploadDropzone, {
+        id: "f",
+        name: "f",
+        accept: "application/pdf",
+        onFileChange: (f: File | null) => seen.push(f),
+      }),
+    );
+    const input = document.querySelector("input[type=file]") as HTMLInputElement;
+    const file = new File([new Uint8Array([0x25, 0x50, 0x44, 0x46])], "a.pdf", {
+      type: "application/pdf",
+    });
+    Object.defineProperty(input, "files", { value: [file] });
+    fireEvent.change(input);
+    expect(seen).toEqual([file]);
+  });
+
+  it("posts order=parallel when All at once is chosen", async () => {
+    const bodies = stubDocumentsFetch();
+    render(createElement(SendClient));
+    await selectPdf();
+    fireEvent.click(screen.getByRole("button", { name: /add signer/i }));
+    fireEvent.click(screen.getByRole("radio", { name: /all at once/i }));
+    await fillAndSubmitTwoSigners();
+    expect(bodies[0]!.get("order")).toBe("parallel");
+  });
+
+  it("omits order and fields by default and includes roles on signers", async () => {
+    const bodies = stubDocumentsFetch();
+    render(createElement(SendClient));
+    await selectPdf();
+    fireEvent.click(screen.getByRole("button", { name: /add signer/i }));
+    await fillAndSubmitTwoSigners();
+    expect(bodies[0]!.get("order")).toBeNull();
+    expect(bodies[0]!.get("fields")).toBeNull();
+    const signers = JSON.parse(String(bodies[0]!.get("signers")));
+    expect(signers[0].role).toBe("Signer 1");
+    expect(signers[1].role).toBe("Signer 2");
+  });
+
+  it("sends the message field when filled", async () => {
+    const bodies = stubDocumentsFetch();
+    render(createElement(SendClient));
+    await screen.findByLabelText(/sender email/i);
+    fireEvent.change(
+      screen.getByLabelText(/message to signers/i),
+      { target: { value: "Please sign." } },
+    );
+    await fillAndSubmit();
+    expect(bodies[0]!.get("message")).toBe("Please sign.");
+  });
+
+  it("serializes placed fields into the fields param", async () => {
+    const bodies = stubDocumentsFetch();
+    render(createElement(SendClient));
+    await selectPdf();
+    fireEvent.click(screen.getByRole("button", { name: "Signature" }));
+    fireEvent.click(screen.getByTestId("field-layer"), {
+      clientX: 100,
+      clientY: 100,
+    });
+    await fillAndSubmit();
+    const fields = JSON.parse(String(bodies[0]!.get("fields")));
+    expect(fields).toHaveLength(1);
+    expect(fields[0].type).toBe("signature");
+    expect(fields[0].role).toBe("Signer 1");
+  });
+
+  it("shows a summary line on the confirm step", async () => {
+    stubDocumentsFetch();
+    render(createElement(SendClient));
+    await fillAndSubmit();
+    expect(await screen.findByText(/1 signer/i)).toBeTruthy();
+  });
+
+  it("overlays tag-detected fields read-only after choosing a file", async () => {
+    stubDocumentsFetch();
+    render(createElement(SendClient));
+    await selectPdf();
+    expect(await screen.findByText(/from tags/i)).toBeTruthy();
+    // read-only: no delete button on tag boxes
+    expect(screen.queryByRole("button", { name: /delete field/i })).toBeNull();
+  });
+
+  it("keeps signers and placed fields when the file is replaced", async () => {
+    stubDocumentsFetch();
+    render(createElement(SendClient));
+    await selectPdf();
+    fireEvent.change(screen.getByLabelText(/^signer name$/i), {
+      target: { value: "Jane" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Signature" }));
+    fireEvent.click(screen.getByTestId("field-layer"), {
+      clientX: 100,
+      clientY: 100,
+    });
+    expect(screen.getByRole("button", { name: /delete field/i })).toBeTruthy();
+
+    const input = document.querySelector(
+      "input[type=file]",
+    ) as HTMLInputElement;
+    Object.defineProperty(input, "files", { value: [pdfFile()] });
+    fireEvent.change(input);
+
+    expect(
+      (screen.getByLabelText(/^signer name$/i) as HTMLInputElement).value,
+    ).toBe("Jane");
+    expect(screen.getByRole("button", { name: /delete field/i })).toBeTruthy();
+  });
+
+  it("burns patches into the uploaded file on submit", async () => {
+    applyPatchesMock.mockClear();
+    const bodies = stubDocumentsFetch();
+    render(createElement(SendClient));
+    await selectPdf();
+    fireEvent.click(screen.getByRole("button", { name: /whiteout/i }));
+    const layer = screen.getByTestId("field-layer");
+    fireEvent.pointerDown(layer, { clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(layer, { clientX: 250, clientY: 150 });
+    fireEvent.pointerUp(layer, { clientX: 250, clientY: 150 });
+    expect(screen.getByRole("button", { name: /delete patch/i })).toBeTruthy();
+
+    await fillAndSubmit();
+    await screen.findByText(/confirm to send/i);
+    expect(applyPatchesMock).toHaveBeenCalledTimes(1);
+    const blob = bodies[0]!.get("file") as Blob;
+    expect(blob.size).toBe(3);
+  });
+
+  it("does not touch the file when there are no patches", async () => {
+    applyPatchesMock.mockClear();
+    stubDocumentsFetch();
+    render(createElement(SendClient));
+    await fillAndSubmit();
+    await screen.findByText(/confirm to send/i);
+    expect(applyPatchesMock).not.toHaveBeenCalled();
+  });
+
+  it("disables Send until the preview settles", async () => {
+    previewControls.auto = false;
+    stubDocumentsFetch();
+    render(createElement(SendClient));
+    await selectPdf();
+    const send = screen.getByRole("button", {
+      name: /^send$/i,
+    }) as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+    act(() => previewControls.onPagesRendered?.(1));
+    expect(send.disabled).toBe(false);
+  });
+
+  it("clears corrections with a notice when the preview fails", async () => {
+    previewControls.auto = false;
+    stubDocumentsFetch();
+    render(createElement(SendClient));
+    await selectPdf();
+    fireEvent.click(screen.getByRole("button", { name: /whiteout/i }));
+    const layer = screen.getByTestId("field-layer");
+    fireEvent.pointerDown(layer, { clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(layer, { clientX: 250, clientY: 150 });
+    fireEvent.pointerUp(layer, { clientX: 250, clientY: 150 });
+    expect(screen.getByRole("button", { name: /delete patch/i })).toBeTruthy();
+    act(() => previewControls.onRenderFailed?.());
+    expect(screen.queryByRole("button", { name: /delete patch/i })).toBeNull();
+    expect(screen.getByText(/preview could not be rendered/i)).toBeTruthy();
+    expect(
+      (screen.getByRole("button", { name: /^send$/i }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+  });
+
+  it("keeps the same file input mounted across the remount into the preview layout", async () => {
+    stubDocumentsFetch();
+    render(createElement(SendClient));
+    await screen.findByLabelText(/sender email/i);
+    const inputBefore = document.querySelector("input[type=file]");
+    Object.defineProperty(inputBefore as HTMLInputElement, "files", {
+      value: [pdfFile()],
+    });
+    fireEvent.change(inputBefore as HTMLInputElement);
+    await screen.findByRole("button", { name: /whiteout/i });
+    expect(document.querySelector("input[type=file]")).toBe(inputBefore);
   });
 });

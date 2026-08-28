@@ -1,6 +1,7 @@
 import {
   PDFDocument,
   StandardFonts,
+  degrees,
   rgb,
   clip,
   endPath,
@@ -8,10 +9,13 @@ import {
   popGraphicsState,
   rectangle,
 } from "pdf-lib";
+import { type DocumentField } from "./fields.js";
 import {
-  areaToPdfRect,
-  type DocumentField,
-} from "./fields.js";
+  areaToDisplayRect,
+  displayPointToPage,
+  displayRectToPage,
+  pageSpaceOf,
+} from "./pageSpace.js";
 
 export type BurnParty = {
   role: string;
@@ -52,26 +56,36 @@ export async function burnFields(
     for (const area of field.areas) {
       const page = pages[area.page - 1];
       if (!page) continue;
-      const { width: pageWidth, height: pageHeight } = page.getSize();
-      const rect = areaToPdfRect(pageWidth, pageHeight, area);
+      const space = pageSpaceOf(page);
+      // Sizes and anchors are computed in display space (how the sender and
+      // signer saw the page), then mapped into raw user space to draw.
+      const display = areaToDisplayRect(space, area);
+      if (display.w <= 0 || display.h <= 0) continue;
+      const rect = displayRectToPage(space, display);
       const { x, y, w, h } = rect;
-      if (w <= 0 || h <= 0) continue;
+      const rotate = degrees(space.rotation);
 
       if (field.type === "signature" || field.type === "initials") {
         const png = party.pngs[field.name];
         if (!png || png.byteLength === 0) continue;
         const image = await doc.embedPng(png);
         const scale = Math.min(
-          w / (image.width || 1),
-          h / (image.height || 1),
+          display.w / (image.width || 1),
+          display.h / (image.height || 1),
         );
         const drawW = image.width * scale;
         const drawH = image.height * scale;
+        const anchor = displayPointToPage(
+          space,
+          display.x + (display.w - drawW) / 2,
+          display.y + (display.h - drawH) / 2,
+        );
         page.drawImage(image, {
-          x: x + (w - drawW) / 2,
-          y: y + (h - drawH) / 2,
+          x: anchor.x,
+          y: anchor.y,
           width: drawW,
           height: drawH,
+          rotate,
         });
         continue;
       }
@@ -100,9 +114,16 @@ export async function burnFields(
       if (raw === undefined || raw === null) continue;
       const text = String(raw);
       if (!text) continue;
-      const size = Math.min(h * 0.6, 12);
+      const size = Math.min(display.h * 0.6, 12);
       const textHeight = font.heightAtSize(size);
-      const textY = y + (h - textHeight) / 2;
+      // drawText's y is the baseline, so lift it by the descent to center
+      // the glyph box, not the baseline, in the field.
+      const descent = textHeight - font.heightAtSize(size, { descender: false });
+      const anchor = displayPointToPage(
+        space,
+        display.x,
+        display.y + (display.h - textHeight) / 2 + descent,
+      );
       page.pushOperators(
         pushGraphicsState(),
         rectangle(x, y, w, h),
@@ -110,10 +131,11 @@ export async function burnFields(
         endPath(),
       );
       page.drawText(text, {
-        x,
-        y: textY,
+        x: anchor.x,
+        y: anchor.y,
         size,
         font,
+        rotate,
         color: rgb(0, 0, 0),
       });
       page.pushOperators(popGraphicsState());

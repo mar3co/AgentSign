@@ -7,12 +7,12 @@ import {
   rgb,
 } from "pdf-lib";
 import {
-  areaToPdfRect,
   type DocumentField,
   type FieldArea,
   type FieldType,
   fieldTypes,
 } from "./fields.js";
+import { areaToPageRect, pageSpaceOf } from "./pageSpace.js";
 
 export type ParseTagsResult = { fields: DocumentField[]; pdf: Uint8Array };
 
@@ -187,10 +187,15 @@ function groupRuns(items: LocatedItem[]): LocatedItem[][] {
   return runs;
 }
 
+type TagViewport = {
+  width: number;
+  height: number;
+  convertToViewportPoint(x: number, y: number): number[];
+};
+
 function unionBox(
   items: LocatedItem[],
-  pageWidth: number,
-  pageHeight: number,
+  viewport: TagViewport,
   page: number,
 ): FieldArea {
   let minX = Infinity;
@@ -204,14 +209,27 @@ function unionBox(
     minY = Math.min(minY, it.y);
     maxY = Math.max(maxY, it.y + it.h);
   }
-  const wPts = Math.max(maxX - minX, 1);
-  const hPts = Math.max(maxY - minY, 1);
+  // Text coordinates are unrotated user space; areas are percent of the
+  // displayed page, so map the box through the page's default viewport
+  // (which honors /Rotate and the CropBox).
+  const corners = [
+    viewport.convertToViewportPoint(minX, minY),
+    viewport.convertToViewportPoint(minX, maxY),
+    viewport.convertToViewportPoint(maxX, minY),
+    viewport.convertToViewportPoint(maxX, maxY),
+  ];
+  const xs = corners.map((c) => c[0]!);
+  const ys = corners.map((c) => c[1]!);
+  const left = Math.min(...xs);
+  const top = Math.min(...ys);
+  const wPts = Math.max(Math.max(...xs) - left, 1);
+  const hPts = Math.max(Math.max(...ys) - top, 1);
   return {
     page,
-    x: (minX / pageWidth) * 100,
-    y: ((pageHeight - maxY) / pageHeight) * 100,
-    w: (wPts / pageWidth) * 100,
-    h: (hPts / pageHeight) * 100,
+    x: (left / viewport.width) * 100,
+    y: (top / viewport.height) * 100,
+    w: (wPts / viewport.width) * 100,
+    h: (hPts / viewport.height) * 100,
   };
 }
 
@@ -300,8 +318,7 @@ function parseBody(body: string): Omit<DocumentField, "areas"> {
 
 function findTagsOnPage(
   items: LocatedItem[],
-  pageWidth: number,
-  pageHeight: number,
+  viewport: TagViewport,
   page: number,
 ): TagMatch[] {
   const matches: TagMatch[] = [];
@@ -332,7 +349,7 @@ function findTagsOnPage(
       matches.push({
         tag,
         body: tag.slice(2, -2),
-        area: unionBox(unique, pageWidth, pageHeight, page),
+        area: unionBox(unique, viewport, page),
       });
     }
   }
@@ -391,15 +408,13 @@ export async function parsePdfTags(bytes: Uint8Array): Promise<ParseTagsResult> 
   for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
     const page = await pdf.getPage(pageNum);
     const viewport = page.getViewport({ scale: 1 });
-    const pageWidth = viewport.width;
-    const pageHeight = viewport.height;
     const content = await page.getTextContent();
     const located: LocatedItem[] = [];
     for (const raw of content.items) {
       if (!("str" in raw) || typeof raw.str !== "string") continue;
       located.push(itemBox(raw as TextItem));
     }
-    const tags = findTagsOnPage(located, pageWidth, pageHeight, pageNum);
+    const tags = findTagsOnPage(located, viewport, pageNum);
     const pageTags: string[] = [];
     for (const tag of tags) {
       const parsed = parseBody(tag.body);
@@ -426,7 +441,6 @@ export async function parsePdfTags(bytes: Uint8Array): Promise<ParseTagsResult> 
   for (const area of whiteoutAreas) {
     const page = pages[area.page - 1];
     if (!page) continue;
-    const { width, height } = page.getSize();
     // Pad slightly so descenders/ascenders are covered visually.
     const padded = {
       ...area,
@@ -435,7 +449,7 @@ export async function parsePdfTags(bytes: Uint8Array): Promise<ParseTagsResult> 
       w: Math.min(100 - Math.max(0, area.x - 0.3), area.w + 0.6),
       h: Math.min(100 - Math.max(0, area.y - 0.3), area.h + 0.6),
     };
-    const rect = areaToPdfRect(width, height, padded);
+    const rect = areaToPageRect(pageSpaceOf(page), padded);
     page.drawRectangle({
       x: rect.x,
       y: rect.y,

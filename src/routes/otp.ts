@@ -158,6 +158,7 @@ export async function verifyDocumentOtp(
       sendEmail: document.sendEmail,
       signingMode:
         document.signingMode === "parallel" ? "parallel" : "sequential",
+      message: document.message,
     },
     at,
   );

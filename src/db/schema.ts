@@ -72,6 +72,7 @@ export const documents = pgTable("documents", {
   status: text("status", { enum: documentStatus }).notNull(),
   title: text("title").notNull(),
   senderEmail: text("sender_email").notNull(),
+  message: text("message"),
   expiresAt: timestamptz("expires_at").notNull(),
   shredAt: timestamptz("shred_at").notNull(),
   webhookUrl: text("webhook_url"),

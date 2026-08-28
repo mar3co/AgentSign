@@ -95,6 +95,10 @@ export function defaultRoleName(signingOrder: number): string {
   return `Signer ${signingOrder}`;
 }
 
+export function defaultRequired(type: FieldType): boolean {
+  return requiredByType[type];
+}
+
 export function mergeFields(
   a: DocumentField[],
   b: DocumentField[],

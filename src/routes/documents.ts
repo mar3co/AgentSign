@@ -97,6 +97,7 @@ type DocumentExtras = {
   completedRedirectUrl: string | null;
   embedOrigin: string | null;
   docValues: FieldValues;
+  message: string | null;
 };
 
 async function resolveSignerParties(
@@ -256,6 +257,33 @@ function parseSendEmail(
   };
 }
 
+const MESSAGE_MAX = 1000;
+
+function parseMessage(
+  raw: unknown,
+): { ok: true; value: string | null } | { ok: false; response: Response } {
+  if (raw == null || raw === "") return { ok: true, value: null };
+  if (typeof raw !== "string") {
+    return {
+      ok: false,
+      response: jsonError(400, "Invalid message", "invalid_request"),
+    };
+  }
+  const trimmed = raw.trim();
+  if (!trimmed) return { ok: true, value: null };
+  if (trimmed.length > MESSAGE_MAX) {
+    return {
+      ok: false,
+      response: jsonError(
+        400,
+        `message is too long (max ${MESSAGE_MAX} characters)`,
+        "invalid_request",
+      ),
+    };
+  }
+  return { ok: true, value: trimmed };
+}
+
 function parseSigningMode(
   raw: unknown,
 ):
@@ -411,6 +439,7 @@ export async function parseDocumentExtras(input: {
   sendEmail?: unknown;
   completedRedirectUrl?: unknown;
   embedOrigin?: unknown;
+  message?: unknown;
 }): Promise<{ ok: true; extras: Omit<DocumentExtras, "fields"> } | { ok: false; response: Response }> {
   const values = parseValuesObject(input.valuesRaw);
   if (!values.ok) return values;
@@ -422,6 +451,8 @@ export async function parseDocumentExtras(input: {
   if (!redirect.ok) return redirect;
   const origin = parseOriginField(input.embedOrigin);
   if (!origin.ok) return origin;
+  const message = parseMessage(input.message);
+  if (!message.ok) return message;
   return {
     ok: true,
     extras: {
@@ -430,6 +461,7 @@ export async function parseDocumentExtras(input: {
       completedRedirectUrl: redirect.url,
       embedOrigin: origin.origin,
       docValues: values.values,
+      message: message.value,
     },
   };
 }
@@ -579,6 +611,7 @@ export async function inviteFirstSigner(
     userId: string | null;
     sendEmail?: boolean;
     signingMode?: "sequential" | "parallel";
+    message?: string | null;
   },
   at: Date,
 ): Promise<{ signers: InviteSigner[] }> {
@@ -629,6 +662,7 @@ export async function inviteFirstSigner(
             senderEmail: document.senderEmail,
             title: document.title,
             expiresAt: document.expiresAt,
+            message: document.message,
             brand: {
               displayName: brand!.displayName,
               hasLogo: Boolean(brand!.logoBytes),
@@ -693,6 +727,7 @@ export async function inviteFirstSigner(
         senderEmail: document.senderEmail,
         title: document.title,
         expiresAt: document.expiresAt,
+        message: document.message,
         brand: {
           displayName: brand.displayName,
           hasLogo: Boolean(brand.logoBytes),
@@ -739,6 +774,7 @@ export async function sendPreparedPdf(opts: {
   sendEmail?: boolean;
   completedRedirectUrl?: string | null;
   embedOrigin?: string | null;
+  message?: string | null;
 }): Promise<Response> {
   const db = requireDb();
   const store = requireStore();
@@ -826,6 +862,7 @@ export async function sendPreparedPdf(opts: {
       sendEmail: opts.sendEmail ?? true,
       completedRedirectUrl: opts.completedRedirectUrl ?? null,
       embedOrigin: opts.embedOrigin ?? null,
+      message: opts.message ?? null,
       createdAt: at,
     })
     .returning();
@@ -906,6 +943,7 @@ export async function createDocument(req: Request): Promise<Response> {
     sendEmail: form.get("send_email"),
     completedRedirectUrl: form.get("completed_redirect_url"),
     embedOrigin: form.get("embed_origin"),
+    message: form.get("message"),
   });
   if (!extras.ok) return extras.response;
 
@@ -977,6 +1015,7 @@ export async function createDocument(req: Request): Promise<Response> {
       sendEmail: extras.extras.sendEmail,
       completedRedirectUrl: extras.extras.completedRedirectUrl,
       embedOrigin: extras.extras.embedOrigin,
+      message: extras.extras.message,
     });
   }
 
@@ -1034,6 +1073,7 @@ export async function createDocument(req: Request): Promise<Response> {
       sendEmail: extras.extras.sendEmail,
       completedRedirectUrl: extras.extras.completedRedirectUrl,
       embedOrigin: extras.extras.embedOrigin,
+      message: extras.extras.message,
       createdAt: at,
     })
     .returning();
