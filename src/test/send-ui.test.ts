@@ -42,6 +42,14 @@ vi.mock("../../app/send/pdf-preview.js", () => ({
   },
 }));
 
+// The real AppShell brings nav, search, and notification chrome that would
+// bloat these tests; render just the canvas (children) and the step rail.
+// The mobile bar is omitted so there is exactly one Send button.
+vi.mock("../../components/app-shell.js", () => ({
+  AppShell: ({ children, rail }: { children?: ReactNode; rail?: ReactNode }) =>
+    createElement("div", null, children, rail ?? null),
+}));
+
 vi.mock("../../src/lib/pdf/tags.js", () => ({
   parsePdfTags: async () => ({
     fields: [
@@ -74,19 +82,31 @@ function pdfFile() {
   });
 }
 
+// The form element wraps the canvas; the rail's inputs and the Send button
+// associate with it through the form attribute, so submit it by id.
 function submitForm() {
-  const form = screen
-    .getByRole("button", { name: /^send$/i })
-    .closest("form");
+  const form = document.getElementById("send-form");
   if (!form) throw new Error("send form not found");
   fireEvent.submit(form);
 }
 
+/** Expand a rail step (headers toggle, so only click when collapsed). */
+function ensureStep(name: RegExp) {
+  const btn = screen.getByRole("button", { name });
+  if (btn.getAttribute("aria-expanded") !== "true") fireEvent.click(btn);
+}
+
+async function railReady() {
+  await screen.findByRole("button", { name: /^document$/i });
+}
+
 async function fillAndSubmit() {
-  await screen.findByLabelText(/sender email/i);
+  await railReady();
+  ensureStep(/^document$/i);
   fireEvent.change(screen.getByLabelText(/^title$/i), {
     target: { value: "Repair authorization" },
   });
+  ensureStep(/^signers$/i);
   fireEvent.change(screen.getByLabelText(/^signer name$/i), {
     target: { value: "Jane" },
   });
@@ -97,7 +117,7 @@ async function fillAndSubmit() {
 }
 
 async function selectPdf() {
-  await screen.findByLabelText(/sender email/i);
+  await railReady();
   const input = document.querySelector(
     "input[type=file]",
   ) as HTMLInputElement;
@@ -106,13 +126,15 @@ async function selectPdf() {
     configurable: true,
   });
   fireEvent.change(input);
-  await screen.findByRole("button", { name: "Signature" });
+  await screen.findByText("a.pdf");
 }
 
 async function fillAndSubmitTwoSigners() {
+  ensureStep(/^document$/i);
   fireEvent.change(screen.getByLabelText(/^title$/i), {
     target: { value: "Repair authorization" },
   });
+  ensureStep(/^signers$/i);
   fireEvent.change(screen.getByLabelText(/signer 1 name/i), {
     target: { value: "Jane" },
   });
@@ -155,6 +177,7 @@ describe("SendClient", () => {
       /sender email/i,
     )) as HTMLInputElement;
     expect(sender.value).toBe("shop@example.com");
+    ensureStep(/^signers$/i);
     expect(screen.getByLabelText(/^signer name$/i)).toBeTruthy();
     expect(screen.getByRole("button", { name: /add signer/i })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /remove signer/i })).toBeNull();
@@ -163,7 +186,8 @@ describe("SendClient", () => {
   it("adds and removes signer rows", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => whoamiOk()));
     render(createElement(SendClient));
-    await screen.findByLabelText(/sender email/i);
+    await railReady();
+    ensureStep(/^signers$/i);
     fireEvent.click(screen.getByRole("button", { name: /add signer/i }));
     expect(screen.getByLabelText(/signer 2 name/i)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /remove signer 2/i }));
@@ -187,6 +211,7 @@ describe("SendClient", () => {
       }),
     );
     render(createElement(SendClient));
+    await selectPdf();
     await fillAndSubmit();
     await screen.findByText(/confirm to send/i);
     const post = calls.find((c) => c.url === "/v1/documents");
@@ -225,6 +250,7 @@ describe("SendClient", () => {
       }),
     );
     render(createElement(SendClient));
+    await selectPdf();
     await fillAndSubmit();
     await screen.findByText(/confirm to send/i);
     fireEvent.change(screen.getByLabelText(/verification code/i), {
@@ -267,6 +293,7 @@ describe("SendClient", () => {
     const bodies = stubDocumentsFetch();
     render(createElement(SendClient));
     await selectPdf();
+    ensureStep(/^signers$/i);
     fireEvent.click(screen.getByRole("button", { name: /add signer/i }));
     fireEvent.click(screen.getByRole("radio", { name: /all at once/i }));
     await fillAndSubmitTwoSigners();
@@ -277,6 +304,7 @@ describe("SendClient", () => {
     const bodies = stubDocumentsFetch();
     render(createElement(SendClient));
     await selectPdf();
+    ensureStep(/^signers$/i);
     fireEvent.click(screen.getByRole("button", { name: /add signer/i }));
     await fillAndSubmitTwoSigners();
     expect(bodies[0]!.get("order")).toBeNull();
@@ -289,7 +317,8 @@ describe("SendClient", () => {
   it("sends the message field when filled", async () => {
     const bodies = stubDocumentsFetch();
     render(createElement(SendClient));
-    await screen.findByLabelText(/sender email/i);
+    await selectPdf();
+    ensureStep(/^review & send$/i);
     fireEvent.change(
       screen.getByLabelText(/message to signers/i),
       { target: { value: "Please sign." } },
@@ -302,6 +331,7 @@ describe("SendClient", () => {
     const bodies = stubDocumentsFetch();
     render(createElement(SendClient));
     await selectPdf();
+    ensureStep(/^fields$/i);
     fireEvent.click(screen.getByRole("button", { name: "Signature" }));
     fireEvent.click(screen.getByTestId("field-layer"), {
       clientX: 100,
@@ -317,6 +347,7 @@ describe("SendClient", () => {
   it("shows a summary line on the confirm step", async () => {
     stubDocumentsFetch();
     render(createElement(SendClient));
+    await selectPdf();
     await fillAndSubmit();
     expect(await screen.findByText(/1 signer/i)).toBeTruthy();
   });
@@ -334,9 +365,11 @@ describe("SendClient", () => {
     stubDocumentsFetch();
     render(createElement(SendClient));
     await selectPdf();
+    ensureStep(/^signers$/i);
     fireEvent.change(screen.getByLabelText(/^signer name$/i), {
       target: { value: "Jane" },
     });
+    ensureStep(/^fields$/i);
     fireEvent.click(screen.getByRole("button", { name: "Signature" }));
     fireEvent.click(screen.getByTestId("field-layer"), {
       clientX: 100,
@@ -350,6 +383,7 @@ describe("SendClient", () => {
     Object.defineProperty(input, "files", { value: [pdfFile()] });
     fireEvent.change(input);
 
+    ensureStep(/^signers$/i);
     expect(
       (screen.getByLabelText(/^signer name$/i) as HTMLInputElement).value,
     ).toBe("Jane");
@@ -361,6 +395,7 @@ describe("SendClient", () => {
     const bodies = stubDocumentsFetch();
     render(createElement(SendClient));
     await selectPdf();
+    ensureStep(/^fields$/i);
     fireEvent.click(screen.getByRole("button", { name: /whiteout/i }));
     const layer = screen.getByTestId("field-layer");
     fireEvent.pointerDown(layer, { clientX: 100, clientY: 100 });
@@ -379,6 +414,7 @@ describe("SendClient", () => {
     applyPatchesMock.mockClear();
     stubDocumentsFetch();
     render(createElement(SendClient));
+    await selectPdf();
     await fillAndSubmit();
     await screen.findByText(/confirm to send/i);
     expect(applyPatchesMock).not.toHaveBeenCalled();
@@ -402,6 +438,7 @@ describe("SendClient", () => {
     stubDocumentsFetch();
     render(createElement(SendClient));
     await selectPdf();
+    ensureStep(/^fields$/i);
     fireEvent.click(screen.getByRole("button", { name: /whiteout/i }));
     const layer = screen.getByTestId("field-layer");
     fireEvent.pointerDown(layer, { clientX: 100, clientY: 100 });
@@ -417,16 +454,49 @@ describe("SendClient", () => {
     ).toBe(false);
   });
 
-  it("keeps the same file input mounted across the remount into the preview layout", async () => {
+  it("keeps the same file input mounted across the switch into the preview layout", async () => {
     stubDocumentsFetch();
     render(createElement(SendClient));
-    await screen.findByLabelText(/sender email/i);
+    await railReady();
     const inputBefore = document.querySelector("input[type=file]");
     Object.defineProperty(inputBefore as HTMLInputElement, "files", {
       value: [pdfFile()],
     });
     fireEvent.change(inputBefore as HTMLInputElement);
-    await screen.findByRole("button", { name: /whiteout/i });
+    await screen.findByText("a.pdf");
     expect(document.querySelector("input[type=file]")).toBe(inputBefore);
+  });
+
+  it("reopens the document step with an error when sending without a PDF", async () => {
+    stubDocumentsFetch();
+    render(createElement(SendClient));
+    await railReady();
+    ensureStep(/^fields$/i); // move away from the document step
+    submitForm();
+    expect(await screen.findByText(/add a pdf/i)).toBeTruthy();
+    expect(
+      screen
+        .getByRole("button", { name: /^document$/i })
+        .getAttribute("aria-expanded"),
+    ).toBe("true");
+  });
+
+  it("reopens the signers step when a signer is incomplete", async () => {
+    stubDocumentsFetch();
+    render(createElement(SendClient));
+    await selectPdf();
+    ensureStep(/^document$/i);
+    fireEvent.change(screen.getByLabelText(/^title$/i), {
+      target: { value: "Repair authorization" },
+    });
+    submitForm();
+    expect(
+      await screen.findByText(/complete each signer/i),
+    ).toBeTruthy();
+    expect(
+      screen
+        .getByRole("button", { name: /^signers$/i })
+        .getAttribute("aria-expanded"),
+    ).toBe("true");
   });
 });

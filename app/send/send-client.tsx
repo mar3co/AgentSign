@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { AppShell } from "@/components/app-shell";
 import { LinkButton } from "@/components/link-button";
 import { LoadingList } from "@/components/loading-list";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -26,45 +27,20 @@ import {
   PatchTextError,
   type PatchBox,
 } from "@/app/send/patch-model";
-import { SendForm, type Order, type SignerRow } from "@/app/send/send-form";
+import {
+  emailish,
+  SendForm,
+  summaryLine,
+  type Order,
+  type SignerRow,
+  type StepId,
+} from "@/app/send/send-form";
 import type { DocumentField } from "@/src/lib/pdf/fields";
 
 type Done = {
   key: string;
   signers: { email: string; sign_url: string | null }[];
 };
-
-function summaryLine(s: {
-  title: string;
-  signerCount: number;
-  order: Order;
-  fieldCount: number;
-  hasMessage: boolean;
-  pageCount: number | null;
-  patchCount: number;
-}): string {
-  const parts: string[] = [s.title];
-  if (s.pageCount != null) {
-    parts.push(`${s.pageCount} page${s.pageCount === 1 ? "" : "s"}`);
-  }
-  parts.push(
-    s.signerCount === 1
-      ? "1 signer"
-      : `${s.signerCount} signers, ${
-          s.order === "parallel" ? "all at once" : "in order"
-        }`,
-  );
-  parts.push(
-    s.fieldCount > 0
-      ? `${s.fieldCount} field${s.fieldCount === 1 ? "" : "s"}`
-      : "no placed fields — signers review and sign",
-  );
-  if (s.hasMessage) parts.push("message included");
-  if (s.patchCount > 0) {
-    parts.push(`${s.patchCount} correction${s.patchCount === 1 ? "" : "s"}`);
-  }
-  return parts.join(" · ");
-}
 
 export function SendClient() {
   const [senderEmail, setSenderEmail] = useState<string | null>(null);
@@ -80,6 +56,7 @@ export function SendClient() {
   const [order, setOrder] = useState<Order>("sequential");
   const [message, setMessage] = useState("");
   const [pageCount, setPageCount] = useState<number | null>(null);
+  const [openStep, setOpenStep] = useState<StepId | null>("document");
   // False from the moment a file is chosen until its preview renders or
   // fails; submitting before then would burn patches against pages the
   // out-of-range cleanup hasn't seen yet.
@@ -190,10 +167,25 @@ export function SendClient() {
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
+    // Inputs in collapsed steps are unmounted, so native validation can't
+    // reach them; check here and reopen the step that needs attention.
+    if (!file || !title.trim() || !senderEmail || !emailish(senderEmail)) {
+      setOpenStep("document");
+      setError("Add a PDF, a title, and your sender email before sending.");
+      return;
+    }
+    if (signers.some((s) => !s.name.trim() || !emailish(s.email))) {
+      setOpenStep("signers");
+      setError("Complete each signer's name and email before sending.");
+      return;
+    }
     setBusy(true);
-    const data = new FormData(e.currentTarget);
-    data.delete("signer_name");
-    data.delete("signer_email");
+    // Everything is controlled state, so build the payload from state rather
+    // than the DOM; collapsed steps then can't drop values.
+    const data = new FormData();
+    data.set("title", title);
+    data.set("sender_email", senderEmail);
+    data.set("message", message);
     data.set(
       "signers",
       JSON.stringify(
@@ -209,7 +201,7 @@ export function SendClient() {
     }
     if (order === "parallel") data.set("order", "parallel");
     try {
-      if (patches.length > 0 && file) {
+      if (patches.length > 0) {
         const bytes = new Uint8Array(await file.arrayBuffer());
         const burned = await applyPatches(bytes, patches);
         data.set(
@@ -217,6 +209,8 @@ export function SendClient() {
           new Blob([new Uint8Array(burned)], { type: "application/pdf" }),
           file.name,
         );
+      } else {
+        data.set("file", file, file.name);
       }
       const res = await fetch("/v1/documents", {
         method: "POST",
@@ -288,13 +282,18 @@ export function SendClient() {
   }
 
   if (senderEmail === null) {
-    return <LoadingList />;
+    return (
+      <AppShell widthClassName="max-w-3xl">
+        <LoadingList />
+      </AppShell>
+    );
   }
 
   if (done) {
     const first = done.signers.find((s) => s.sign_url);
     return (
-      <div className="flex flex-col gap-4">
+      <AppShell widthClassName="max-w-3xl">
+        <div className="flex flex-col gap-4">
         <Alert>
           <AlertDescription className="flex flex-col gap-2">
             <p>
@@ -317,13 +316,14 @@ export function SendClient() {
             ) : null}
           </AlertDescription>
         </Alert>
-        <div className="flex flex-wrap items-center gap-3">
-          <LinkButton href="/documents">Open Documents</LinkButton>
-          <LinkButton href="/send" variant="outline">
-            Send another
-          </LinkButton>
+          <div className="flex flex-wrap items-center gap-3">
+            <LinkButton href="/documents">Open Documents</LinkButton>
+            <LinkButton href="/send" variant="outline">
+              Send another
+            </LinkButton>
+          </div>
         </div>
-      </div>
+      </AppShell>
     );
   }
 
@@ -338,9 +338,10 @@ export function SendClient() {
       patchCount: patches.length,
     });
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Confirm to send</CardTitle>
+      <AppShell widthClassName="max-w-3xl">
+        <Card>
+          <CardHeader>
+            <CardTitle>Confirm to send</CardTitle>
           <CardDescription>
             We emailed a 6-digit code to {senderEmail || "you"}. Enter it and
             your signer gets their link.
@@ -371,7 +372,8 @@ export function SendClient() {
             </Button>
           </form>
         </CardContent>
-      </Card>
+        </Card>
+      </AppShell>
     );
   }
 
@@ -397,6 +399,9 @@ export function SendClient() {
       setOrder={setOrder}
       message={message}
       setMessage={setMessage}
+      pageCount={pageCount}
+      openStep={openStep}
+      setOpenStep={setOpenStep}
       onPagesRendered={handlePagesRendered}
       onPreviewFailed={handlePreviewFailed}
       error={error}
