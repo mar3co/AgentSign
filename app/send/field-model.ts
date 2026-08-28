@@ -1,9 +1,12 @@
 import {
+  DEFAULT_FIELD_SIZES,
   defaultRequired,
   defaultRoleName,
   type DocumentField,
   type FieldType,
 } from "@/src/lib/pdf/fields";
+
+export { DEFAULT_FIELD_SIZES };
 
 export type PlacedField = {
   id: string;
@@ -15,6 +18,9 @@ export type PlacedField = {
   w: number;
   h: number;
   required: boolean;
+  // Machine-suggested (heuristic or AI) rather than hand-placed; suggestions
+  // are replaced wholesale when the file changes or detection re-runs.
+  suggested?: boolean;
 };
 
 export const SIGNER_COLORS = [
@@ -29,15 +35,6 @@ export const SIGNER_COLORS = [
 export function signerColor(index: number): string {
   return SIGNER_COLORS[index % SIGNER_COLORS.length]!;
 }
-
-export const DEFAULT_FIELD_SIZES: Record<FieldType, { w: number; h: number }> = {
-  signature: { w: 22, h: 5 },
-  initials: { w: 8, h: 5 },
-  date: { w: 14, h: 3.5 },
-  name: { w: 18, h: 3.5 },
-  text: { w: 18, h: 3.5 },
-  checkbox: { w: 3, h: 3 },
-};
 
 let nextId = 0;
 function localId(): string {
@@ -76,6 +73,31 @@ export function makePlacedField(
     h: size.h,
     required: defaultRequired(type),
   });
+}
+
+/**
+ * Detected suggestions become ordinary placed fields (assigned to the first
+ * signer) so the sender can move, resize, or delete them before sending.
+ * Placed fields are single-area, so multi-area detected fields split into
+ * one placed field per area; names, roles, and default values are dropped.
+ */
+export function placedFromDetected(fields: DocumentField[]): PlacedField[] {
+  return fields.flatMap((f) =>
+    f.areas.map((a) =>
+      clampToPage({
+        id: localId(),
+        type: f.type,
+        signerIndex: 0,
+        page: a.page,
+        x: a.x,
+        y: a.y,
+        w: a.w,
+        h: a.h,
+        required: f.required,
+        suggested: true,
+      }),
+    ),
+  );
 }
 
 export function serializeFields(placed: PlacedField[]): DocumentField[] {

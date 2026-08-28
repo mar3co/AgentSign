@@ -18,6 +18,7 @@ import { Label } from "@/components/ui/label";
 import { loadPdfjs } from "@/app/lib/load-pdfjs";
 import {
   dropOutOfRangeFields,
+  placedFromDetected,
   serializeFields,
   type PlacedField,
 } from "@/app/send/field-model";
@@ -42,7 +43,7 @@ type Done = {
   signers: { email: string; sign_url: string | null }[];
 };
 
-export function SendClient() {
+export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
   const [senderEmail, setSenderEmail] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -71,6 +72,8 @@ export function SendClient() {
   placedRef.current = placed;
   const patchesRef = useRef(patches);
   patchesRef.current = patches;
+  const fileRef = useRef(file);
+  fileRef.current = file;
 
   useEffect(() => {
     let cancelled = false;
@@ -104,9 +107,32 @@ export function SendClient() {
       try {
         await loadPdfjs();
         const { parsePdfTags } = await import("@/src/lib/pdf/tags");
+        const { extractAcroFields } = await import("@/src/lib/pdf/acroform");
         const bytes = new Uint8Array(await file.arrayBuffer());
         const parsed = await parsePdfTags(bytes);
-        if (!cancelled) setTagFields(parsed.fields);
+        // The server imports fillable-form fields on upload, bound to the
+        // first human signer's role — "Signer 1" for documents sent from
+        // this editor; preview them alongside tag fields so the editor
+        // shows what gets created.
+        const acro = await extractAcroFields(bytes).catch(() => []);
+        if (cancelled) return;
+        setTagFields([...parsed.fields, ...acro]);
+
+        // Plain PDFs without tags or a fillable form: suggest fields for
+        // blanks like "Signature: ____" as editable placed fields.
+        if (parsed.fields.length === 0 && acro.length === 0) {
+          const { detectFieldCandidates } = await import("@/src/lib/pdf/detect");
+          const detected = placedFromDetected(await detectFieldCandidates(bytes));
+          if (!cancelled && detected.length > 0) {
+            setPlaced((prev) => [
+              ...prev.filter((p) => !p.suggested),
+              ...detected,
+            ]);
+            setReplaceNotice(
+              `Suggested ${detected.length} field${detected.length === 1 ? "" : "s"} from blanks found in the document. Move or delete any that are wrong.`,
+            );
+          }
+        }
       } catch {
         if (!cancelled) setTagFields([]); // tags preview is best-effort
       }
@@ -116,9 +142,10 @@ export function SendClient() {
     };
   }, [file]);
 
-  // Replacing the file keeps signers, message, order, placed fields, and
-  // patches — the old file isn't recoverable client-side, so there's no
-  // confirm dialog, just this reset of file-derived state.
+  // Replacing the file keeps signers, message, order, hand-placed fields,
+  // and patches — the old file isn't recoverable client-side, so there's no
+  // confirm dialog, just this reset of file-derived state. Suggestions were
+  // detected from the old file's content, so they don't carry over.
   const handleFileChange = useCallback((f: File | null) => {
     setReplaceNotice(null);
     setFile(f);
@@ -127,6 +154,8 @@ export function SendClient() {
       setPlaced([]);
       setPatches([]);
       setPageCount(null);
+    } else {
+      setPlaced((prev) => prev.filter((p) => !p.suggested));
     }
   }, []);
 
@@ -159,7 +188,7 @@ export function SendClient() {
       setPlaced([]);
       setPatches([]);
       setReplaceNotice(
-        "The preview could not be rendered, so placed fields and corrections were removed. You can still send this PDF as-is.",
+        "The preview could not be rendered, so placed fields and corrections were removed. You can still send this file as-is.",
       );
     }
   }, []);
@@ -171,7 +200,7 @@ export function SendClient() {
     // reach them; check here and reopen the step that needs attention.
     if (!file || !title.trim() || !senderEmail || !emailish(senderEmail)) {
       setOpenStep("document");
-      setError("Add a PDF, a title, and your sender email before sending.");
+      setError("Add a document, a title, and your sender email before sending.");
       return;
     }
     if (signers.some((s) => !s.name.trim() || !emailish(s.email))) {
@@ -255,6 +284,60 @@ export function SendClient() {
       setBusy(false);
     }
   }
+
+  const [aiBusy, setAiBusy] = useState(false);
+  const handleAiDetect = useCallback(async () => {
+    const f = file;
+    if (!f || aiBusy) return;
+    // The detect endpoint is PDF-only; DOCX uploads convert on the server
+    // only when the document is sent.
+    if (f.type !== "application/pdf" && !/\.pdf$/i.test(f.name)) {
+      setError("AI field detection works on PDFs. DOCX files are converted when you send.");
+      return;
+    }
+    setAiBusy(true);
+    setError(null);
+    try {
+      const data = new FormData();
+      data.set("file", f, f.name);
+      const res = await fetch("/v1/detect-fields", {
+        method: "POST",
+        credentials: "include",
+        body: data,
+      });
+      // The file may have been replaced while the model ran; errors and
+      // suggestions both belong to the old document.
+      if (fileRef.current !== f) return;
+      if (!res.ok) {
+        // 404 means the flag flipped off after this page loaded.
+        if (res.status === 404) {
+          setError("AI detection is not available right now.");
+          return;
+        }
+        const body = (await res.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        setError(body?.error ?? "Could not detect fields.");
+        return;
+      }
+      const json = (await res.json()) as { fields?: DocumentField[] };
+      const detected = placedFromDetected(json.fields ?? []);
+      if (detected.length === 0) {
+        setReplaceNotice("No fields were detected in this document.");
+        return;
+      }
+      // Replace earlier suggestions (heuristic or a previous AI run) so a
+      // second click doesn't stack duplicates; hand-placed fields stay.
+      setPlaced((prev) => [...prev.filter((p) => !p.suggested), ...detected]);
+      setReplaceNotice(
+        `Added ${detected.length} AI-suggested field${detected.length === 1 ? "" : "s"}. Move or delete any that are wrong.`,
+      );
+    } catch {
+      setError("Could not detect fields.");
+    } finally {
+      setAiBusy(false);
+    }
+  }, [file, aiBusy]);
 
   async function onConfirm(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -423,6 +506,9 @@ export function SendClient() {
       busy={busy}
       previewPending={file !== null && !previewSettled}
       onSubmit={onSubmit}
+      aiDetect={aiDetect}
+      aiBusy={aiBusy}
+      onAiDetect={handleAiDetect}
     />
   );
 }

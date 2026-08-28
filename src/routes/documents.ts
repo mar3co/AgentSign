@@ -29,6 +29,7 @@ import {
   type Mailer,
 } from "../lib/email.js";
 import { sha256Hex } from "../lib/hash.js";
+import { slidingWindowLimiter } from "../lib/rateLimit.js";
 import {
   claimSends,
   ensureAccount,
@@ -40,10 +41,19 @@ import { parseEmbedOrigin } from "../lib/embed.js";
 import {
   defaultRoleName,
   fieldsFitPageCount,
+  MAX_FIELDS,
   mergeFields,
   parseFieldsJson,
   type DocumentField,
 } from "../lib/pdf/fields.js";
+import {
+  DocxConvertError,
+  DocxUnavailableError,
+  docxToPdf,
+  isDocx,
+  isLegacyDoc,
+} from "../lib/docx.js";
+import { importAcroFields } from "../lib/pdf/acroform.js";
 import { InvalidFieldsError, parsePdfTags } from "../lib/pdf/tags.js";
 import {
   fieldAppearanceKey,
@@ -353,6 +363,7 @@ function parseOriginField(
 export async function parsePdfAndFields(
   bytes: Uint8Array,
   fieldsRaw: unknown,
+  acroRole: string | null = null,
 ): Promise<
   | { ok: true; fields: DocumentField[]; storedBytes: Uint8Array }
   | { ok: false; response: Response }
@@ -404,9 +415,41 @@ export async function parsePdfAndFields(
       response: jsonError(400, merged.error, merged.code),
     };
   }
-  const pages = await fieldsMatchPdfPages(merged.fields, storedBytes);
+
+  // Fillable PDFs: import AcroForm widgets as fields bound to `acroRole` and
+  // strip them from the stored copy. Callers pass null when there is no role
+  // the fields could bind to (no human party, ambiguous duplicate roles).
+  // Best-effort — if the imported fields can't merge (limits, name
+  // conflicts), keep the upload working as it did without the import.
+  let fields = merged.fields;
+  if (acroRole) {
+    const acro = await importAcroFields(storedBytes, acroRole);
+    if (acro.fields.length > 0) {
+      // The editor previews every imported field, so silently sending a
+      // document with none of them is worse than refusing the upload.
+      if (merged.fields.length + acro.fields.length > MAX_FIELDS) {
+        return {
+          ok: false,
+          response: jsonError(
+            400,
+            `This form has more fillable fields than the ${MAX_FIELDS}-field limit. Flatten the PDF or remove some fields and try again.`,
+            "invalid_fields",
+          ),
+        };
+      }
+      const withAcro = mergeFields(merged.fields, acro.fields);
+      if (withAcro.ok) {
+        fields = withAcro.fields;
+        storedBytes = acro.pdf;
+      } else {
+        console.warn("dropping imported form fields:", withAcro.error);
+      }
+    }
+  }
+
+  const pages = await fieldsMatchPdfPages(fields, storedBytes);
   if (!pages.ok) return pages;
-  return { ok: true, fields: merged.fields, storedBytes };
+  return { ok: true, fields, storedBytes };
 }
 
 async function fieldsMatchPdfPages(
@@ -555,6 +598,111 @@ function isPdf(bytes: Uint8Array, type: string): boolean {
     bytes[2] === 0x44 &&
     bytes[3] === 0x46;
   return magic || type === "application/pdf";
+}
+
+// DOCX conversion launches a browser, so cap how fast one caller can invoke
+// it — POST /v1/documents is reachable without credentials by design.
+const convertLimited = slidingWindowLimiter(10, 10 * 60 * 1000);
+
+/**
+ * Client IP for anonymous rate keys, as reported by the deployment's proxy.
+ * Vercel strips the client's copies of these headers; a self-hosted reverse
+ * proxy must overwrite them too, or callers can pick their own bucket.
+ */
+function clientIp(req: Request): string {
+  return (
+    req.headers.get("x-vercel-forwarded-for")?.split(",")[0]?.trim() ||
+    req.headers.get("x-real-ip")?.trim() ||
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    "anonymous"
+  );
+}
+
+/**
+ * Uploads may be a PDF or a DOCX (converted to PDF here); everything after
+ * this point works only with PDF bytes.
+ */
+export async function normalizeUploadToPdf(
+  file: Blob,
+  callerKey: string | null,
+): Promise<{ ok: true; bytes: Uint8Array } | { ok: false; response: Response }> {
+  if (file.size > PDF_MAX_BYTES) {
+    return {
+      ok: false,
+      response: jsonError(400, "File exceeds maximum size", "file_too_large"),
+    };
+  }
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (isPdf(bytes, file.type)) return { ok: true, bytes };
+
+  const name = file instanceof File ? file.name : "";
+  if (isLegacyDoc(bytes, file.type, name)) {
+    return {
+      ok: false,
+      response: jsonError(
+        400,
+        "Legacy .doc files aren't supported. Save the file as .docx or PDF and try again.",
+        "invalid_pdf",
+      ),
+    };
+  }
+  if (isDocx(bytes, file.type, name)) {
+    if (callerKey && convertLimited(callerKey)) {
+      return {
+        ok: false,
+        response: jsonError(
+          429,
+          "Too many document conversions. Try again in a few minutes.",
+          "rate_limited",
+        ),
+      };
+    }
+    let converted: Uint8Array;
+    try {
+      converted = await docxToPdf(bytes);
+    } catch (err) {
+      if (err instanceof DocxUnavailableError) {
+        // Infrastructure failure (missing/broken Chromium) — if this isn't
+        // logged, every DOCX upload 503s with zero server-side trace.
+        console.error("DOCX conversion unavailable:", err);
+        return {
+          ok: false,
+          response: jsonError(
+            503,
+            "DOCX conversion is not available",
+            "docx_unavailable",
+          ),
+        };
+      }
+      if (err instanceof DocxConvertError) {
+        return {
+          ok: false,
+          response: jsonError(400, "Could not read the DOCX file", "invalid_docx"),
+        };
+      }
+      // Anything else is our failure, not the file's — don't blame the upload.
+      console.error("DOCX conversion failed:", err);
+      return {
+        ok: false,
+        response: jsonError(500, "DOCX conversion failed", "docx_error"),
+      };
+    }
+    if (converted.length > PDF_MAX_BYTES) {
+      return {
+        ok: false,
+        response: jsonError(
+          400,
+          "The converted PDF exceeds maximum size",
+          "file_too_large",
+        ),
+      };
+    }
+    return { ok: true, bytes: converted };
+  }
+  return {
+    ok: false,
+    response: jsonError(400, "File must be a PDF or DOCX", "invalid_pdf"),
+  };
 }
 
 function requireDb(): AuditDb {
@@ -976,46 +1124,15 @@ export async function createDocument(req: Request): Promise<Response> {
   if (!(file instanceof Blob)) {
     return jsonError(400, "A PDF file is required", "invalid_pdf");
   }
-  if (file.size > PDF_MAX_BYTES) {
-    return jsonError(400, "PDF exceeds maximum size", "file_too_large");
-  }
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  if (!isPdf(bytes, file.type)) {
-    return jsonError(400, "File must be a PDF", "invalid_pdf");
-  }
-
-  const tagged = await parsePdfAndFields(bytes, form.get("fields"));
-  if (!tagged.ok) return tagged.response;
-  const extras = await parseDocumentExtras({
-    valuesRaw: form.get("values"),
-    order: form.get("order"),
-    sendEmail: form.get("send_email"),
-    completedRedirectUrl: form.get("completed_redirect_url"),
-    embedOrigin: form.get("embed_origin"),
-    message: form.get("message"),
-  });
-  if (!extras.ok) return extras.response;
-
-  const webhookField = String(form.get("webhook_url") ?? "").trim();
-  let webhookUrl: string | null = null;
-  let webhookSecret: string | null = null;
-  if (webhookField) {
-    const blocked = await webhookUrlError(webhookField);
-    if (blocked) return jsonError(400, blocked, "invalid_webhook_url");
-    webhookUrl = webhookField;
-    webhookSecret = newWebhookSecret();
-  }
 
   const db = requireDb();
   const store = requireStore();
   if (!store) return storeUnavailableResponse();
   const mailer = requireMailer();
   const at = now();
-  const env = getEnv();
-  const limit = Number(env.FREE_SEND_LIMIT);
-  const windowDays = Number(env.FREE_SEND_WINDOW_DAYS);
-  const windowStart = new Date(at.getTime() - windowDays * 86_400_000);
 
+  // Credentials are resolved before the upload is processed: DOCX conversion
+  // launches a browser, and an invalid key must 401 before buying that work.
   let liveUserId: string | null = null;
   let viaOauth = false;
   const raw = bearerToken(req);
@@ -1050,6 +1167,60 @@ export async function createDocument(req: Request): Promise<Response> {
       return jsonError(401, "Unauthorized", "unauthorized");
     }
   }
+  const cookieHeader = req.headers.get("cookie");
+  const sessionUser =
+    !liveUserId && cookieHeader
+      ? await getAuth().userFromCookie(cookieHeader)
+      : null;
+
+  // Conversion cost is capped per validated identity; anonymous callers
+  // share the proxy-reported client IP's bucket.
+  const normalized = await normalizeUploadToPdf(
+    file,
+    liveUserId ?? sessionUser?.id ?? clientIp(req),
+  );
+  if (!normalized.ok) return normalized.response;
+  const bytes = normalized.bytes;
+
+  // AcroForm fields bind to the first human signer's role. With no human or
+  // ambiguous (duplicate) roles, skip the import rather than fail the upload.
+  const signerRoles = parsedSigners.map(
+    (s, i) => s.role?.trim() || defaultRoleName(i + 1),
+  );
+  const firstHuman = parsedSigners.findIndex(
+    (s) => (s.kind ?? "human") === "human",
+  );
+  const acroRole =
+    firstHuman >= 0 && new Set(signerRoles).size === signerRoles.length
+      ? signerRoles[firstHuman]!
+      : null;
+
+  const tagged = await parsePdfAndFields(bytes, form.get("fields"), acroRole);
+  if (!tagged.ok) return tagged.response;
+  const extras = await parseDocumentExtras({
+    valuesRaw: form.get("values"),
+    order: form.get("order"),
+    sendEmail: form.get("send_email"),
+    completedRedirectUrl: form.get("completed_redirect_url"),
+    embedOrigin: form.get("embed_origin"),
+    message: form.get("message"),
+  });
+  if (!extras.ok) return extras.response;
+
+  const webhookField = String(form.get("webhook_url") ?? "").trim();
+  let webhookUrl: string | null = null;
+  let webhookSecret: string | null = null;
+  if (webhookField) {
+    const blocked = await webhookUrlError(webhookField);
+    if (blocked) return jsonError(400, blocked, "invalid_webhook_url");
+    webhookUrl = webhookField;
+    webhookSecret = newWebhookSecret();
+  }
+
+  const env = getEnv();
+  const limit = Number(env.FREE_SEND_LIMIT);
+  const windowDays = Number(env.FREE_SEND_WINDOW_DAYS);
+  const windowStart = new Date(at.getTime() - windowDays * 86_400_000);
 
   if (liveUserId) {
     // OAuth grants are interactive agents: the account owner approves each
@@ -1085,11 +1256,8 @@ export async function createDocument(req: Request): Promise<Response> {
   // A logged-in user sending as their own verified address skips the code
   // unless they opted in; anyone else keeps it — the code is the only
   // proof they control the sender email.
-  const cookie = req.headers.get("cookie");
-  if (cookie) {
-    const sessionUser = await getAuth().userFromCookie(cookie);
+  if (sessionUser) {
     if (
-      sessionUser &&
       sessionUser.email.trim().toLowerCase() === senderEmail
     ) {
       await ensureAccount(db, sessionUser);

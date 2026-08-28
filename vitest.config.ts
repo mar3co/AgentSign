@@ -11,6 +11,8 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    // Stray git worktrees under .claude/ carry their own test copies.
+    exclude: ["**/node_modules/**", ".claude/**"],
     setupFiles: ["./src/test/setup.ts"],
     // setDeps is process-global; parallel files race the shared DB handle.
     fileParallelism: false,

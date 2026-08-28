@@ -3,6 +3,7 @@ import { PDFDocument, degrees } from "pdf-lib";
 import {
   areaToPageRect,
   displayPointToPage,
+  pagePointToDisplay,
   pageSpaceOf,
   type PageSpace,
 } from "../lib/pdf/pageSpace.js";
@@ -42,6 +43,18 @@ describe("pageSpace", () => {
     // An interior point: 100 right, 50 up from the displayed corner.
     expect(displayPointToPage(space(90), 100, 50)).toEqual({ x: 480, y: 140 });
     expect(displayPointToPage(space(270), 100, 50)).toEqual({ x: 80, y: 640 });
+  });
+
+  it("round-trips display points through user space for every rotation", () => {
+    for (const rotation of [0, 90, 180, 270] as const) {
+      const s = space(rotation);
+      for (const [dx, dy] of [[0, 0], [100, 50], [321.5, 87.25]]) {
+        const p = displayPointToPage(s, dx!, dy!);
+        const back = pagePointToDisplay(s, p.x, p.y);
+        expect(back.x).toBeCloseTo(dx!);
+        expect(back.y).toBeCloseTo(dy!);
+      }
+    }
   });
 
   it("swaps the displayed area's width and height on sideways pages", () => {

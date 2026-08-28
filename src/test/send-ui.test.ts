@@ -497,7 +497,7 @@ describe("SendClient", () => {
     await railReady();
     ensureStep(/^fields$/i); // move away from the document step
     submitForm();
-    expect(await screen.findByText(/add a pdf/i)).toBeTruthy();
+    expect(await screen.findByText(/add a document/i)).toBeTruthy();
     expect(
       screen
         .getByRole("button", { name: /^document$/i })

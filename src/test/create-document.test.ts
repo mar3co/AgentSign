@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { GET as getAuthCallback } from "../../app/auth/callback/route.js";
 import { POST as postLogin } from "../../app/login/session/route.js";
@@ -1550,5 +1550,167 @@ describe("POST /v1/documents on-page fields", () => {
     const { id } = (await res.json()) as { id: string };
     const [row] = await db.select().from(documents).where(eq(documents.id, id));
     expect(row!.message).toBe("Please sign before Friday.");
+  });
+});
+
+describe("POST /v1/documents acroform import", () => {
+  async function fillablePdfBytes() {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    const field = doc.getForm().createTextField("Approved By");
+    field.addToPage(page, { x: 72, y: 700, width: 200, height: 18 });
+    return doc.save();
+  }
+
+  async function fillableUpload(signers: unknown[], fields?: unknown) {
+    const db = await createTestDb();
+    const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+    setDeps({
+      db,
+      store,
+      mailer: { sendMail: async () => {} },
+      now: () => new Date(),
+    });
+    const pdf = await fillablePdfBytes();
+    const body = new FormData();
+    body.set("title", "Order form");
+    body.set("sender_email", "shop@example.com");
+    body.set("signers", JSON.stringify(signers));
+    if (fields !== undefined) body.set("fields", JSON.stringify(fields));
+    body.set("file", new Blob([pdf as BlobPart], { type: "application/pdf" }), "form.pdf");
+    const res = await postDocument(
+      new Request("http://sign.test/v1/documents", { method: "POST", body }),
+    );
+    return { db, res };
+  }
+
+  it("binds imported fields to a custom signer role", { timeout: 60_000 }, async () => {
+    const { db, res } = await fillableUpload([
+      { name: "Jane", email: "jane@example.com", role: "Buyer" },
+    ]);
+    expect(res.status).toBe(201);
+    const [row] = await db.select().from(documents);
+    const fields = (row!.fields ?? []) as { name: string; role: string }[];
+    expect(
+      fields.some((f) => f.name === "acro_Approved By" && f.role === "Buyer"),
+    ).toBe(true);
+  });
+
+  it("skips the import when signer roles are ambiguous", { timeout: 60_000 }, async () => {
+    const { db, res } = await fillableUpload([
+      { name: "Jane", email: "jane@example.com", role: "Buyer" },
+      { name: "Joe", email: "joe@example.com", role: "Buyer" },
+    ]);
+    expect(res.status).toBe(201);
+    const [row] = await db.select().from(documents);
+    expect((row!.fields ?? []) as unknown[]).toEqual([]);
+  });
+
+  it("binds imported fields to the first human signer, not the first signer", { timeout: 60_000 }, async () => {
+    const { db, userFor } = await bootAuth();
+    const cookie = await magicCookie("shop@example.com");
+    const userId = userFor("shop@example.com").id;
+    await db.update(accounts).set({ plan: "pro" }).where(eq(accounts.userId, userId));
+    const createdAgent = await postAgents(
+      new Request("http://sign.test/v1/agents", {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ slug: "grok-legal", name: "Grok Legal" }),
+      }),
+    );
+    expect(createdAgent.status).toBe(201);
+    const key = await mintLive(cookie);
+
+    const pdf = await fillablePdfBytes();
+    const body = new FormData();
+    body.set("title", "Order form");
+    body.set("sender_email", "shop@example.com");
+    body.set(
+      "signers",
+      JSON.stringify([
+        {
+          name: "Grok Legal",
+          email: "shop@example.com",
+          kind: "agent",
+          agent: "grok-legal",
+          role: "Agent",
+        },
+        { name: "Jane", email: "jane@example.com", role: "Buyer" },
+      ]),
+    );
+    body.set("file", new Blob([pdf as BlobPart], { type: "application/pdf" }), "form.pdf");
+    const res = await postDocument(
+      new Request("http://sign.test/v1/documents", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}` },
+        body,
+      }),
+    );
+    expect(res.status).toBe(201);
+    const [row] = await db.select().from(documents);
+    const fields = (row!.fields ?? []) as { name: string; role: string }[];
+    const imported = fields.find((f) => f.name === "acro_Approved By");
+    expect(imported?.role).toBe("Buyer");
+  });
+
+  it("rejects a form with more fillable fields than the limit", { timeout: 60_000 }, async () => {
+    const db = await createTestDb();
+    const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+    setDeps({ db, store, mailer: { sendMail: async () => {} } });
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    const form = doc.getForm();
+    for (let i = 0; i < 201; i++) {
+      form.createTextField(`f${i}`).addToPage(page, {
+        x: 12 + (i % 5) * 118,
+        y: 760 - Math.floor(i / 5) * 18,
+        width: 100,
+        height: 12,
+      });
+    }
+    const body = new FormData();
+    body.set("title", "Tax packet");
+    body.set("sender_email", "shop@example.com");
+    body.set("signers", JSON.stringify([{ name: "Jane", email: "jane@example.com" }]));
+    body.set(
+      "file",
+      new Blob([(await doc.save()) as BlobPart], { type: "application/pdf" }),
+      "packet.pdf",
+    );
+    const res = await postDocument(
+      new Request("http://sign.test/v1/documents", { method: "POST", body }),
+    );
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as { error: string; code: string };
+    expect(json.code).toBe("invalid_fields");
+    expect(json.error).toContain("more fillable fields");
+  });
+
+  it("keeps the sender's fields when an imported field collides", { timeout: 60_000 }, async () => {
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { db, res } = await fillableUpload(
+        [{ name: "Jane", email: "jane@example.com", role: "Buyer" }],
+        [
+          {
+            name: "acro_Approved By",
+            type: "signature",
+            role: "Buyer",
+            required: true,
+            readonly: false,
+            areas: [{ page: 1, x: 10, y: 10, w: 22, h: 5 }],
+          },
+        ],
+      );
+      expect(res.status).toBe(201);
+      const [row] = await db.select().from(documents);
+      const fields = (row!.fields ?? []) as { name: string; type: string }[];
+      const kept = fields.filter((f) => f.name === "acro_Approved By");
+      expect(kept).toHaveLength(1);
+      expect(kept[0]!.type).toBe("signature");
+      expect(warned).toHaveBeenCalled();
+    } finally {
+      warned.mockRestore();
+    }
   });
 });

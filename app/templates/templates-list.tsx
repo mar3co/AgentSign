@@ -250,13 +250,13 @@ export function TemplatesList({ entitled, templates = [] }: TemplatesListProps) 
             Add role
           </Button>
           <div className="flex flex-col gap-2">
-            <Label htmlFor="file">PDF</Label>
+            <Label htmlFor="file">Document</Label>
             <UploadDropzone
               id="file"
               name="file"
-              accept="application/pdf,.pdf"
+              accept="application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
               required
-              prompt="Drag & Drop or Choose a PDF to upload"
+              prompt="Drag & Drop or Choose a PDF or DOCX to upload"
               hint="This PDF is reused every time the template is sent."
             />
           </div>
