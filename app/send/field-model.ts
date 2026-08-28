@@ -78,6 +78,28 @@ export function makePlacedField(
   });
 }
 
+/**
+ * Detected suggestions become ordinary placed fields (assigned to the first
+ * signer) so the sender can move, resize, or delete them before sending.
+ */
+export function placedFromDetected(fields: DocumentField[]): PlacedField[] {
+  return fields.flatMap((f) =>
+    f.areas.map((a) =>
+      clampToPage({
+        id: localId(),
+        type: f.type,
+        signerIndex: 0,
+        page: a.page,
+        x: a.x,
+        y: a.y,
+        w: a.w,
+        h: a.h,
+        required: f.required,
+      }),
+    ),
+  );
+}
+
 export function serializeFields(placed: PlacedField[]): DocumentField[] {
   const counts = new Map<string, number>();
   return placed.map((f) => {

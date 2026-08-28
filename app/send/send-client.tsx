@@ -18,6 +18,7 @@ import { Label } from "@/components/ui/label";
 import { loadPdfjs } from "@/app/lib/load-pdfjs";
 import {
   dropOutOfRangeFields,
+  placedFromDetected,
   serializeFields,
   type PlacedField,
 } from "@/app/send/field-model";
@@ -42,7 +43,7 @@ type Done = {
   signers: { email: string; sign_url: string | null }[];
 };
 
-export function SendClient() {
+export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
   const [senderEmail, setSenderEmail] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -104,9 +105,27 @@ export function SendClient() {
       try {
         await loadPdfjs();
         const { parsePdfTags } = await import("@/src/lib/pdf/tags");
+        const { extractAcroFields } = await import("@/src/lib/pdf/acroform");
         const bytes = new Uint8Array(await file.arrayBuffer());
         const parsed = await parsePdfTags(bytes);
-        if (!cancelled) setTagFields(parsed.fields);
+        // The server imports fillable-form fields on upload; preview them
+        // alongside tag fields so what you see matches what gets created.
+        const acro = await extractAcroFields(bytes).catch(() => []);
+        if (cancelled) return;
+        setTagFields([...parsed.fields, ...acro]);
+
+        // Plain PDFs without tags or a fillable form: suggest fields for
+        // blanks like "Signature: ____" as editable placed fields.
+        if (parsed.fields.length === 0 && acro.length === 0) {
+          const { detectFieldCandidates } = await import("@/src/lib/pdf/detect");
+          const detected = placedFromDetected(await detectFieldCandidates(bytes));
+          if (!cancelled && detected.length > 0) {
+            setPlaced((prev) => [...prev, ...detected]);
+            setReplaceNotice(
+              `Suggested ${detected.length} field${detected.length === 1 ? "" : "s"} from blanks found in the document. Move or delete any that are wrong.`,
+            );
+          }
+        }
       } catch {
         if (!cancelled) setTagFields([]); // tags preview is best-effort
       }
@@ -255,6 +274,44 @@ export function SendClient() {
       setBusy(false);
     }
   }
+
+  const [aiBusy, setAiBusy] = useState(false);
+  const handleAiDetect = useCallback(async () => {
+    const f = file;
+    if (!f || aiBusy) return;
+    setAiBusy(true);
+    setError(null);
+    try {
+      const data = new FormData();
+      data.set("file", f, f.name);
+      const res = await fetch("/v1/detect-fields", {
+        method: "POST",
+        credentials: "include",
+        body: data,
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        setError(body?.error ?? "Could not detect fields.");
+        return;
+      }
+      const json = (await res.json()) as { fields?: DocumentField[] };
+      const detected = placedFromDetected(json.fields ?? []);
+      if (detected.length === 0) {
+        setReplaceNotice("No fields were detected in this document.");
+        return;
+      }
+      setPlaced((prev) => [...prev, ...detected]);
+      setReplaceNotice(
+        `Added ${detected.length} AI-suggested field${detected.length === 1 ? "" : "s"}. Move or delete any that are wrong.`,
+      );
+    } catch {
+      setError("Could not detect fields.");
+    } finally {
+      setAiBusy(false);
+    }
+  }, [file, aiBusy]);
 
   async function onConfirm(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -423,6 +480,9 @@ export function SendClient() {
       busy={busy}
       previewPending={file !== null && !previewSettled}
       onSubmit={onSubmit}
+      aiDetect={aiDetect}
+      aiBusy={aiBusy}
+      onAiDetect={handleAiDetect}
     />
   );
 }

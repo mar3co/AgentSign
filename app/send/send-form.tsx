@@ -170,6 +170,9 @@ export function SendForm(props: {
   busy: boolean;
   previewPending: boolean;
   onSubmit: (e: FormEvent<HTMLFormElement>) => void;
+  aiDetect?: boolean;
+  aiBusy?: boolean;
+  onAiDetect?: () => void;
 }) {
   const {
     senderEmail,
@@ -201,6 +204,9 @@ export function SendForm(props: {
     busy,
     previewPending,
     onSubmit,
+    aiDetect = false,
+    aiBusy = false,
+    onAiDetect,
   } = props;
 
   const [activeSigner, setActiveSigner] = useState(0);
@@ -412,15 +418,29 @@ export function SendForm(props: {
           onToggle={() => toggleStep("fields")}
         >
           {file ? (
-            <FieldPalette
-              signers={signers}
-              activeSigner={activeSigner}
-              onSignerChange={setActiveSigner}
-              activeType={activeType}
-              onTypeChange={setActiveType}
-              whiteoutActive={whiteoutActive}
-              onWhiteoutChange={setWhiteoutActive}
-            />
+            <>
+              <FieldPalette
+                signers={signers}
+                activeSigner={activeSigner}
+                onSignerChange={setActiveSigner}
+                activeType={activeType}
+                onTypeChange={setActiveType}
+                whiteoutActive={whiteoutActive}
+                onWhiteoutChange={setWhiteoutActive}
+              />
+              {aiDetect && onAiDetect ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="self-start"
+                  disabled={aiBusy}
+                  onClick={onAiDetect}
+                >
+                  {aiBusy ? "Detecting…" : "Detect fields with AI"}
+                </Button>
+              ) : null}
+            </>
           ) : (
             <p className="text-xs text-muted-foreground">
               Add a PDF first, then pick a field type and click the page to
@@ -516,10 +536,10 @@ export function SendForm(props: {
           <UploadDropzone
             id="file"
             name="file"
-            accept="application/pdf,.pdf"
+            accept="application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             required
             collapseWhenFilled
-            prompt="Drag & Drop or Choose a PDF to upload"
+            prompt="Drag & Drop or Choose a PDF or DOCX to upload"
             hint="Your signer gets an email link in seconds."
             onFileChange={onFileChange}
             className={file ? undefined : "mx-auto w-full max-w-xl"}

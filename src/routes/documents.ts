@@ -44,6 +44,13 @@ import {
   parseFieldsJson,
   type DocumentField,
 } from "../lib/pdf/fields.js";
+import {
+  DocxUnavailableError,
+  docxToPdf,
+  isDocx,
+  isLegacyDoc,
+} from "../lib/docx.js";
+import { importAcroFields } from "../lib/pdf/acroform.js";
 import { InvalidFieldsError, parsePdfTags } from "../lib/pdf/tags.js";
 import {
   fieldAppearanceKey,
@@ -404,9 +411,23 @@ export async function parsePdfAndFields(
       response: jsonError(400, merged.error, merged.code),
     };
   }
-  const pages = await fieldsMatchPdfPages(merged.fields, storedBytes);
+
+  // Fillable PDFs: import AcroForm widgets as fields and strip them from the
+  // stored copy. Best-effort — if the imported fields can't merge (limits,
+  // name conflicts), keep the upload working as it did without the import.
+  let fields = merged.fields;
+  const acro = await importAcroFields(storedBytes);
+  if (acro.fields.length > 0) {
+    const withAcro = mergeFields(merged.fields, acro.fields);
+    if (withAcro.ok) {
+      fields = withAcro.fields;
+      storedBytes = acro.pdf;
+    }
+  }
+
+  const pages = await fieldsMatchPdfPages(fields, storedBytes);
   if (!pages.ok) return pages;
-  return { ok: true, fields: merged.fields, storedBytes };
+  return { ok: true, fields, storedBytes };
 }
 
 async function fieldsMatchPdfPages(
@@ -555,6 +576,59 @@ function isPdf(bytes: Uint8Array, type: string): boolean {
     bytes[2] === 0x44 &&
     bytes[3] === 0x46;
   return magic || type === "application/pdf";
+}
+
+/**
+ * Uploads may be a PDF or a DOCX (converted to PDF here); everything after
+ * this point works only with PDF bytes.
+ */
+export async function normalizeUploadToPdf(
+  file: Blob,
+): Promise<{ ok: true; bytes: Uint8Array } | { ok: false; response: Response }> {
+  if (file.size > PDF_MAX_BYTES) {
+    return {
+      ok: false,
+      response: jsonError(400, "File exceeds maximum size", "file_too_large"),
+    };
+  }
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (isPdf(bytes, file.type)) return { ok: true, bytes };
+
+  const name = file instanceof File ? file.name : "";
+  if (isLegacyDoc(bytes, file.type, name)) {
+    return {
+      ok: false,
+      response: jsonError(
+        400,
+        "Legacy .doc files aren't supported. Save the file as .docx or PDF and try again.",
+        "invalid_pdf",
+      ),
+    };
+  }
+  if (isDocx(bytes, file.type, name)) {
+    try {
+      return { ok: true, bytes: await docxToPdf(bytes) };
+    } catch (err) {
+      if (err instanceof DocxUnavailableError) {
+        return {
+          ok: false,
+          response: jsonError(
+            503,
+            "DOCX conversion is not available",
+            "docx_unavailable",
+          ),
+        };
+      }
+      return {
+        ok: false,
+        response: jsonError(400, "Could not read the DOCX file", "invalid_docx"),
+      };
+    }
+  }
+  return {
+    ok: false,
+    response: jsonError(400, "File must be a PDF or DOCX", "invalid_pdf"),
+  };
 }
 
 function requireDb(): AuditDb {
@@ -976,13 +1050,9 @@ export async function createDocument(req: Request): Promise<Response> {
   if (!(file instanceof Blob)) {
     return jsonError(400, "A PDF file is required", "invalid_pdf");
   }
-  if (file.size > PDF_MAX_BYTES) {
-    return jsonError(400, "PDF exceeds maximum size", "file_too_large");
-  }
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  if (!isPdf(bytes, file.type)) {
-    return jsonError(400, "File must be a PDF", "invalid_pdf");
-  }
+  const normalized = await normalizeUploadToPdf(file);
+  if (!normalized.ok) return normalized.response;
+  const bytes = normalized.bytes;
 
   const tagged = await parsePdfAndFields(bytes, form.get("fields"));
   if (!tagged.ok) return tagged.response;

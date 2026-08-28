@@ -28,7 +28,9 @@ const envSchema = z.object({
   SELF_HOST: z.string().default(""),
   SIGN_FLAG_AGENT_PARTIES: z.string().default(""),
   SIGN_FLAG_AGENT_ONLY_ATTEST: z.string().default(""),
+  SIGN_FLAG_AI_FIELD_DETECT: z.string().default(""),
   FLAGS_SECRET: z.string().default(""),
+  ANTHROPIC_API_KEY: z.string().default(""),
 });
 
 export type Env = z.infer<typeof envSchema>;

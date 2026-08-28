@@ -184,7 +184,7 @@ export default function Home() {
             id="file"
             name="file"
             type="file"
-            accept="application/pdf,.pdf"
+            accept="application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             required
             className="sr-only"
             onChange={(e) => onFile(e.target.files?.[0]?.name ?? null)}

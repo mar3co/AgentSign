@@ -1,15 +1,22 @@
 import { getEnv } from "../env.js";
 
-export type FlagName = "agent_parties" | "agent_only_attest";
+export type FlagName = "agent_parties" | "agent_only_attest" | "ai_field_detect";
 
 export const FLAG_DEFAULTS: Record<FlagName, boolean> = {
   agent_parties: true,
   agent_only_attest: false,
+  ai_field_detect: false,
 };
 
-const ENV_KEYS: Record<FlagName, "SIGN_FLAG_AGENT_PARTIES" | "SIGN_FLAG_AGENT_ONLY_ATTEST"> = {
+const ENV_KEYS: Record<
+  FlagName,
+  | "SIGN_FLAG_AGENT_PARTIES"
+  | "SIGN_FLAG_AGENT_ONLY_ATTEST"
+  | "SIGN_FLAG_AI_FIELD_DETECT"
+> = {
   agent_parties: "SIGN_FLAG_AGENT_PARTIES",
   agent_only_attest: "SIGN_FLAG_AGENT_ONLY_ATTEST",
+  ai_field_detect: "SIGN_FLAG_AI_FIELD_DETECT",
 };
 
 /** `"1"`/`"true"` on, `"0"`/`"false"` off, empty/other → no override. */
