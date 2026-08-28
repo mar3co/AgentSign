@@ -228,9 +228,20 @@ export function SendClient() {
         setError(body?.error ?? "Could not send.");
         return;
       }
-      const json = (await res.json()) as { id?: string };
+      const json = (await res.json()) as {
+        id?: string;
+        status?: string;
+        key?: string;
+        signers?: { email: string; sign_url: string | null }[];
+      };
       if (!json.id) {
         setError("Could not send.");
+        return;
+      }
+      if (json.status === "pending") {
+        // Confirmation is off for this sender: the document went out
+        // directly, so skip the code screen.
+        setDone({ key: json.key ?? "", signers: json.signers ?? [] });
         return;
       }
       setDocumentId(json.id);
@@ -302,10 +313,14 @@ export function SendClient() {
                 ? `${first.email} has their signing link.`
                 : "Your signers get their links in order."}
             </p>
-            <p>Keep this key; it is shown once.</p>
-            <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-xs">
-              {done.key}
-            </pre>
+            {done.key ? (
+              <>
+                <p>Keep this key; it is shown once.</p>
+                <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-xs">
+                  {done.key}
+                </pre>
+              </>
+            ) : null}
             {first?.sign_url ? (
               <p>
                 Signer link:{" "}

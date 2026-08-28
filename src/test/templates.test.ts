@@ -19,10 +19,10 @@ import {
   PATCH as patchTemplate,
 } from "../../app/v1/templates/[id]/route.js";
 import { POST as sendTemplate } from "../../app/v1/templates/[id]/send/route.js";
-import { accounts, templates } from "../db/schema.js";
+import { accounts, oauthGrants, templates } from "../db/schema.js";
 import { setDeps } from "../lib/deps.js";
 import { createFsStore } from "../lib/storage.js";
-import { newTmpKey } from "../lib/tokens.js";
+import { newOauthToken, newTmpKey } from "../lib/tokens.js";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import { createTestDb } from "./db.js";
 import { minimalPdf } from "./pdf.js";
@@ -440,6 +440,48 @@ describe("templates API", () => {
     expect(sent.slice(beforeMail).some((m) => m.to === "jane@example.com")).toBe(
       true,
     );
+  });
+
+  it("OAuth agent template send is held for the sender's code", { timeout: 60_000 }, async () => {
+    const { db, userFor, sent } = await boot();
+    const { cookie, userId } = await asPro(db, userFor);
+    const { body } = await templateForm();
+    const created = await postTemplate(
+      new Request("http://sign.test/v1/templates", {
+        method: "POST",
+        headers: { cookie },
+        body,
+      }),
+    );
+    const template = (await created.json()) as TemplateJson;
+    const token = newOauthToken();
+    await db.insert(oauthGrants).values({
+      userId,
+      clientId: "client_test",
+      accessHash: token.hash,
+      expiresAt: new Date(Date.now() + 3_600_000),
+    });
+    const beforeMail = sent.length;
+
+    const sentRes = await sendTemplate(
+      new Request(`http://sign.test/v1/templates/${template.id}/send`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token.raw}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          signers: [{ name: "Jane", email: "jane@example.com" }],
+        }),
+      }),
+      templateCtx(template.id),
+    );
+    expect(sentRes.status).toBe(201);
+    const json = (await sentRes.json()) as { status: string };
+    expect(json.status).toBe("pending_sender");
+    const after = sent.slice(beforeMail);
+    expect(after.some((m) => /verification code/i.test(m.subject))).toBe(true);
+    expect(after.some((m) => m.to === "jane@example.com")).toBe(false);
   });
 
   it("send with wrong signer count is 400 invalid_request", { timeout: 60_000 }, async () => {

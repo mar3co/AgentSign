@@ -99,7 +99,7 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
     {
       title: "Send document",
       description:
-        "Create and send a signing document (POST /v1/documents). Pass PDF bytes as base64, not a public pdf_url. Optional Bearer sign_live_ key. Without a key, starts a sender OTP one-off — tell the operator to check sender email. sign_tmp_ cannot send or list. Signer objects may include kind (human|agent) and agent slug. Optional fields JSON, message, values, order, send_email, completed_redirect_url, embed_origin. No sign tool. Humans Finish. Agents Attest.",
+        "Create and send a signing document (POST /v1/documents). Pass PDF bytes as base64, not a public pdf_url. Optional Bearer sign_live_ key. Without a key, starts a sender OTP one-off — tell the operator to check sender email. OAuth callers usually get pending_sender too: the account holds agent sends for an emailed confirmation code unless turned off in Settings. sign_live_ keys always send immediately. sign_tmp_ cannot send or list. Signer objects may include kind (human|agent) and agent slug. Optional fields JSON, message, values, order, send_email, completed_redirect_url, embed_origin. No sign tool. Humans Finish. Agents Attest.",
       inputSchema: {
         title: z.string().min(1),
         sender_email: z.string().min(1),

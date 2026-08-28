@@ -406,7 +406,7 @@ describe("POST /v1/documents", () => {
     expect(keys).toHaveLength(0);
   });
 
-  it("session cookie without Bearer stays pending_sender and does not mail the signer", async () => {
+  it("session send as your own email goes out directly with a status key", async () => {
     const db = await createTestDb();
     const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
     const sent: { to: string; subject: string; text: string }[] = [];
@@ -432,14 +432,89 @@ describe("POST /v1/documents", () => {
       }),
     );
     expect(res.status).toBe(201);
-    const json = (await res.json()) as { id: string; status: string };
-    expect(json.status).toBe("pending_sender");
+    const json = (await res.json()) as { id: string; status: string; key?: string };
+    expect(json.status).toBe("pending");
+    expect(json.key).toMatch(/^sign_tmp_/);
     const [row] = await db.select().from(documents).where(eq(documents.id, json.id));
-    expect(row!.status).toBe("pending_sender");
-    expect(sent.some((m) => m.to === "shop@example.com")).toBe(true);
-    expect(sent.some((m) => m.to === "jane@example.com")).toBe(false);
-    expect(sent.some((m) => /please sign/i.test(m.subject))).toBe(false);
+    expect(row!.status).toBe("pending");
+    expect(row!.userId).toBeTruthy();
+    expect(sent.some((m) => /verification code/i.test(m.subject))).toBe(false);
+    expect(sent.some((m) => m.to === "jane@example.com")).toBe(true);
+  });
+
+  it("session send keeps the code when Confirm my sends is on", async () => {
+    const db = await createTestDb();
+    const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+    const sent: { to: string; subject: string; text: string }[] = [];
+    const { adapter, userFor } = createFakeAuth();
+    setDeps({
+      db,
+      store,
+      auth: adapter,
+      mailer: { sendMail: async (m) => { sent.push(m); } },
+    });
+    const cookie = await magicCookie("shop@example.com");
+    await db
+      .insert(accounts)
+      .values({
+        userId: userFor("shop@example.com").id,
+        email: "shop@example.com",
+        confirmHumanSends: true,
+      })
+      .onConflictDoUpdate({
+        target: accounts.userId,
+        set: { confirmHumanSends: true },
+      });
+    const pdf = await minimalPdf();
+    const body = new FormData();
+    body.set("title", "Repair authorization");
+    body.set("sender_email", "shop@example.com");
+    body.set("signers", JSON.stringify([{ name: "Jane", email: "jane@example.com" }]));
+    body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
+    const res = await postDocument(
+      new Request("http://sign.test/v1/documents", {
+        method: "POST",
+        headers: { cookie },
+        body,
+      }),
+    );
+    expect(res.status).toBe(201);
+    const json = (await res.json()) as { status: string };
+    expect(json.status).toBe("pending_sender");
     expect(sent.some((m) => /verification code/i.test(m.subject))).toBe(true);
+    expect(sent.some((m) => m.to === "jane@example.com")).toBe(false);
+  });
+
+  it("session send with a mismatched sender email stays pending_sender", async () => {
+    const db = await createTestDb();
+    const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+    const sent: { to: string; subject: string; text: string }[] = [];
+    const { adapter } = createFakeAuth();
+    setDeps({
+      db,
+      store,
+      auth: adapter,
+      mailer: { sendMail: async (m) => { sent.push(m); } },
+    });
+    const cookie = await magicCookie("someone@example.com");
+    const pdf = await minimalPdf();
+    const body = new FormData();
+    body.set("title", "Repair authorization");
+    body.set("sender_email", "shop@example.com");
+    body.set("signers", JSON.stringify([{ name: "Jane", email: "jane@example.com" }]));
+    body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
+    const res = await postDocument(
+      new Request("http://sign.test/v1/documents", {
+        method: "POST",
+        headers: { cookie },
+        body,
+      }),
+    );
+    expect(res.status).toBe(201);
+    const json = (await res.json()) as { status: string };
+    expect(json.status).toBe("pending_sender");
+    expect(sent.some((m) => m.to === "shop@example.com" && /verification code/i.test(m.subject))).toBe(true);
+    expect(sent.some((m) => m.to === "jane@example.com")).toBe(false);
   });
 
   it("OTP verify is 429 when 20 sends in the window already exist", { timeout: 60_000 }, async () => {
