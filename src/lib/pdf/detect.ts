@@ -1,5 +1,8 @@
 import {
+  clampArea,
+  DEFAULT_FIELD_SIZES,
   defaultRequired,
+  defaultRoleName,
   type DocumentField,
   type FieldArea,
   type FieldType,
@@ -25,16 +28,6 @@ const LABEL_RE = /([a-z][a-z '()/-]{0,40})\s*:\s*$/i;
 
 const MAX_CANDIDATES = 50;
 
-// Percent-of-page sizes for boxes placed next to a bare label.
-const LABEL_BOX_SIZES: Record<FieldType, { w: number; h: number }> = {
-  signature: { w: 22, h: 5 },
-  initials: { w: 8, h: 5 },
-  date: { w: 14, h: 3.5 },
-  name: { w: 18, h: 3.5 },
-  text: { w: 18, h: 3.5 },
-  checkbox: { w: 3, h: 3 },
-};
-
 function classifyLabel(label: string): FieldType | null {
   const l = label.toLowerCase();
   if (/\bsign(ature|ed by|s? here)?\b/.test(l) || l === "x") return "signature";
@@ -42,18 +35,6 @@ function classifyLabel(label: string): FieldType | null {
   if (/\bdate[a-z]*\b/.test(l)) return "date";
   if (/\bname\b/.test(l)) return "name";
   return null;
-}
-
-function clampArea(area: FieldArea): FieldArea {
-  const w = Math.min(area.w, 100);
-  const h = Math.min(area.h, 100);
-  return {
-    ...area,
-    w,
-    h,
-    x: Math.min(Math.max(area.x, 0), 100 - w),
-    y: Math.min(Math.max(area.y, 0), 100 - h),
-  };
 }
 
 type Span = { item: LocatedItem; start: number; end: number };
@@ -133,7 +114,7 @@ function detectOnLine(
     const type = classifyLabel(label[1]!.trim());
     if (type) {
       const labelArea = charRangeBox(line, 0, line.text.length, viewport, page);
-      const size = LABEL_BOX_SIZES[type];
+      const size = DEFAULT_FIELD_SIZES[type];
       found.push({
         type,
         area: clampArea({
@@ -168,7 +149,7 @@ export async function detectFieldCandidates(
         fields.push({
           name: `detected_${type}_${n}`,
           type,
-          role: "Signer 1",
+          role: defaultRoleName(1),
           required: defaultRequired(type),
           readonly: false,
           areas: [clampArea(expandArea(area, type))],

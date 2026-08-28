@@ -99,6 +99,29 @@ export function defaultRequired(type: FieldType): boolean {
   return requiredByType[type];
 }
 
+// Percent-of-page box sizes shared by the editor palette and the detectors,
+// so a size change can't silently desync suggestion boxes from placed fields.
+export const DEFAULT_FIELD_SIZES: Record<FieldType, { w: number; h: number }> = {
+  signature: { w: 22, h: 5 },
+  initials: { w: 8, h: 5 },
+  date: { w: 14, h: 3.5 },
+  name: { w: 18, h: 3.5 },
+  text: { w: 18, h: 3.5 },
+  checkbox: { w: 3, h: 3 },
+};
+
+export function clampArea(area: FieldArea): FieldArea {
+  const w = Math.min(area.w, 100);
+  const h = Math.min(area.h, 100);
+  return {
+    ...area,
+    w,
+    h,
+    x: Math.min(Math.max(area.x, 0), 100 - w),
+    y: Math.min(Math.max(area.y, 0), 100 - h),
+  };
+}
+
 export function mergeFields(
   a: DocumentField[],
   b: DocumentField[],

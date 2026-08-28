@@ -9,6 +9,9 @@ function jsonError(status: number, error: string, code: string): Response {
   return Response.json({ error, code }, { status });
 }
 
+/** The model declined or its reply was cut off — not a fact about the document. */
+export class DetectBlockedError extends Error {}
+
 async function claudeGenerate(prompt: string): Promise<string> {
   const { default: Anthropic } = await import("@anthropic-ai/sdk");
   const client = new Anthropic({ apiKey: getEnv().ANTHROPIC_API_KEY });
@@ -17,7 +20,12 @@ async function claudeGenerate(prompt: string): Promise<string> {
     max_tokens: 16000,
     messages: [{ role: "user", content: prompt }],
   });
-  if (response.stop_reason === "refusal") return "[]";
+  if (
+    response.stop_reason === "refusal" ||
+    response.stop_reason === "max_tokens"
+  ) {
+    throw new DetectBlockedError(`unusable model reply: ${response.stop_reason}`);
+  }
   return response.content
     .filter((b) => b.type === "text")
     .map((b) => b.text)
@@ -60,6 +68,14 @@ export async function postDetectFields(
     if (err instanceof Error && err.message === "invalid_pdf") {
       return jsonError(400, "File must be a PDF", "invalid_pdf");
     }
+    if (err instanceof DetectBlockedError) {
+      return jsonError(
+        502,
+        "The AI couldn't process this document",
+        "detect_failed",
+      );
+    }
+    console.error("detect-fields failed:", err);
     return jsonError(502, "Detection failed", "detect_failed");
   }
 }

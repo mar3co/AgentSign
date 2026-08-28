@@ -13,7 +13,7 @@ export class DocxUnavailableError extends Error {
   code = "docx_unavailable" as const;
 }
 export class DocxConvertError extends Error {
-  code = "docx_invalid" as const;
+  code = "invalid_docx" as const;
 }
 
 /** DOCX files are zip containers (PK\x03\x04) — pair the magic with mime/name. */
@@ -93,12 +93,21 @@ export async function docxToPdf(bytes: Uint8Array): Promise<Uint8Array> {
   }
 
   const { executablePath, args } = await chromiumExecutable();
-  const puppeteer = await import("puppeteer-core");
-  const browser = await puppeteer.launch({
-    executablePath,
-    args,
-    headless: true,
-  });
+  let browser;
+  try {
+    const puppeteer = await import("puppeteer-core");
+    browser = await puppeteer.launch({
+      executablePath,
+      args,
+      headless: true,
+    });
+  } catch (err) {
+    // A present-but-broken Chromium is an infrastructure problem, not a
+    // problem with the uploaded file.
+    const e = new DocxUnavailableError("could not launch chromium");
+    e.cause = err;
+    throw e;
+  }
   try {
     const page = await browser.newPage();
     await page.setContent(pageHtml(html), { waitUntil: "load" });

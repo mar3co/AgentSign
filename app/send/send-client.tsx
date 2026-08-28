@@ -290,6 +290,11 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
         body: data,
       });
       if (!res.ok) {
+        // 404 means the flag flipped off after this page loaded.
+        if (res.status === 404) {
+          setError("AI detection is not available right now.");
+          return;
+        }
         const body = (await res.json().catch(() => null)) as {
           error?: string;
         } | null;

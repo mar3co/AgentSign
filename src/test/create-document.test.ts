@@ -1552,3 +1552,52 @@ describe("POST /v1/documents on-page fields", () => {
     expect(row!.message).toBe("Please sign before Friday.");
   });
 });
+
+describe("POST /v1/documents acroform import", () => {
+  async function fillableUpload(signers: unknown[]) {
+    const db = await createTestDb();
+    const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+    setDeps({
+      db,
+      store,
+      mailer: { sendMail: async () => {} },
+      now: () => new Date(),
+    });
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    const field = doc.getForm().createTextField("Approved By");
+    field.addToPage(page, { x: 72, y: 700, width: 200, height: 18 });
+    const pdf = await doc.save();
+    const body = new FormData();
+    body.set("title", "Order form");
+    body.set("sender_email", "shop@example.com");
+    body.set("signers", JSON.stringify(signers));
+    body.set("file", new Blob([pdf as BlobPart], { type: "application/pdf" }), "form.pdf");
+    const res = await postDocument(
+      new Request("http://sign.test/v1/documents", { method: "POST", body }),
+    );
+    return { db, res };
+  }
+
+  it("binds imported fields to a custom signer role", { timeout: 60_000 }, async () => {
+    const { db, res } = await fillableUpload([
+      { name: "Jane", email: "jane@example.com", role: "Buyer" },
+    ]);
+    expect(res.status).toBe(201);
+    const [row] = await db.select().from(documents);
+    const fields = (row!.fields ?? []) as { name: string; role: string }[];
+    expect(
+      fields.some((f) => f.name === "acro_Approved By" && f.role === "Buyer"),
+    ).toBe(true);
+  });
+
+  it("skips the import when signer roles are ambiguous", { timeout: 60_000 }, async () => {
+    const { db, res } = await fillableUpload([
+      { name: "Jane", email: "jane@example.com", role: "Buyer" },
+      { name: "Joe", email: "joe@example.com", role: "Buyer" },
+    ]);
+    expect(res.status).toBe(201);
+    const [row] = await db.select().from(documents);
+    expect((row!.fields ?? []) as unknown[]).toEqual([]);
+  });
+});

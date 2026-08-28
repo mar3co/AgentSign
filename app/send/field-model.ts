@@ -1,9 +1,12 @@
 import {
+  DEFAULT_FIELD_SIZES,
   defaultRequired,
   defaultRoleName,
   type DocumentField,
   type FieldType,
 } from "@/src/lib/pdf/fields";
+
+export { DEFAULT_FIELD_SIZES };
 
 export type PlacedField = {
   id: string;
@@ -29,15 +32,6 @@ export const SIGNER_COLORS = [
 export function signerColor(index: number): string {
   return SIGNER_COLORS[index % SIGNER_COLORS.length]!;
 }
-
-export const DEFAULT_FIELD_SIZES: Record<FieldType, { w: number; h: number }> = {
-  signature: { w: 22, h: 5 },
-  initials: { w: 8, h: 5 },
-  date: { w: 14, h: 3.5 },
-  name: { w: 18, h: 3.5 },
-  text: { w: 18, h: 3.5 },
-  checkbox: { w: 3, h: 3 },
-};
 
 let nextId = 0;
 function localId(): string {
@@ -81,6 +75,8 @@ export function makePlacedField(
 /**
  * Detected suggestions become ordinary placed fields (assigned to the first
  * signer) so the sender can move, resize, or delete them before sending.
+ * Assumes single-area suggestion fields: names, roles, and default values
+ * are dropped, and multi-area fields split into independent placed fields.
  */
 export function placedFromDetected(fields: DocumentField[]): PlacedField[] {
   return fields.flatMap((f) =>

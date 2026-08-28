@@ -7,7 +7,9 @@ import {
   type PDFRef,
 } from "pdf-lib";
 import {
+  clampArea,
   defaultRequired,
+  defaultRoleName,
   type DocumentField,
   type FieldArea,
   type FieldType,
@@ -52,7 +54,7 @@ function defaultValueOf(field: PDFField): string | boolean | undefined {
 
 type Collected = { field: DocumentField; source: PDFField };
 
-function collect(doc: PDFDocument): Collected[] {
+function collect(doc: PDFDocument, role: string): Collected[] {
   let acroFields: PDFField[];
   try {
     acroFields = doc.getForm().getFields();
@@ -90,27 +92,35 @@ function collect(doc: PDFDocument): Collected[] {
       if (pageIndex === undefined) continue;
       const rect = widget.getRectangle();
       if (!(rect.width > 0) || !(rect.height > 0)) continue;
-      areas.push(
-        pageRectToArea(
-          pageSpaceOf(pages[pageIndex]!),
-          { x: rect.x, y: rect.y, w: rect.width, h: rect.height },
-          pageIndex + 1,
-        ),
+      const area = pageRectToArea(
+        pageSpaceOf(pages[pageIndex]!),
+        { x: rect.x, y: rect.y, w: rect.width, h: rect.height },
+        pageIndex + 1,
       );
+      // Widgets parked outside the visible page (cropped PDFs) aren't
+      // real inputs; clamping them in would surface hidden fields.
+      if (
+        area.x >= 100 ||
+        area.y >= 100 ||
+        area.x + area.w <= 0 ||
+        area.y + area.h <= 0
+      ) {
+        continue;
+      }
+      areas.push(clampArea(area));
     }
     if (areas.length === 0) continue;
 
+    const defaultValue = defaultValueOf(source);
     out.push({
       source,
       field: {
         name: importedName(source.getName(), i, used),
         type,
-        role: "Signer 1",
+        role,
         required: source.isRequired() || defaultRequired(type),
         readonly: false,
-        ...(defaultValueOf(source) !== undefined
-          ? { default_value: defaultValueOf(source) }
-          : {}),
+        ...(defaultValue !== undefined ? { default_value: defaultValue } : {}),
         areas,
       },
     });
@@ -121,10 +131,11 @@ function collect(doc: PDFDocument): Collected[] {
 /** Read fillable AcroForm fields as DocumentFields without touching the PDF. */
 export async function extractAcroFields(
   bytes: Uint8Array,
+  role: string = defaultRoleName(1),
 ): Promise<DocumentField[]> {
   try {
     const doc = await PDFDocument.load(bytes);
-    return collect(doc).map((c) => c.field);
+    return collect(doc, role).map((c) => c.field);
   } catch {
     return []; // Import is best-effort; an unreadable form just means no fields.
   }
@@ -136,10 +147,11 @@ export async function extractAcroFields(
  */
 export async function importAcroFields(
   bytes: Uint8Array,
+  role: string = defaultRoleName(1),
 ): Promise<AcroImportResult> {
   try {
     const doc = await PDFDocument.load(bytes);
-    const collected = collect(doc);
+    const collected = collect(doc, role);
     if (collected.length === 0) return { fields: [], pdf: bytes };
     const form = doc.getForm();
     for (const c of collected) form.removeField(c.source);

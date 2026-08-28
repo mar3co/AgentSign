@@ -81,6 +81,30 @@ describe("extractAcroFields", () => {
     doc.addPage([612, 792]);
     expect(await extractAcroFields(await doc.save())).toEqual([]);
   });
+
+  it("binds imported fields to the given role", async () => {
+    const fields = await extractAcroFields(await fillablePdf(), "Buyer");
+    expect(fields.length).toBeGreaterThan(0);
+    expect(fields.every((f) => f.role === "Buyer")).toBe(true);
+  });
+
+  it("clamps partially off-page widgets and skips fully off-page ones", async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    const form = doc.getForm();
+    const partial = form.createTextField("Partial");
+    partial.addToPage(page, { x: 560, y: 700, width: 100, height: 18 });
+    const hidden = form.createTextField("Hidden");
+    hidden.addToPage(page, { x: 700, y: 700, width: 100, height: 18 });
+
+    const fields = await extractAcroFields(await doc.save());
+    const names = fields.map((f) => f.name);
+    expect(names).toContain("acro_Partial");
+    expect(names).not.toContain("acro_Hidden");
+    const area = fields.find((f) => f.name === "acro_Partial")!.areas[0]!;
+    expect(area.x).toBeGreaterThanOrEqual(0);
+    expect(area.x + area.w).toBeLessThanOrEqual(100);
+  });
 });
 
 describe("importAcroFields", () => {

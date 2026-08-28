@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   defaultRequired,
+  defaultRoleName,
   fieldTypes,
   type DocumentField,
 } from "./fields.js";
@@ -72,11 +73,15 @@ export function parseAiFields(raw: string): DocumentField[] {
   } catch {
     return [];
   }
-  const parsed = z.array(aiFieldSchema).safeParse(json);
-  if (!parsed.success) return [];
+  if (!Array.isArray(json)) return [];
+  // Element-wise so one malformed entry doesn't discard valid suggestions.
+  const valid = json.flatMap((item) => {
+    const parsed = aiFieldSchema.safeParse(item);
+    return parsed.success ? [parsed.data] : [];
+  });
 
   const counts = new Map<string, number>();
-  return parsed.data.slice(0, MAX_AI_FIELDS).map((f) => {
+  return valid.slice(0, MAX_AI_FIELDS).map((f) => {
     const w = Math.min(Math.max(f.w, 1), 100);
     const h = Math.min(Math.max(f.h, 1), 100);
     const n = (counts.get(f.type) ?? 0) + 1;
@@ -84,7 +89,7 @@ export function parseAiFields(raw: string): DocumentField[] {
     return {
       name: `ai_${f.type}_${n}`,
       type: f.type,
-      role: "Signer 1",
+      role: defaultRoleName(1),
       required: defaultRequired(f.type),
       readonly: false,
       areas: [

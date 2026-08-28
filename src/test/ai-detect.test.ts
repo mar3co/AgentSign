@@ -1,8 +1,37 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import { aiDetectFields, parseAiFields } from "../lib/pdf/aiDetect.js";
-import { postDetectFields } from "../routes/detect.js";
+import { DetectBlockedError, postDetectFields } from "../routes/detect.js";
 import { resetEnvCache } from "../env.js";
+import type { AuthAdapter } from "../lib/auth/supabase.js";
+import { resetDeps, setDeps } from "../lib/deps.js";
+
+function authedDeps() {
+  const adapter: AuthAdapter = {
+    sendMagicLink: async () => {},
+    signInWithPassword: async () => ({
+      ok: false,
+      error: "no",
+      code: "invalid_credentials",
+    }),
+    signUp: async () => ({ ok: true }),
+    startOAuth: async ({ redirectTo }) => ({ url: redirectTo }),
+    userFromCookie: async (header) =>
+      header ? { id: "u1", email: "u@example.com" } : null,
+    exchangeCode: async () => null,
+  };
+  setDeps({ auth: adapter });
+}
+
+function detectRequest(bytes: Uint8Array): Request {
+  const body = new FormData();
+  body.set("file", new Blob([bytes as BlobPart], { type: "application/pdf" }), "doc.pdf");
+  return new Request("http://test/v1/detect-fields", {
+    method: "POST",
+    headers: { cookie: "sign_session=tok" },
+    body,
+  });
+}
 
 async function simplePdf(): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
@@ -15,6 +44,8 @@ async function simplePdf(): Promise<Uint8Array> {
 afterEach(() => {
   vi.unstubAllEnvs();
   resetEnvCache();
+  resetDeps();
+  vi.restoreAllMocks();
 });
 
 describe("parseAiFields", () => {
@@ -78,5 +109,67 @@ describe("postDetectFields", () => {
       async () => "[]",
     );
     expect(res.status).toBe(401);
+  });
+
+  it("503s when ANTHROPIC_API_KEY is not configured", async () => {
+    vi.stubEnv("SIGN_FLAG_AI_FIELD_DETECT", "1");
+    vi.stubEnv("ANTHROPIC_API_KEY", "");
+    resetEnvCache();
+    authedDeps();
+    const res = await postDetectFields(detectRequest(await simplePdf()), async () => "[]");
+    expect(res.status).toBe(503);
+    const json = (await res.json()) as { code: string };
+    expect(json.code).toBe("not_configured");
+  });
+
+  it("returns detected fields for an authenticated request", async () => {
+    vi.stubEnv("SIGN_FLAG_AI_FIELD_DETECT", "1");
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    resetEnvCache();
+    authedDeps();
+    const res = await postDetectFields(detectRequest(await simplePdf()), async () =>
+      JSON.stringify([{ type: "signature", page: 1, x: 10, y: 88, w: 22, h: 5 }]),
+    );
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { fields: { name: string }[] };
+    expect(json.fields.map((f) => f.name)).toEqual(["ai_signature_1"]);
+  });
+
+  it("400s for bytes that are not a PDF", async () => {
+    vi.stubEnv("SIGN_FLAG_AI_FIELD_DETECT", "1");
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    resetEnvCache();
+    authedDeps();
+    const res = await postDetectFields(
+      detectRequest(new TextEncoder().encode("not a pdf")),
+      async () => "[]",
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("502s distinctly when the model blocks or truncates", async () => {
+    vi.stubEnv("SIGN_FLAG_AI_FIELD_DETECT", "1");
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    resetEnvCache();
+    authedDeps();
+    const res = await postDetectFields(detectRequest(await simplePdf()), async () => {
+      throw new DetectBlockedError("unusable model reply: refusal");
+    });
+    expect(res.status).toBe(502);
+    const json = (await res.json()) as { error: string };
+    expect(json.error).toBe("The AI couldn't process this document");
+  });
+
+  it("502s and logs when the model call fails", async () => {
+    vi.stubEnv("SIGN_FLAG_AI_FIELD_DETECT", "1");
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    resetEnvCache();
+    authedDeps();
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await postDetectFields(detectRequest(await simplePdf()), async () => {
+      throw new Error("api down");
+    });
+    expect(res.status).toBe(502);
+    expect(logged).toHaveBeenCalled();
   });
 });

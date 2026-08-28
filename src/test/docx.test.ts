@@ -53,6 +53,6 @@ describe("docxToPdf", () => {
   it("rejects bytes that are not a DOCX", async () => {
     await expect(
       docxToPdf(new Uint8Array([1, 2, 3, 4])),
-    ).rejects.toMatchObject({ code: "docx_invalid" });
+    ).rejects.toMatchObject({ code: "invalid_docx" });
   });
 });

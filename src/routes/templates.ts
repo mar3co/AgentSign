@@ -345,7 +345,8 @@ export async function createTemplate(req: Request): Promise<Response> {
     const parsed = parseRoles(rolesRaw);
     if (!parsed.ok) return parsed.response;
     roleNames = parsed.names;
-    const tagged = await parsePdfAndFields(bytes, fieldsRaw);
+    // AcroForm fields bind to the template's first role.
+    const tagged = await parsePdfAndFields(bytes, fieldsRaw, roleNames[0] ?? null);
     if (!tagged.ok) return tagged.response;
     bytes = tagged.storedBytes;
     fields = tagged.fields;

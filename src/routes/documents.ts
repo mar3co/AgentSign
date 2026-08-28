@@ -45,6 +45,7 @@ import {
   type DocumentField,
 } from "../lib/pdf/fields.js";
 import {
+  DocxConvertError,
   DocxUnavailableError,
   docxToPdf,
   isDocx,
@@ -360,6 +361,7 @@ function parseOriginField(
 export async function parsePdfAndFields(
   bytes: Uint8Array,
   fieldsRaw: unknown,
+  acroRole: string | null = null,
 ): Promise<
   | { ok: true; fields: DocumentField[]; storedBytes: Uint8Array }
   | { ok: false; response: Response }
@@ -412,16 +414,20 @@ export async function parsePdfAndFields(
     };
   }
 
-  // Fillable PDFs: import AcroForm widgets as fields and strip them from the
-  // stored copy. Best-effort — if the imported fields can't merge (limits,
-  // name conflicts), keep the upload working as it did without the import.
+  // Fillable PDFs: import AcroForm widgets as fields bound to `acroRole` and
+  // strip them from the stored copy. Callers pass null when there is no role
+  // the fields could bind to (no human party, ambiguous duplicate roles).
+  // Best-effort — if the imported fields can't merge (limits, name
+  // conflicts), keep the upload working as it did without the import.
   let fields = merged.fields;
-  const acro = await importAcroFields(storedBytes);
-  if (acro.fields.length > 0) {
-    const withAcro = mergeFields(merged.fields, acro.fields);
-    if (withAcro.ok) {
-      fields = withAcro.fields;
-      storedBytes = acro.pdf;
+  if (acroRole) {
+    const acro = await importAcroFields(storedBytes, acroRole);
+    if (acro.fields.length > 0) {
+      const withAcro = mergeFields(merged.fields, acro.fields);
+      if (withAcro.ok) {
+        fields = withAcro.fields;
+        storedBytes = acro.pdf;
+      }
     }
   }
 
@@ -606,8 +612,9 @@ export async function normalizeUploadToPdf(
     };
   }
   if (isDocx(bytes, file.type, name)) {
+    let converted: Uint8Array;
     try {
-      return { ok: true, bytes: await docxToPdf(bytes) };
+      converted = await docxToPdf(bytes);
     } catch (err) {
       if (err instanceof DocxUnavailableError) {
         return {
@@ -619,11 +626,26 @@ export async function normalizeUploadToPdf(
           ),
         };
       }
+      if (err instanceof DocxConvertError) {
+        return {
+          ok: false,
+          response: jsonError(400, "Could not read the DOCX file", "invalid_docx"),
+        };
+      }
+      // Anything else is our failure, not the file's — don't blame the upload.
+      console.error("DOCX conversion failed:", err);
       return {
         ok: false,
-        response: jsonError(400, "Could not read the DOCX file", "invalid_docx"),
+        response: jsonError(500, "DOCX conversion failed", "docx_error"),
       };
     }
+    if (converted.length > PDF_MAX_BYTES) {
+      return {
+        ok: false,
+        response: jsonError(400, "File exceeds maximum size", "file_too_large"),
+      };
+    }
+    return { ok: true, bytes: converted };
   }
   return {
     ok: false,
@@ -1054,7 +1076,20 @@ export async function createDocument(req: Request): Promise<Response> {
   if (!normalized.ok) return normalized.response;
   const bytes = normalized.bytes;
 
-  const tagged = await parsePdfAndFields(bytes, form.get("fields"));
+  // AcroForm fields bind to the first human signer's role. With no human or
+  // ambiguous (duplicate) roles, skip the import rather than fail the upload.
+  const signerRoles = parsedSigners.map(
+    (s, i) => s.role?.trim() || defaultRoleName(i + 1),
+  );
+  const firstHuman = parsedSigners.findIndex(
+    (s) => (s.kind ?? "human") === "human",
+  );
+  const acroRole =
+    firstHuman >= 0 && new Set(signerRoles).size === signerRoles.length
+      ? signerRoles[firstHuman]!
+      : null;
+
+  const tagged = await parsePdfAndFields(bytes, form.get("fields"), acroRole);
   if (!tagged.ok) return tagged.response;
   const extras = await parseDocumentExtras({
     valuesRaw: form.get("values"),
