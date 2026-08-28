@@ -1,5 +1,10 @@
-import { PDFDocument, PDFFont, StandardFonts, rgb } from "pdf-lib";
-import { areaToPdfRect } from "@/src/lib/pdf/fields";
+import { PDFDocument, PDFFont, StandardFonts, degrees, rgb } from "pdf-lib";
+import {
+  areaToDisplayRect,
+  displayPointToPage,
+  displayRectToPage,
+  pageSpaceOf,
+} from "@/src/lib/pdf/pageSpace";
 
 export type PatchBox = {
   id: string; // client-only id
@@ -49,11 +54,39 @@ export function clampPatch(p: PatchBox): PatchBox {
   };
 }
 
+/** A whiteout can't remove a tag field — the tag is detected from the
+ * document's text, which stays extractable under a drawn rectangle. */
+export function patchesCoverTags(
+  patches: PatchBox[],
+  tagFields: { areas: { page: number; x: number; y: number; w: number; h: number }[] }[],
+): boolean {
+  return patches.some((p) =>
+    tagFields.some((f) =>
+      f.areas.some(
+        (a) =>
+          a.page === p.page &&
+          a.x < p.x + p.w &&
+          a.x + a.w > p.x &&
+          a.y < p.y + p.h &&
+          a.y + a.h > p.y,
+      ),
+    ),
+  );
+}
+
 export function dropOutOfRangePatches(
   patches: PatchBox[],
   pageCount: number,
 ): PatchBox[] {
   return patches.filter((p) => p.page >= 1 && p.page <= pageCount);
+}
+
+/** Correction text the standard Helvetica font cannot encode. */
+export class PatchTextError extends Error {
+  constructor(text: string) {
+    super(`correction text cannot be printed: ${text}`);
+    this.name = "PatchTextError";
+  }
 }
 
 export async function applyPatches(
@@ -69,23 +102,38 @@ export async function applyPatches(
   for (const patch of patches) {
     const page = pages[patch.page - 1];
     if (!page) continue;
-    const { width: pageWidth, height: pageHeight } = page.getSize();
-    const rect = areaToPdfRect(pageWidth, pageHeight, patch);
-    const { x, y, w, h } = rect;
-    if (w <= 0 || h <= 0) continue;
+    const space = pageSpaceOf(page);
+    const display = areaToDisplayRect(space, patch);
+    if (display.w <= 0 || display.h <= 0) continue;
+    const rect = displayRectToPage(space, display);
 
-    page.drawRectangle({ x, y, width: w, height: h, color: rgb(1, 1, 1) });
+    page.drawRectangle({
+      x: rect.x,
+      y: rect.y,
+      width: rect.w,
+      height: rect.h,
+      color: rgb(1, 1, 1),
+    });
 
     if (patch.text) {
       if (!font) font = await doc.embedFont(StandardFonts.Helvetica);
-      const textY = Math.max(y, y + (h - patch.fontSize) / 2);
-      page.drawText(patch.text, {
-        x: x + 2,
-        y: textY,
-        size: patch.fontSize,
-        font,
-        color: rgb(0.1, 0.1, 0.1),
-      });
+      const anchor = displayPointToPage(
+        space,
+        display.x + 2,
+        Math.max(display.y, display.y + (display.h - patch.fontSize) / 2),
+      );
+      try {
+        page.drawText(patch.text, {
+          x: anchor.x,
+          y: anchor.y,
+          size: patch.fontSize,
+          font,
+          rotate: degrees(space.rotation),
+          color: rgb(0.1, 0.1, 0.1),
+        });
+      } catch {
+        throw new PatchTextError(patch.text);
+      }
     }
   }
 
