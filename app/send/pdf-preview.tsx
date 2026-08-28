@@ -9,10 +9,12 @@ export function PdfPreview({
   file,
   overlay,
   onPagesRendered,
+  onRenderFailed,
 }: {
   file: File;
   overlay?: (pageIndex: number) => ReactNode;
   onPagesRendered?: (pageCount: number) => void;
+  onRenderFailed?: () => void;
 }) {
   const [pages, setPages] = useState<PreviewPage[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -55,13 +57,16 @@ export function PdfPreview({
           onPagesRendered?.(out.length);
         }
       } catch {
-        if (!cancelled) setFailed(true);
+        if (!cancelled) {
+          setFailed(true);
+          onRenderFailed?.();
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [file, onPagesRendered]);
+  }, [file, onPagesRendered, onRenderFailed]);
 
   if (failed) {
     return (

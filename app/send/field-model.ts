@@ -84,7 +84,9 @@ export function serializeFields(placed: PlacedField[]): DocumentField[] {
     const n = (counts.get(f.type) ?? 0) + 1;
     counts.set(f.type, n);
     return {
-      name: `${f.type}_${n}`,
+      // "placed_" keeps click-placed names clear of {{tag}} names like
+      // "text_1", which would collide in the server's role+name merge.
+      name: `placed_${f.type}_${n}`,
       type: f.type,
       role: defaultRoleName(f.signerIndex + 1),
       required: f.required,

@@ -1,10 +1,15 @@
 // @vitest-environment happy-dom
 import { createElement, useEffect, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 
-const { applyPatchesMock } = vi.hoisted(() => ({
+const { applyPatchesMock, previewControls } = vi.hoisted(() => ({
   applyPatchesMock: vi.fn(async () => new Uint8Array([9, 9, 9])),
+  previewControls: {
+    auto: true,
+    onPagesRendered: undefined as ((n: number) => void) | undefined,
+    onRenderFailed: undefined as (() => void) | undefined,
+  },
 }));
 
 vi.mock("../../app/send/patch-model.js", async (importOriginal) => {
@@ -17,12 +22,16 @@ vi.mock("../../app/send/pdf-preview.js", () => ({
   PdfPreview: ({
     overlay,
     onPagesRendered,
+    onRenderFailed,
   }: {
     overlay?: (pageIndex: number) => ReactNode;
     onPagesRendered?: (pageCount: number) => void;
+    onRenderFailed?: () => void;
   }) => {
     useEffect(() => {
-      onPagesRendered?.(1);
+      previewControls.onPagesRendered = onPagesRendered;
+      previewControls.onRenderFailed = onRenderFailed;
+      if (previewControls.auto) onPagesRendered?.(1);
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
     return createElement(
@@ -136,6 +145,7 @@ describe("SendClient", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    previewControls.auto = true;
   });
 
   it("prefills sender email from whoami and starts with one signer", async () => {
@@ -372,6 +382,39 @@ describe("SendClient", () => {
     await fillAndSubmit();
     await screen.findByText(/confirm to send/i);
     expect(applyPatchesMock).not.toHaveBeenCalled();
+  });
+
+  it("disables Send until the preview settles", async () => {
+    previewControls.auto = false;
+    stubDocumentsFetch();
+    render(createElement(SendClient));
+    await selectPdf();
+    const send = screen.getByRole("button", {
+      name: /^send$/i,
+    }) as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+    act(() => previewControls.onPagesRendered?.(1));
+    expect(send.disabled).toBe(false);
+  });
+
+  it("clears corrections with a notice when the preview fails", async () => {
+    previewControls.auto = false;
+    stubDocumentsFetch();
+    render(createElement(SendClient));
+    await selectPdf();
+    fireEvent.click(screen.getByRole("button", { name: /whiteout/i }));
+    const layer = screen.getByTestId("field-layer");
+    fireEvent.pointerDown(layer, { clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(layer, { clientX: 250, clientY: 150 });
+    fireEvent.pointerUp(layer, { clientX: 250, clientY: 150 });
+    expect(screen.getByRole("button", { name: /delete patch/i })).toBeTruthy();
+    act(() => previewControls.onRenderFailed?.());
+    expect(screen.queryByRole("button", { name: /delete patch/i })).toBeNull();
+    expect(screen.getByText(/preview could not be rendered/i)).toBeTruthy();
+    expect(
+      (screen.getByRole("button", { name: /^send$/i }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
   });
 
   it("keeps the same file input mounted across the remount into the preview layout", async () => {

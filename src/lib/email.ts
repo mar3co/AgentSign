@@ -135,7 +135,13 @@ export function inviteEmail(input: {
   message?: string | null;
 }): Pick<MailMessage, "subject" | "text" | "html"> {
   const messageLines = input.message
-    ? [``, `Message from ${input.senderEmail}:`, input.message]
+    ? [
+        ``,
+        `Message from ${input.senderEmail}:`,
+        // Quote every line so a multi-line message can't pose as part of
+        // the email itself in the plain-text variant.
+        ...input.message.split("\n").map((line) => `> ${line}`),
+      ]
     : [];
   const text = [
     `${senderWho(input.senderEmail, input.brand)} asked you to sign "${input.title}".`,

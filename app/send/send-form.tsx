@@ -13,7 +13,7 @@ import { UploadDropzone } from "@/components/upload-dropzone";
 import { FieldOverlay } from "@/app/send/field-editor/overlay";
 import { FieldPalette } from "@/app/send/field-editor/palette";
 import { removeSignerFields, type PlacedField } from "@/app/send/field-model";
-import type { PatchBox } from "@/app/send/patch-model";
+import { patchesCoverTags, type PatchBox } from "@/app/send/patch-model";
 import { PdfPreview } from "@/app/send/pdf-preview";
 import type { DocumentField, FieldType } from "@/src/lib/pdf/fields";
 
@@ -44,8 +44,10 @@ export function SendForm(props: {
   message: string;
   setMessage: (v: string) => void;
   onPagesRendered: (n: number) => void;
+  onPreviewFailed: () => void;
   error: string | null;
   busy: boolean;
+  previewPending: boolean;
   onSubmit: (e: FormEvent<HTMLFormElement>) => void;
 }) {
   const {
@@ -70,8 +72,10 @@ export function SendForm(props: {
     message,
     setMessage,
     onPagesRendered,
+    onPreviewFailed,
     error,
     busy,
+    previewPending,
     onSubmit,
   } = props;
 
@@ -94,9 +98,10 @@ export function SendForm(props: {
     }
     setSigners((prev) => prev.filter((_, j) => j !== i));
     setPlaced((prev) => removeSignerFields(prev, i));
-    setActiveSigner((prev) =>
-      prev >= signers.length - 1 ? Math.max(signers.length - 2, 0) : prev,
-    );
+    setActiveSigner((prev) => {
+      const next = prev > i ? prev - 1 : prev;
+      return Math.max(0, Math.min(next, signers.length - 2));
+    });
   }
 
   const formFields = (
@@ -114,6 +119,16 @@ export function SendForm(props: {
       {replaceNotice ? (
         <Alert>
           <AlertDescription>{replaceNotice}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {patchesCoverTags(patches, tagFields) ? (
+        <Alert>
+          <AlertDescription>
+            A correction covers a tag field. Covering a tag hides the text
+            but keeps the field, because fields come from the document text.
+            To remove the field, delete the tag from the PDF itself.
+          </AlertDescription>
         </Alert>
       ) : null}
 
@@ -261,7 +276,11 @@ export function SendForm(props: {
         </Alert>
       ) : null}
 
-      <Button className="self-start px-8" type="submit" disabled={busy}>
+      <Button
+        className="self-start px-8"
+        type="submit"
+        disabled={busy || previewPending}
+      >
         Send
       </Button>
     </>
@@ -290,6 +309,7 @@ export function SendForm(props: {
             <PdfPreview
               file={file}
               onPagesRendered={onPagesRendered}
+              onRenderFailed={onPreviewFailed}
               overlay={(pageIndex) => (
                 <FieldOverlay
                   pageIndex={pageIndex}

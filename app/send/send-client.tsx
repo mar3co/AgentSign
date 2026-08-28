@@ -23,6 +23,7 @@ import {
 import {
   applyPatches,
   dropOutOfRangePatches,
+  PatchTextError,
   type PatchBox,
 } from "@/app/send/patch-model";
 import { SendForm, type Order, type SignerRow } from "@/app/send/send-form";
@@ -79,6 +80,10 @@ export function SendClient() {
   const [order, setOrder] = useState<Order>("sequential");
   const [message, setMessage] = useState("");
   const [pageCount, setPageCount] = useState<number | null>(null);
+  // False from the moment a file is chosen until its preview renders or
+  // fails; submitting before then would burn patches against pages the
+  // out-of-range cleanup hasn't seen yet.
+  const [previewSettled, setPreviewSettled] = useState(true);
   const [replaceNotice, setReplaceNotice] = useState<string | null>(null);
   const [documentId, setDocumentId] = useState<string | null>(null);
   const [done, setDone] = useState<Done | null>(null);
@@ -140,6 +145,7 @@ export function SendClient() {
   const handleFileChange = useCallback((f: File | null) => {
     setReplaceNotice(null);
     setFile(f);
+    setPreviewSettled(!f);
     if (!f) {
       setPlaced([]);
       setPatches([]);
@@ -150,6 +156,7 @@ export function SendClient() {
   // Stable identity (via refs) so PdfPreview's effect only re-runs when the
   // file itself changes, not on every render.
   const handlePagesRendered = useCallback((n: number) => {
+    setPreviewSettled(true);
     setPageCount(n);
     const currentPlaced = placedRef.current;
     const currentPatches = patchesRef.current;
@@ -162,6 +169,20 @@ export function SendClient() {
       setPatches(keptPatches);
       setReplaceNotice(
         `Removed ${removedFields} field${removedFields === 1 ? "" : "s"} and ${removedPatches} correction${removedPatches === 1 ? "" : "s"} that were on pages the new PDF doesn't have.`,
+      );
+    }
+  }, []);
+
+  // Without a preview there is no way to see or edit placed fields and
+  // patches, so they can't be trusted against this file — drop them.
+  const handlePreviewFailed = useCallback(() => {
+    setPreviewSettled(true);
+    setPageCount(null);
+    if (placedRef.current.length > 0 || patchesRef.current.length > 0) {
+      setPlaced([]);
+      setPatches([]);
+      setReplaceNotice(
+        "The preview could not be rendered, so placed fields and corrections were removed. You can still send this PDF as-is.",
       );
     }
   }, []);
@@ -219,8 +240,12 @@ export function SendClient() {
         return;
       }
       setDocumentId(json.id);
-    } catch {
-      setError("Could not send.");
+    } catch (err) {
+      setError(
+        err instanceof PatchTextError
+          ? "A correction contains characters that can't be printed. Edit its text and try again."
+          : "Could not send.",
+      );
     } finally {
       setBusy(false);
     }
@@ -373,8 +398,10 @@ export function SendClient() {
       message={message}
       setMessage={setMessage}
       onPagesRendered={handlePagesRendered}
+      onPreviewFailed={handlePreviewFailed}
       error={error}
       busy={busy}
+      previewPending={file !== null && !previewSettled}
       onSubmit={onSubmit}
     />
   );

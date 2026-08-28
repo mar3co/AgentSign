@@ -197,12 +197,18 @@ function PatchBoxView({
         <div
           className="flex w-full flex-col gap-1 p-1"
           onClick={(e) => e.stopPropagation()}
+          onBlur={(e) => {
+            // Only commit when focus leaves the editor entirely, not when
+            // it moves between the text and size inputs.
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+              commit();
+            }
+          }}
         >
           <input
             aria-label="Patch text"
             value={text}
             onChange={(e) => setText(e.target.value)}
-            onBlur={commit}
             onKeyDown={commitOnEnter}
             className="w-full rounded border px-1 text-[10px]"
           />
@@ -213,13 +219,12 @@ function PatchBoxView({
             max={48}
             value={fontSize}
             onChange={(e) => setFontSize(Number(e.target.value))}
-            onBlur={commit}
             onKeyDown={commitOnEnter}
             className="w-full rounded border px-1 text-[10px]"
           />
         </div>
       ) : (
-        <span className="truncate px-1">{patch.text}</span>
+        <span className="w-full truncate px-1 text-left">{patch.text}</span>
       )}
       <button
         type="button"
@@ -331,13 +336,23 @@ export function FieldOverlay(props: {
       onPointerMove={onPatchPointerMove}
       onPointerUp={onPatchPointerUp}
     >
+      {pagePatches.map((p) => (
+        <PatchBoxView
+          key={p.id}
+          patch={p}
+          onChange={onPatchChange}
+          onDelete={onPatchDelete}
+        />
+      ))}
+      {/* Above patches: a whiteout can't remove a tag field, so its
+          indicator must stay visible even when covered. */}
       {tagFields?.map((tf, i) =>
         tf.areas
           .filter((a) => a.page === page)
           .map((area, j) => (
             <div
               key={`tag-${i}-${j}`}
-              className="absolute flex items-center border border-dashed border-gray-400 bg-gray-400/10 px-1 text-[10px] text-gray-600"
+              className="pointer-events-none absolute flex items-center border border-dashed border-gray-400 bg-gray-400/10 px-1 text-[10px] text-gray-600"
               style={{
                 left: area.x + "%",
                 top: area.y + "%",
@@ -349,14 +364,6 @@ export function FieldOverlay(props: {
             </div>
           )),
       )}
-      {pagePatches.map((p) => (
-        <PatchBoxView
-          key={p.id}
-          patch={p}
-          onChange={onPatchChange}
-          onDelete={onPatchDelete}
-        />
-      ))}
       {patchPreview ? (
         <div
           className="pointer-events-none absolute border border-dashed border-gray-400 bg-white/60"

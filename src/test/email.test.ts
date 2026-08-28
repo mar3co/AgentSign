@@ -139,6 +139,18 @@ describe("email templates", () => {
     expect(mail.html).toContain("Please sign before Friday.");
   });
 
+  it("quotes every sender message line in the text variant", () => {
+    const mail = inviteEmail({
+      signUrl: "/s/tok123",
+      senderEmail: "shop@example.com",
+      title: "T",
+      expiresAt: new Date("2026-09-03T00:00:00Z"),
+      message: "Line one\nSign here: https://evil.example",
+    });
+    expect(mail.text).toContain("> Line one");
+    expect(mail.text).toContain("> Sign here: https://evil.example");
+  });
+
   it("escapes html in the sender message", () => {
     const mail = inviteEmail({
       signUrl: "/s/tok123",
