@@ -72,6 +72,8 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
   placedRef.current = placed;
   const patchesRef = useRef(patches);
   patchesRef.current = patches;
+  const fileRef = useRef(file);
+  fileRef.current = file;
 
   useEffect(() => {
     let cancelled = false;
@@ -303,6 +305,9 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
         credentials: "include",
         body: data,
       });
+      // The file may have been replaced while the model ran; errors and
+      // suggestions both belong to the old document.
+      if (fileRef.current !== f) return;
       if (!res.ok) {
         // 404 means the flag flipped off after this page loaded.
         if (res.status === 404) {

@@ -28,7 +28,7 @@ export type DocumentField = {
   areas: FieldArea[];
 };
 
-const MAX_FIELDS = 200;
+export const MAX_FIELDS = 200;
 const MAX_AREAS = 20;
 
 const requiredByType: Record<FieldType, boolean> = {

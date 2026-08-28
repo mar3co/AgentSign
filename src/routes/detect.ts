@@ -2,32 +2,12 @@ import { getEnv } from "../env.js";
 import { getAuth } from "../lib/auth/supabase.js";
 import { flagOn } from "../lib/flags.js";
 import { aiDetectFields } from "../lib/pdf/aiDetect.js";
+import { slidingWindowLimiter } from "../lib/rateLimit.js";
 
 const PDF_MAX_BYTES = 20 * 1024 * 1024;
 
 // Each request is a paid model call, so cap how fast one user can burn them.
-// Per-instance state: coarse protection against runaway loops, not a quota.
-const RATE_LIMIT = 10;
-const RATE_WINDOW_MS = 10 * 60 * 1000;
-const recentByUser = new Map<string, number[]>();
-
-function rateLimited(userId: string, now = Date.now()): boolean {
-  if (recentByUser.size > 1000) {
-    const cutoff = now - RATE_WINDOW_MS;
-    for (const [id, times] of recentByUser) {
-      if (times.every((t) => t <= cutoff)) recentByUser.delete(id);
-    }
-  }
-  const cutoff = now - RATE_WINDOW_MS;
-  const times = (recentByUser.get(userId) ?? []).filter((t) => t > cutoff);
-  if (times.length >= RATE_LIMIT) {
-    recentByUser.set(userId, times);
-    return true;
-  }
-  times.push(now);
-  recentByUser.set(userId, times);
-  return false;
-}
+const rateLimited = slidingWindowLimiter(10, 10 * 60 * 1000);
 
 function jsonError(status: number, error: string, code: string): Response {
   return Response.json({ error, code }, { status });
@@ -85,8 +65,9 @@ export async function postDetectFields(
   }
   const bytes = new Uint8Array(await file.arrayBuffer());
 
-  // Checked last so only requests that reach the model count against the
-  // cap — a misconfigured key or invalid upload shouldn't burn quota.
+  // Checked last so cheap rejections (flag, auth, key, malformed form)
+  // never count against the cap. A file that fails to parse still counts:
+  // the parse itself is work worth capping.
   if (rateLimited(user.id)) {
     return jsonError(
       429,

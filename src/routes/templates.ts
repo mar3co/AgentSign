@@ -339,7 +339,7 @@ export async function createTemplate(req: Request): Promise<Response> {
     if (!(file instanceof Blob)) {
       return jsonError(400, "A PDF file is required", "invalid_pdf");
     }
-    const normalized = await normalizeUploadToPdf(file);
+    const normalized = await normalizeUploadToPdf(file, gate.caller.user.id);
     if (!normalized.ok) return normalized.response;
     bytes = normalized.bytes;
     const parsed = parseRoles(rolesRaw);

@@ -1653,6 +1653,39 @@ describe("POST /v1/documents acroform import", () => {
     expect(imported?.role).toBe("Buyer");
   });
 
+  it("rejects a form with more fillable fields than the limit", { timeout: 60_000 }, async () => {
+    const db = await createTestDb();
+    const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+    setDeps({ db, store, mailer: { sendMail: async () => {} } });
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    const form = doc.getForm();
+    for (let i = 0; i < 201; i++) {
+      form.createTextField(`f${i}`).addToPage(page, {
+        x: 12 + (i % 5) * 118,
+        y: 760 - Math.floor(i / 5) * 18,
+        width: 100,
+        height: 12,
+      });
+    }
+    const body = new FormData();
+    body.set("title", "Tax packet");
+    body.set("sender_email", "shop@example.com");
+    body.set("signers", JSON.stringify([{ name: "Jane", email: "jane@example.com" }]));
+    body.set(
+      "file",
+      new Blob([(await doc.save()) as BlobPart], { type: "application/pdf" }),
+      "packet.pdf",
+    );
+    const res = await postDocument(
+      new Request("http://sign.test/v1/documents", { method: "POST", body }),
+    );
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as { error: string; code: string };
+    expect(json.code).toBe("invalid_fields");
+    expect(json.error).toContain("more fillable fields");
+  });
+
   it("keeps the sender's fields when an imported field collides", { timeout: 60_000 }, async () => {
     const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {

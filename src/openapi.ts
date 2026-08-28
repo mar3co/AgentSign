@@ -810,6 +810,7 @@ export const openapi = {
           "401": errorResponse,
           "403": errorResponse,
           "404": errorResponse,
+          "429": errorResponse,
           "500": errorResponse,
           "503": errorResponse,
         },

@@ -29,6 +29,7 @@ import {
   type Mailer,
 } from "../lib/email.js";
 import { sha256Hex } from "../lib/hash.js";
+import { slidingWindowLimiter } from "../lib/rateLimit.js";
 import {
   claimSends,
   ensureAccount,
@@ -40,6 +41,7 @@ import { parseEmbedOrigin } from "../lib/embed.js";
 import {
   defaultRoleName,
   fieldsFitPageCount,
+  MAX_FIELDS,
   mergeFields,
   parseFieldsJson,
   type DocumentField,
@@ -423,6 +425,18 @@ export async function parsePdfAndFields(
   if (acroRole) {
     const acro = await importAcroFields(storedBytes, acroRole);
     if (acro.fields.length > 0) {
+      // The editor previews every imported field, so silently sending a
+      // document with none of them is worse than refusing the upload.
+      if (merged.fields.length + acro.fields.length > MAX_FIELDS) {
+        return {
+          ok: false,
+          response: jsonError(
+            400,
+            `This form has more fillable fields than the ${MAX_FIELDS}-field limit. Flatten the PDF or remove some fields and try again.`,
+            "invalid_fields",
+          ),
+        };
+      }
       const withAcro = mergeFields(merged.fields, acro.fields);
       if (withAcro.ok) {
         fields = withAcro.fields;
@@ -586,12 +600,31 @@ function isPdf(bytes: Uint8Array, type: string): boolean {
   return magic || type === "application/pdf";
 }
 
+// DOCX conversion launches a browser, so cap how fast one caller can invoke
+// it — POST /v1/documents is reachable without credentials by design.
+const convertLimited = slidingWindowLimiter(10, 10 * 60 * 1000);
+
+/**
+ * Client IP for anonymous rate keys, as reported by the deployment's proxy.
+ * Vercel strips the client's copies of these headers; a self-hosted reverse
+ * proxy must overwrite them too, or callers can pick their own bucket.
+ */
+function clientIp(req: Request): string {
+  return (
+    req.headers.get("x-vercel-forwarded-for")?.split(",")[0]?.trim() ||
+    req.headers.get("x-real-ip")?.trim() ||
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    "anonymous"
+  );
+}
+
 /**
  * Uploads may be a PDF or a DOCX (converted to PDF here); everything after
  * this point works only with PDF bytes.
  */
 export async function normalizeUploadToPdf(
   file: Blob,
+  callerKey: string | null,
 ): Promise<{ ok: true; bytes: Uint8Array } | { ok: false; response: Response }> {
   if (file.size > PDF_MAX_BYTES) {
     return {
@@ -614,6 +647,16 @@ export async function normalizeUploadToPdf(
     };
   }
   if (isDocx(bytes, file.type, name)) {
+    if (callerKey && convertLimited(callerKey)) {
+      return {
+        ok: false,
+        response: jsonError(
+          429,
+          "Too many document conversions. Try again in a few minutes.",
+          "rate_limited",
+        ),
+      };
+    }
     let converted: Uint8Array;
     try {
       converted = await docxToPdf(bytes);
@@ -1081,7 +1124,61 @@ export async function createDocument(req: Request): Promise<Response> {
   if (!(file instanceof Blob)) {
     return jsonError(400, "A PDF file is required", "invalid_pdf");
   }
-  const normalized = await normalizeUploadToPdf(file);
+
+  const db = requireDb();
+  const store = requireStore();
+  if (!store) return storeUnavailableResponse();
+  const mailer = requireMailer();
+  const at = now();
+
+  // Credentials are resolved before the upload is processed: DOCX conversion
+  // launches a browser, and an invalid key must 401 before buying that work.
+  let liveUserId: string | null = null;
+  let viaOauth = false;
+  const raw = bearerToken(req);
+  if (raw) {
+    if (raw.startsWith("sign_oauth_")) {
+      viaOauth = true;
+      const grant = await lookupOauthGrant(db, raw);
+      if (!grant) return jsonError(401, "Unauthorized", "unauthorized");
+      const account = await accountForOauthGrant(db, grant);
+      if (!account) return jsonError(401, "Unauthorized", "unauthorized");
+      liveUserId = account.id;
+      senderEmail = account.email;
+    } else if (raw.startsWith("sign_live_")) {
+      const key = await lookupApiKey(db, raw);
+      if (
+        !key ||
+        key.kind !== "live" ||
+        !key.userId ||
+        key.expiresAt.getTime() <= at.getTime()
+      ) {
+        return jsonError(401, "Unauthorized", "unauthorized");
+      }
+      liveUserId = key.userId;
+      const [liveAccount] = await db
+        .select()
+        .from(accounts)
+        .where(eq(accounts.userId, liveUserId));
+      if (liveAccount?.email) {
+        senderEmail = liveAccount.email.trim().toLowerCase();
+      }
+    } else {
+      return jsonError(401, "Unauthorized", "unauthorized");
+    }
+  }
+  const cookieHeader = req.headers.get("cookie");
+  const sessionUser =
+    !liveUserId && cookieHeader
+      ? await getAuth().userFromCookie(cookieHeader)
+      : null;
+
+  // Conversion cost is capped per validated identity; anonymous callers
+  // share the proxy-reported client IP's bucket.
+  const normalized = await normalizeUploadToPdf(
+    file,
+    liveUserId ?? sessionUser?.id ?? clientIp(req),
+  );
   if (!normalized.ok) return normalized.response;
   const bytes = normalized.bytes;
 
@@ -1120,50 +1217,10 @@ export async function createDocument(req: Request): Promise<Response> {
     webhookSecret = newWebhookSecret();
   }
 
-  const db = requireDb();
-  const store = requireStore();
-  if (!store) return storeUnavailableResponse();
-  const mailer = requireMailer();
-  const at = now();
   const env = getEnv();
   const limit = Number(env.FREE_SEND_LIMIT);
   const windowDays = Number(env.FREE_SEND_WINDOW_DAYS);
   const windowStart = new Date(at.getTime() - windowDays * 86_400_000);
-
-  let liveUserId: string | null = null;
-  let viaOauth = false;
-  const raw = bearerToken(req);
-  if (raw) {
-    if (raw.startsWith("sign_oauth_")) {
-      viaOauth = true;
-      const grant = await lookupOauthGrant(db, raw);
-      if (!grant) return jsonError(401, "Unauthorized", "unauthorized");
-      const account = await accountForOauthGrant(db, grant);
-      if (!account) return jsonError(401, "Unauthorized", "unauthorized");
-      liveUserId = account.id;
-      senderEmail = account.email;
-    } else if (raw.startsWith("sign_live_")) {
-      const key = await lookupApiKey(db, raw);
-      if (
-        !key ||
-        key.kind !== "live" ||
-        !key.userId ||
-        key.expiresAt.getTime() <= at.getTime()
-      ) {
-        return jsonError(401, "Unauthorized", "unauthorized");
-      }
-      liveUserId = key.userId;
-      const [liveAccount] = await db
-        .select()
-        .from(accounts)
-        .where(eq(accounts.userId, liveUserId));
-      if (liveAccount?.email) {
-        senderEmail = liveAccount.email.trim().toLowerCase();
-      }
-    } else {
-      return jsonError(401, "Unauthorized", "unauthorized");
-    }
-  }
 
   if (liveUserId) {
     // OAuth grants are interactive agents: the account owner approves each
@@ -1199,11 +1256,8 @@ export async function createDocument(req: Request): Promise<Response> {
   // A logged-in user sending as their own verified address skips the code
   // unless they opted in; anyone else keeps it — the code is the only
   // proof they control the sender email.
-  const cookie = req.headers.get("cookie");
-  if (cookie) {
-    const sessionUser = await getAuth().userFromCookie(cookie);
+  if (sessionUser) {
     if (
-      sessionUser &&
       sessionUser.email.trim().toLowerCase() === senderEmail
     ) {
       await ensureAccount(db, sessionUser);

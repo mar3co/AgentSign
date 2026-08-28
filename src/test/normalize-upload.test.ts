@@ -25,6 +25,7 @@ describe("normalizeUploadToPdf", () => {
     const pdf = await minimalPdf();
     const result = await normalizeUploadToPdf(
       new File([pdf as BlobPart], "doc.pdf", { type: "application/pdf" }),
+      null,
     );
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.bytes).toEqual(new Uint8Array(pdf));
@@ -34,6 +35,7 @@ describe("normalizeUploadToPdf", () => {
     const big = new Uint8Array(20 * 1024 * 1024 + 1);
     const result = await normalizeUploadToPdf(
       new File([big as BlobPart], "big.pdf", { type: "application/pdf" }),
+      null,
     );
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.response.status).toBe(400);
@@ -43,6 +45,7 @@ describe("normalizeUploadToPdf", () => {
     const ole = new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0, 0, 0, 0]);
     const result = await normalizeUploadToPdf(
       new File([ole as BlobPart], "old.doc", { type: "application/msword" }),
+      null,
     );
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -55,6 +58,7 @@ describe("normalizeUploadToPdf", () => {
   it("rejects files that are neither PDF nor DOCX", async () => {
     const result = await normalizeUploadToPdf(
       new File(["hello" as BlobPart], "notes.txt", { type: "text/plain" }),
+      null,
     );
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.response.status).toBe(400);
@@ -63,14 +67,14 @@ describe("normalizeUploadToPdf", () => {
   it("converts a DOCX and returns the PDF bytes", async () => {
     const pdf = new Uint8Array(await minimalPdf());
     vi.mocked(docxToPdf).mockResolvedValueOnce(pdf);
-    const result = await normalizeUploadToPdf(docxFile());
+    const result = await normalizeUploadToPdf(docxFile(), null);
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.bytes).toBe(pdf);
   });
 
   it("maps an unreadable DOCX to 400 invalid_docx", async () => {
     vi.mocked(docxToPdf).mockRejectedValueOnce(new DocxConvertError("bad zip"));
-    const result = await normalizeUploadToPdf(docxFile());
+    const result = await normalizeUploadToPdf(docxFile(), null);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.response.status).toBe(400);
@@ -84,7 +88,7 @@ describe("normalizeUploadToPdf", () => {
       new DocxUnavailableError("no chromium"),
     );
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
-    const result = await normalizeUploadToPdf(docxFile());
+    const result = await normalizeUploadToPdf(docxFile(), null);
     expect(logged).toHaveBeenCalled();
     logged.mockRestore();
     expect(result.ok).toBe(false);
@@ -98,7 +102,7 @@ describe("normalizeUploadToPdf", () => {
   it("maps unexpected conversion failures to 500, not a file error", async () => {
     vi.mocked(docxToPdf).mockRejectedValueOnce(new Error("tmp full"));
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
-    const result = await normalizeUploadToPdf(docxFile());
+    const result = await normalizeUploadToPdf(docxFile(), null);
     expect(logged).toHaveBeenCalled();
     logged.mockRestore();
     expect(result.ok).toBe(false);
@@ -109,11 +113,30 @@ describe("normalizeUploadToPdf", () => {
     }
   });
 
+  it("rate-limits conversions per caller key", async () => {
+    const pdf = new Uint8Array(await minimalPdf());
+    vi.mocked(docxToPdf).mockResolvedValue(pdf);
+    for (let i = 0; i < 10; i++) {
+      const result = await normalizeUploadToPdf(docxFile(), "caller-a");
+      expect(result.ok).toBe(true);
+    }
+    const limited = await normalizeUploadToPdf(docxFile(), "caller-a");
+    expect(limited.ok).toBe(false);
+    if (!limited.ok) {
+      expect(limited.response.status).toBe(429);
+      const json = (await limited.response.json()) as { code: string };
+      expect(json.code).toBe("rate_limited");
+    }
+    // A different caller is unaffected; no key skips the limiter.
+    expect((await normalizeUploadToPdf(docxFile(), "caller-b")).ok).toBe(true);
+    expect((await normalizeUploadToPdf(docxFile(), null)).ok).toBe(true);
+  });
+
   it("rejects a converted PDF that exceeds the size limit", async () => {
     vi.mocked(docxToPdf).mockResolvedValueOnce(
       new Uint8Array(20 * 1024 * 1024 + 1),
     );
-    const result = await normalizeUploadToPdf(docxFile());
+    const result = await normalizeUploadToPdf(docxFile(), null);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.response.status).toBe(400);
