@@ -108,8 +108,10 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
         const { extractAcroFields } = await import("@/src/lib/pdf/acroform");
         const bytes = new Uint8Array(await file.arrayBuffer());
         const parsed = await parsePdfTags(bytes);
-        // The server imports fillable-form fields on upload; preview them
-        // alongside tag fields so what you see matches what gets created.
+        // The server imports fillable-form fields on upload, bound to the
+        // first human signer's role — "Signer 1" for documents sent from
+        // this editor; preview them alongside tag fields so the editor
+        // shows what gets created.
         const acro = await extractAcroFields(bytes).catch(() => []);
         if (cancelled) return;
         setTagFields([...parsed.fields, ...acro]);
@@ -120,7 +122,10 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
           const { detectFieldCandidates } = await import("@/src/lib/pdf/detect");
           const detected = placedFromDetected(await detectFieldCandidates(bytes));
           if (!cancelled && detected.length > 0) {
-            setPlaced((prev) => [...prev, ...detected]);
+            setPlaced((prev) => [
+              ...prev.filter((p) => !p.suggested),
+              ...detected,
+            ]);
             setReplaceNotice(
               `Suggested ${detected.length} field${detected.length === 1 ? "" : "s"} from blanks found in the document. Move or delete any that are wrong.`,
             );
@@ -135,9 +140,10 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
     };
   }, [file]);
 
-  // Replacing the file keeps signers, message, order, placed fields, and
-  // patches — the old file isn't recoverable client-side, so there's no
-  // confirm dialog, just this reset of file-derived state.
+  // Replacing the file keeps signers, message, order, hand-placed fields,
+  // and patches — the old file isn't recoverable client-side, so there's no
+  // confirm dialog, just this reset of file-derived state. Suggestions were
+  // detected from the old file's content, so they don't carry over.
   const handleFileChange = useCallback((f: File | null) => {
     setReplaceNotice(null);
     setFile(f);
@@ -146,6 +152,8 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
       setPlaced([]);
       setPatches([]);
       setPageCount(null);
+    } else {
+      setPlaced((prev) => prev.filter((p) => !p.suggested));
     }
   }, []);
 
@@ -178,7 +186,7 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
       setPlaced([]);
       setPatches([]);
       setReplaceNotice(
-        "The preview could not be rendered, so placed fields and corrections were removed. You can still send this PDF as-is.",
+        "The preview could not be rendered, so placed fields and corrections were removed. You can still send this file as-is.",
       );
     }
   }, []);
@@ -190,7 +198,7 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
     // reach them; check here and reopen the step that needs attention.
     if (!file || !title.trim() || !senderEmail || !emailish(senderEmail)) {
       setOpenStep("document");
-      setError("Add a PDF, a title, and your sender email before sending.");
+      setError("Add a document, a title, and your sender email before sending.");
       return;
     }
     if (signers.some((s) => !s.name.trim() || !emailish(s.email))) {
@@ -279,6 +287,12 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
   const handleAiDetect = useCallback(async () => {
     const f = file;
     if (!f || aiBusy) return;
+    // The detect endpoint is PDF-only; DOCX uploads convert on the server
+    // only when the document is sent.
+    if (f.type !== "application/pdf" && !/\.pdf$/i.test(f.name)) {
+      setError("AI field detection works on PDFs. DOCX files are converted when you send.");
+      return;
+    }
     setAiBusy(true);
     setError(null);
     try {
@@ -307,7 +321,9 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
         setReplaceNotice("No fields were detected in this document.");
         return;
       }
-      setPlaced((prev) => [...prev, ...detected]);
+      // Replace earlier suggestions (heuristic or a previous AI run) so a
+      // second click doesn't stack duplicates; hand-placed fields stay.
+      setPlaced((prev) => [...prev.filter((p) => !p.suggested), ...detected]);
       setReplaceNotice(
         `Added ${detected.length} AI-suggested field${detected.length === 1 ? "" : "s"}. Move or delete any that are wrong.`,
       );

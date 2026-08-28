@@ -50,23 +50,30 @@ const LOCAL_CHROME_PATHS = [
 async function chromiumExecutable(): Promise<{
   executablePath: string;
   args: string[];
+  headless: boolean | "shell";
 }> {
+  let bundledError: unknown;
   if (process.platform === "linux") {
     try {
       const chromium = (await import("@sparticuz/chromium")).default;
+      // The bundled binary is a headless-shell build; "shell" is the mode
+      // @sparticuz/chromium documents, not puppeteer's default.
       return {
         executablePath: await chromium.executablePath(),
         args: chromium.args,
+        headless: "shell",
       };
-    } catch {
-      // Fall through to system paths.
+    } catch (err) {
+      bundledError = err; // Fall through to system paths.
     }
   }
   const local = LOCAL_CHROME_PATHS.find((p) => existsSync(p));
   if (!local) {
-    throw new DocxUnavailableError("no chromium executable found");
+    const e = new DocxUnavailableError("no chromium executable found");
+    e.cause = bundledError;
+    throw e;
   }
-  return { executablePath: local, args: ["--headless=new"] };
+  return { executablePath: local, args: [], headless: true };
 }
 
 function pageHtml(body: string): string {
@@ -92,14 +99,14 @@ export async function docxToPdf(bytes: Uint8Array): Promise<Uint8Array> {
     throw e;
   }
 
-  const { executablePath, args } = await chromiumExecutable();
+  const { executablePath, args, headless } = await chromiumExecutable();
   let browser;
   try {
     const puppeteer = await import("puppeteer-core");
     browser = await puppeteer.launch({
       executablePath,
       args,
-      headless: true,
+      headless,
     });
   } catch (err) {
     // A present-but-broken Chromium is an infrastructure problem, not a

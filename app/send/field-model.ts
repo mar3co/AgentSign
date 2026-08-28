@@ -18,6 +18,9 @@ export type PlacedField = {
   w: number;
   h: number;
   required: boolean;
+  // Machine-suggested (heuristic or AI) rather than hand-placed; suggestions
+  // are replaced wholesale when the file changes or detection re-runs.
+  suggested?: boolean;
 };
 
 export const SIGNER_COLORS = [
@@ -75,8 +78,8 @@ export function makePlacedField(
 /**
  * Detected suggestions become ordinary placed fields (assigned to the first
  * signer) so the sender can move, resize, or delete them before sending.
- * Assumes single-area suggestion fields: names, roles, and default values
- * are dropped, and multi-area fields split into independent placed fields.
+ * Placed fields are single-area, so multi-area detected fields split into
+ * one placed field per area; names, roles, and default values are dropped.
  */
 export function placedFromDetected(fields: DocumentField[]): PlacedField[] {
   return fields.flatMap((f) =>
@@ -91,6 +94,7 @@ export function placedFromDetected(fields: DocumentField[]): PlacedField[] {
         w: a.w,
         h: a.h,
         required: f.required,
+        suggested: true,
       }),
     ),
   );

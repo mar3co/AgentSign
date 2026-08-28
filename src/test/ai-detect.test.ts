@@ -46,6 +46,7 @@ afterEach(() => {
   resetEnvCache();
   resetDeps();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe("parseAiFields", () => {
@@ -77,6 +78,15 @@ describe("parseAiFields", () => {
 });
 
 describe("aiDetectFields", () => {
+  it("skips the model call when the PDF has no text", async () => {
+    const doc = await PDFDocument.create();
+    doc.addPage([612, 792]);
+    const generate = vi.fn(async () => "[]");
+    const fields = await aiDetectFields(await doc.save(), generate);
+    expect(fields).toEqual([]);
+    expect(generate).not.toHaveBeenCalled();
+  });
+
   it("sends the text digest and drops out-of-range pages", async () => {
     const bytes = await simplePdf();
     let prompt = "";
@@ -126,7 +136,8 @@ describe("postDetectFields", () => {
     vi.stubEnv("SIGN_FLAG_AI_FIELD_DETECT", "1");
     vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
     resetEnvCache();
-    authedDeps();
+    // Unique user ids per test: the limiter's map is module-global state.
+    authedDeps("happy-user");
     const res = await postDetectFields(detectRequest(await simplePdf()), async () =>
       JSON.stringify([{ type: "signature", page: 1, x: 10, y: 88, w: 22, h: 5 }]),
     );
@@ -139,7 +150,7 @@ describe("postDetectFields", () => {
     vi.stubEnv("SIGN_FLAG_AI_FIELD_DETECT", "1");
     vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
     resetEnvCache();
-    authedDeps();
+    authedDeps("bad-file-user");
     const res = await postDetectFields(
       detectRequest(new TextEncoder().encode("not a pdf")),
       async () => "[]",
@@ -151,19 +162,43 @@ describe("postDetectFields", () => {
     vi.stubEnv("SIGN_FLAG_AI_FIELD_DETECT", "1");
     vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
     resetEnvCache();
-    authedDeps();
+    authedDeps("blocked-user");
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
     const res = await postDetectFields(detectRequest(await simplePdf()), async () => {
       throw new DetectBlockedError("unusable model reply: refusal");
     });
+    expect(warned).toHaveBeenCalled();
     expect(res.status).toBe(502);
     const json = (await res.json()) as { error: string };
     expect(json.error).toBe("The AI couldn't process this document");
   });
 
-  it("429s after too many requests from one user", async () => {
+  it("429s after too many model calls, then frees up after the window", { timeout: 120_000 }, async () => {
     vi.stubEnv("SIGN_FLAG_AI_FIELD_DETECT", "1");
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
     resetEnvCache();
     authedDeps("rate-limit-user");
+    // Fake only Date so the limiter's clock moves without stalling pdfjs.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const bytes = await simplePdf();
+    const make = () => postDetectFields(detectRequest(bytes), async () => "[]");
+    for (let i = 0; i < 10; i++) {
+      expect((await make()).status).toBe(200);
+    }
+    const res = await make();
+    expect(res.status).toBe(429);
+    const json = (await res.json()) as { code: string };
+    expect(json.code).toBe("rate_limited");
+
+    vi.setSystemTime(Date.now() + 10 * 60 * 1000 + 1000);
+    expect((await make()).status).toBe(200);
+  });
+
+  it("does not count requests rejected before the model call", async () => {
+    vi.stubEnv("SIGN_FLAG_AI_FIELD_DETECT", "1");
+    vi.stubEnv("ANTHROPIC_API_KEY", "");
+    resetEnvCache();
+    authedDeps("not-configured-user");
     const make = () =>
       postDetectFields(
         new Request("http://test/v1/detect-fields", {
@@ -172,21 +207,17 @@ describe("postDetectFields", () => {
         }),
         async () => "[]",
       );
-    // Without an API key each allowed request stops at 503; the cap comes first.
-    for (let i = 0; i < 10; i++) {
+    // A missing key 503s every time; it must never flip into a 429.
+    for (let i = 0; i < 11; i++) {
       expect((await make()).status).toBe(503);
     }
-    const res = await make();
-    expect(res.status).toBe(429);
-    const json = (await res.json()) as { code: string };
-    expect(json.code).toBe("rate_limited");
   });
 
   it("502s and logs when the model call fails", async () => {
     vi.stubEnv("SIGN_FLAG_AI_FIELD_DETECT", "1");
     vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
     resetEnvCache();
-    authedDeps();
+    authedDeps("api-down-user");
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     const res = await postDetectFields(detectRequest(await simplePdf()), async () => {
       throw new Error("api down");

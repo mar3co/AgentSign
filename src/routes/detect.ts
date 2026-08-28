@@ -66,13 +66,6 @@ export async function postDetectFields(
   }
   const user = await getAuth().userFromCookie(req.headers.get("cookie"));
   if (!user) return jsonError(401, "Unauthorized", "unauthorized");
-  if (rateLimited(user.id)) {
-    return jsonError(
-      429,
-      "Too many detection requests. Try again in a few minutes.",
-      "rate_limited",
-    );
-  }
   if (!getEnv().ANTHROPIC_API_KEY.trim()) {
     return jsonError(503, "AI detection is not configured", "not_configured");
   }
@@ -92,6 +85,16 @@ export async function postDetectFields(
   }
   const bytes = new Uint8Array(await file.arrayBuffer());
 
+  // Checked last so only requests that reach the model count against the
+  // cap — a misconfigured key or invalid upload shouldn't burn quota.
+  if (rateLimited(user.id)) {
+    return jsonError(
+      429,
+      "Too many detection requests. Try again in a few minutes.",
+      "rate_limited",
+    );
+  }
+
   try {
     const fields = await aiDetectFields(bytes, generate);
     return Response.json({ fields });
@@ -100,6 +103,8 @@ export async function postDetectFields(
       return jsonError(400, "File must be a PDF", "invalid_pdf");
     }
     if (err instanceof DetectBlockedError) {
+      // Not an outage, but operators should see refusal/truncation rates.
+      console.warn("detect-fields blocked:", err.message);
       return jsonError(
         502,
         "The AI couldn't process this document",

@@ -107,7 +107,7 @@ function detectOnLine(
   }
   if (found.length > 0) return found;
 
-  // No underscores: a bare keyword label at the end of the line gets a
+  // No blanks detected: a bare keyword label at the end of the line gets a
   // default-size box placed right after it.
   const label = LABEL_RE.exec(line.text.trimEnd());
   if (label) {

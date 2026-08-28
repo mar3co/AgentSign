@@ -88,6 +88,25 @@ describe("extractAcroFields", () => {
     expect(fields.every((f) => f.role === "Buyer")).toBe(true);
   });
 
+  it("keeps the source form's required flag for text-like fields", async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    const form = doc.getForm();
+    const email = form.createTextField("Email");
+    email.enableRequired();
+    email.addToPage(page, { x: 72, y: 700, width: 200, height: 18 });
+    const dob = form.createTextField("Date of Birth");
+    dob.addToPage(page, { x: 72, y: 660, width: 120, height: 18 });
+
+    const fields = await extractAcroFields(await doc.save());
+    const byName = Object.fromEntries(fields.map((f) => [f.name, f]));
+    expect(byName["acro_Email"]?.required).toBe(true);
+    // Optional in the source form stays optional, even when the name
+    // heuristic types the field as a date.
+    expect(byName["acro_Date of Birth"]?.type).toBe("date");
+    expect(byName["acro_Date of Birth"]?.required).toBe(false);
+  });
+
   it("clamps partially off-page widgets and skips fully off-page ones", async () => {
     const doc = await PDFDocument.create();
     const page = doc.addPage([612, 792]);

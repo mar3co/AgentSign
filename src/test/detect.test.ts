@@ -59,6 +59,11 @@ describe("detectFieldCandidates", () => {
     const fields = await detectFieldCandidates(bytes);
     expect(fields).toHaveLength(1);
     expect(fields[0]!.type).toBe("signature");
+    // The box goes after the label text, not on top of it: the label starts
+    // at 72pt on a 612pt page (~11.8%), so the box must start past that.
+    const area = fields[0]!.areas[0]!;
+    expect(area.page).toBe(1);
+    expect(area.x).toBeGreaterThan(18);
   });
 
   it("ignores dividers, prose, and non-keyword bare labels", async () => {

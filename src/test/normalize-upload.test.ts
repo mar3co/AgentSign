@@ -79,11 +79,14 @@ describe("normalizeUploadToPdf", () => {
     }
   });
 
-  it("maps missing conversion infrastructure to 503", async () => {
+  it("maps missing conversion infrastructure to 503 and logs it", async () => {
     vi.mocked(docxToPdf).mockRejectedValueOnce(
       new DocxUnavailableError("no chromium"),
     );
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     const result = await normalizeUploadToPdf(docxFile());
+    expect(logged).toHaveBeenCalled();
+    logged.mockRestore();
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.response.status).toBe(503);

@@ -427,6 +427,8 @@ export async function parsePdfAndFields(
       if (withAcro.ok) {
         fields = withAcro.fields;
         storedBytes = acro.pdf;
+      } else {
+        console.warn("dropping imported form fields:", withAcro.error);
       }
     }
   }
@@ -617,6 +619,9 @@ export async function normalizeUploadToPdf(
       converted = await docxToPdf(bytes);
     } catch (err) {
       if (err instanceof DocxUnavailableError) {
+        // Infrastructure failure (missing/broken Chromium) — if this isn't
+        // logged, every DOCX upload 503s with zero server-side trace.
+        console.error("DOCX conversion unavailable:", err);
         return {
           ok: false,
           response: jsonError(
@@ -642,7 +647,11 @@ export async function normalizeUploadToPdf(
     if (converted.length > PDF_MAX_BYTES) {
       return {
         ok: false,
-        response: jsonError(400, "File exceeds maximum size", "file_too_large"),
+        response: jsonError(
+          400,
+          "The converted PDF exceeds maximum size",
+          "file_too_large",
+        ),
       };
     }
     return { ok: true, bytes: converted };

@@ -8,7 +8,6 @@ import {
 } from "pdf-lib";
 import {
   clampArea,
-  defaultRequired,
   defaultRoleName,
   type DocumentField,
   type FieldArea,
@@ -59,7 +58,7 @@ function collect(doc: PDFDocument, role: string): Collected[] {
   try {
     acroFields = doc.getForm().getFields();
   } catch {
-    return []; // Malformed or missing AcroForm dictionary — nothing to import.
+    return []; // Malformed AcroForm dictionary — nothing to import.
   }
 
   const pages = doc.getPages();
@@ -118,7 +117,11 @@ function collect(doc: PDFDocument, role: string): Collected[] {
         name: importedName(source.getName(), i, used),
         type,
         role,
-        required: source.isRequired() || defaultRequired(type),
+        // The source form's required flag wins, except for signature and
+        // initials: authors rarely set the flag, and a skippable signature
+        // box defeats the point of sending for signature.
+        required:
+          source.isRequired() || type === "signature" || type === "initials",
         readonly: false,
         ...(defaultValue !== undefined ? { default_value: defaultValue } : {}),
         areas,
@@ -149,17 +152,26 @@ export async function importAcroFields(
   bytes: Uint8Array,
   role: string = defaultRoleName(1),
 ): Promise<AcroImportResult> {
+  let doc: PDFDocument;
+  let collected: Collected[];
   try {
-    const doc = await PDFDocument.load(bytes);
-    const collected = collect(doc, role);
-    if (collected.length === 0) return { fields: [], pdf: bytes };
+    doc = await PDFDocument.load(bytes);
+    collected = collect(doc, role);
+  } catch {
+    return { fields: [], pdf: bytes };
+  }
+  if (collected.length === 0) return { fields: [], pdf: bytes };
+  try {
     const form = doc.getForm();
     for (const c of collected) form.removeField(c.source);
     return {
       fields: collected.map((c) => c.field),
       pdf: await doc.save(),
     };
-  } catch {
-    return { fields: [], pdf: bytes };
+  } catch (err) {
+    // Widget removal is cosmetic; the fields the sender previewed must not
+    // silently vanish because pdf-lib choked on rewriting the form.
+    console.warn("acroform widget removal failed, keeping original PDF:", err);
+    return { fields: collected.map((c) => c.field), pdf: bytes };
   }
 }

@@ -2,8 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   // PGlite ships wasm assets that must load from node_modules, not a bundle;
-  // @sparticuz/chromium ships the Chromium binary the same way — without this
-  // the deploy trace drops bin/ and DOCX conversion 503s in production.
+  // @sparticuz/chromium and puppeteer-core ship their payloads the same way.
   serverExternalPackages: [
     "@electric-sql/pglite",
     "pdfjs-dist",
@@ -11,7 +10,8 @@ const nextConfig: NextConfig = {
     "puppeteer-core",
   ],
   // The Chromium payload is unpacked via runtime-computed paths the file
-  // tracer can't see; without this the DOCX routes deploy without a browser.
+  // tracer can't see; without this the DOCX routes deploy without a browser
+  // and every DOCX upload 503s in production.
   outputFileTracingIncludes: {
     "/v1/documents": ["./node_modules/@sparticuz/chromium/bin/**/*"],
     "/v1/templates": ["./node_modules/@sparticuz/chromium/bin/**/*"],
