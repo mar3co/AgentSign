@@ -73,6 +73,12 @@ Unchanged. Signers see the rendered PDF; Finish/Attest, consent, and audit flows
 - Input problems (empty, too large, page cap) → 400 with the codes above.
 - An internal renderer crash on accepted input is our bug → 500 `render_failed`, logged. Never silently send a mangled document.
 
+Amendments from the PR #16 security review:
+
+- Lexing runs under a wall-clock budget (marked is superlinear on adversarial input) and rendering happens only after auth and the free-send cap; budget or nesting blowups → 400 `markdown_too_large`.
+- Markdown whose text is entirely outside WinAnsi (e.g. all CJK) would render a blank page; that is rejected as 400 `invalid_markdown` instead of silently sending it. The Latin-1 limit is documented in OpenAPI, MCP, and llms.txt.
+- `{{tags}}` inside code blocks and codespans are literal text: monospace glyphs never create fields, so documents explaining tag syntax send cleanly.
+
 ## Testing
 
 - **Renderer unit tests (bulk of the work):** one case per construct; degradation cases (raw HTML, images, deep nesting, pathological input); pagination across page breaks; deterministic output for identical input.

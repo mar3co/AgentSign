@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,8 +7,9 @@ import { eq } from "drizzle-orm";
 import { POST as postDocument } from "../../app/v1/documents/route.js";
 import { GET as getPdf } from "../../app/v1/documents/[id]/pdf/route.js";
 import { POST as postOtp } from "../../app/v1/documents/[id]/otp/route.js";
-import { documents, files } from "../db/schema.js";
+import { accounts, documents, files } from "../db/schema.js";
 import { purgeDocument } from "../jobs/shred.js";
+import { mintLiveKey } from "../lib/keys.js";
 import { resetDeps, setDeps } from "../lib/deps.js";
 import { createFsStore, objectKey } from "../lib/storage.js";
 import { createTestDb } from "./db.js";
@@ -189,5 +191,74 @@ describe("POST /v1/documents with markdown", () => {
     await purgeDocument(h.db, h.store, id, new Date(), { force: true });
     expect(await h.store.get(objectKey(id, "source"))).toBeNull();
     expect(await h.store.get(objectKey(id, "original"))).toBeNull();
+  });
+
+  it("410s ?kind=source after the document is shredded", async () => {
+    const h = await harness();
+    const { id, key } = await verifiedMarkdownSend(h, "# NDA\n\n{{sig}}");
+    await purgeDocument(h.db, h.store, id, new Date(), { force: true });
+    const res = await getPdf(
+      new Request(`http://sign.test/v1/documents/${id}/pdf?kind=source`, {
+        headers: { authorization: `Bearer ${key}` },
+      }),
+      { params: Promise.resolve({ id }) },
+    );
+    expect(res.status).toBe(410);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe("deleted");
+  });
+
+  it("stores source for an authenticated live-key markdown send", async () => {
+    const { db, store } = await harness();
+    const userId = randomUUID();
+    await db.insert(accounts).values({ userId, email: "pro@example.com" });
+    const { raw } = await mintLiveKey(db, userId);
+    const markdown = "# Deal\n\nSign here.\n\n{{sig}}";
+    const res = await postDocument(
+      new Request("http://sign.test/v1/documents", {
+        method: "POST",
+        body: markdownForm(markdown),
+        headers: { authorization: `Bearer ${raw}` },
+      }),
+    );
+    expect(res.status).toBe(201);
+    const { id, status } = (await res.json()) as { id: string; status: string };
+    expect(status).toBe("pending");
+    const fileRows = await db.select().from(files).where(eq(files.documentId, id));
+    expect(fileRows.map((f) => f.kind).sort()).toEqual(["original", "source"]);
+    const source = await store.get(objectKey(id, "source"));
+    expect(new TextDecoder().decode(source!)).toBe(markdown);
+  });
+
+  it("rejects markdown with no renderable text", async () => {
+    await harness();
+    const res = await send(markdownForm("# 契約書\n\n借主は毎月十万円を支払う。"));
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe("invalid_markdown");
+  });
+
+  it("sends a document whose code block mentions tag syntax", async () => {
+    const { db } = await harness();
+    const res = await send(
+      markdownForm(
+        "# Template help\n\nPut tags in your file:\n\n```\n{{name;colour=blue}} or {{sig}}\n```\n",
+      ),
+    );
+    expect(res.status).toBe(201);
+    const { id } = (await res.json()) as { id: string };
+    const [row] = await db.select().from(documents).where(eq(documents.id, id));
+    expect(row!.fields).toEqual([]);
+  });
+
+  it("rejects markdown sent as a file part", async () => {
+    await harness();
+    const body = markdownForm(null);
+    body.set("markdown", new Blob(["# Hi"], { type: "text/markdown" }), "doc.md");
+    const res = await send(body);
+    expect(res.status).toBe(400);
+    const parsed = (await res.json()) as { code: string; error: string };
+    expect(parsed.code).toBe("invalid_request");
+    expect(parsed.error).toContain("text field");
   });
 });

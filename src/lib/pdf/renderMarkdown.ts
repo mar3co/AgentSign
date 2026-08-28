@@ -1,4 +1,4 @@
-import { marked, type Token, type Tokens } from "marked";
+import { Lexer, Tokenizer, marked, type Token, type Tokens } from "marked";
 import {
   PDFDocument,
   PageSizes,
@@ -20,12 +20,55 @@ const TAG_RE = /\{\{[^}]+\}\}/g;
 const RULE_GRAY = rgb(0.6, 0.6, 0.6);
 const FOOTER_SIZE = 9;
 const MAX_PAGES = 200;
+const MAX_INDENT = CONTENT_W / 2;
+const LEX_BUDGET_MS = 5_000;
 
 export class MarkdownTooLargeError extends Error {
   code = "markdown_too_large" as const;
   constructor(message = "Rendered markdown exceeds the page limit") {
     super(message);
     this.name = "MarkdownTooLargeError";
+  }
+}
+
+export class EmptyMarkdownError extends Error {
+  code = "invalid_markdown" as const;
+  constructor(message = "Markdown contains no renderable text") {
+    super(message);
+    this.name = "EmptyMarkdownError";
+  }
+}
+
+/**
+ * Lex with a wall-clock budget: marked is superlinear on adversarial input,
+ * so a deadline check in every tokenizer step keeps untrusted markdown from
+ * pinning the CPU. Deep nesting overflows the stack inside marked; both cases
+ * surface as MarkdownTooLargeError (the input, not us, is at fault).
+ */
+function lexWithBudget(src: string, budgetMs: number): Token[] {
+  const deadline = Date.now() + budgetMs;
+  const tokenizer = new Tokenizer();
+  const proto = Tokenizer.prototype as unknown as Record<string, unknown>;
+  for (const name of Object.getOwnPropertyNames(proto)) {
+    const fn = proto[name];
+    if (name === "constructor" || typeof fn !== "function") continue;
+    (tokenizer as unknown as Record<string, unknown>)[name] = function (
+      this: unknown,
+      ...args: unknown[]
+    ) {
+      if (Date.now() > deadline) {
+        throw new MarkdownTooLargeError("Markdown is too complex to render");
+      }
+      return (fn as (...a: unknown[]) => unknown).apply(this, args);
+    };
+  }
+  try {
+    return new Lexer({ ...marked.defaults, tokenizer }).lex(src);
+  } catch (err) {
+    if (err instanceof RangeError) {
+      throw new MarkdownTooLargeError("Markdown is nested too deeply");
+    }
+    throw err;
   }
 }
 
@@ -196,6 +239,27 @@ function wrapRuns(
     lineWidth += width;
   };
 
+  // Char-level split for a single word wider than the wrap width, so long
+  // hashes and unspaced URLs stay on the paper instead of running off it.
+  const breakWord = (word: string, font: PDFFont): string[] => {
+    const chunks: string[] = [];
+    let current = "";
+    let currentWidth = 0;
+    for (const ch of word) {
+      const w = font.widthOfTextAtSize(ch, size);
+      if (current && currentWidth + w > maxWidth) {
+        chunks.push(current);
+        current = ch;
+        currentWidth = w;
+      } else {
+        current += ch;
+        currentWidth += w;
+      }
+    }
+    if (current) chunks.push(current);
+    return chunks;
+  };
+
   for (const run of runs) {
     const font = fontOverride ?? fontFor(run.style);
     const text = toWinAnsi(unescapeEntities(run.text));
@@ -210,7 +274,11 @@ function wrapRuns(
         else pendingSpace = true;
         continue;
       }
-      append(segment, font, false);
+      if (font.widthOfTextAtSize(segment, size) > maxWidth) {
+        for (const chunk of breakWord(segment, font)) append(chunk, font, false);
+      } else {
+        append(segment, font, false);
+      }
     }
   }
   flush();
@@ -220,6 +288,7 @@ function wrapRuns(
 class Typesetter {
   private page: PDFPage;
   private y: number;
+  private drawnGlyphs = 0;
 
   constructor(
     private doc: PDFDocument,
@@ -231,6 +300,11 @@ class Typesetter {
   }
 
   private fontFor = (style: Style): PDFFont => this.fonts[style];
+
+  /** Non-whitespace characters actually drawn; zero means a blank document. */
+  get glyphCount(): number {
+    return this.drawnGlyphs;
+  }
 
   private ensureRoom(lineHeight: number): void {
     if (this.y - lineHeight >= MARGIN) return;
@@ -244,6 +318,7 @@ class Typesetter {
   }
 
   rule(indent = 0): void {
+    indent = Math.min(indent, MAX_INDENT);
     this.ensureRoom(BODY_SIZE);
     this.y -= BODY_SIZE;
     this.page.drawLine({
@@ -256,7 +331,8 @@ class Typesetter {
 
   drawRuns(runs: Run[], opts: { size?: number; indent?: number; font?: PDFFont } = {}): void {
     const size = opts.size ?? BODY_SIZE;
-    const indent = opts.indent ?? 0;
+    // Clamp so deep list/quote nesting keeps a usable wrap width on-page.
+    const indent = Math.min(opts.indent ?? 0, MAX_INDENT);
     const lines = wrapRuns(runs, CONTENT_W - indent, size, this.fontFor, opts.font);
     for (const pieces of lines) {
       const lineHeight = size * LEADING;
@@ -265,6 +341,7 @@ class Typesetter {
       let x = MARGIN + indent;
       for (const piece of pieces) {
         this.page.drawText(piece.text, { x, y: this.y, size, font: piece.font });
+        this.drawnGlyphs += piece.text.replace(/\s/g, "").length;
         x += piece.font.widthOfTextAtSize(piece.text, size);
       }
     }
@@ -283,6 +360,7 @@ class Typesetter {
         this.y -= lineHeight;
         if (chunk.length > 0) {
           this.page.drawText(chunk, { x: MARGIN, y: this.y, size: CODE_SIZE, font });
+          this.drawnGlyphs += chunk.replace(/\s/g, "").length;
         }
       }
     }
@@ -304,23 +382,25 @@ class Typesetter {
         return wrapRuns(runs, cellW, BODY_SIZE, this.fontFor);
       });
 
+    // Rows paginate per wrapped line so a tall cell continues on the next
+    // page instead of drawing below the bottom margin.
     const drawRow = (cells: Tokens.TableCell[], header: boolean) => {
       const perCell = rowLines(cells, header);
       const rows = Math.max(1, ...perCell.map((l) => l.length));
-      this.ensureRoom(rows * lineHeight);
-      const startY = this.y;
-      for (const [col, cellLines] of perCell.entries()) {
-        let y = startY;
-        for (const pieces of cellLines) {
-          y -= lineHeight;
+      for (let lineIdx = 0; lineIdx < rows; lineIdx++) {
+        this.ensureRoom(lineHeight);
+        this.y -= lineHeight;
+        for (const [col, cellLines] of perCell.entries()) {
+          const pieces = cellLines[lineIdx];
+          if (!pieces) continue;
           let x = MARGIN + col * colW;
           for (const piece of pieces) {
-            this.page.drawText(piece.text, { x, y, size: BODY_SIZE, font: piece.font });
+            this.page.drawText(piece.text, { x, y: this.y, size: BODY_SIZE, font: piece.font });
+            this.drawnGlyphs += piece.text.replace(/\s/g, "").length;
             x += piece.font.widthOfTextAtSize(piece.text, BODY_SIZE);
           }
         }
       }
-      this.y = startY - rows * lineHeight;
     };
 
     this.gap(BODY_SIZE * 0.5);
@@ -417,7 +497,7 @@ class Typesetter {
 
 export async function renderMarkdown(
   markdown: string,
-  opts: { maxPages?: number } = {},
+  opts: { maxPages?: number; lexBudgetMs?: number } = {},
 ): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   const epoch = new Date(0);
@@ -434,7 +514,8 @@ export async function renderMarkdown(
     heading: await doc.embedFont(StandardFonts.HelveticaBold),
   };
   const typesetter = new Typesetter(doc, fonts, opts.maxPages ?? MAX_PAGES);
-  typesetter.drawBlocks(marked.lexer(markdown));
+  typesetter.drawBlocks(lexWithBudget(markdown, opts.lexBudgetMs ?? LEX_BUDGET_MS));
+  if (typesetter.glyphCount === 0) throw new EmptyMarkdownError();
 
   const footerFont = await doc.embedFont(StandardFonts.Helvetica);
   const pages = doc.getPages();

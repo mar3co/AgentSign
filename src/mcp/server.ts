@@ -108,7 +108,7 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
           .string()
           .optional()
           .describe(
-            "Document content as markdown. Rendered to PDF server-side; {{sig}} tags place signature fields. Preferred over pdf.",
+            "Document content as markdown. Rendered to PDF server-side; {{sig}} tags place signature fields (tags inside code blocks stay literal). Latin-1 text only: characters outside WinAnsi (emoji, CJK) are dropped. Preferred over pdf.",
           ),
         pdf: z
           .string()

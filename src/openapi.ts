@@ -238,7 +238,7 @@ export const openapi = {
                   markdown: {
                     type: "string",
                     description:
-                      "Document content as markdown (max 1 MiB). Rendered to PDF server-side; {{sig}} tags place fields. Provide markdown or file, not both.",
+                      "Document content as markdown (max 1 MiB). Rendered to PDF server-side; {{sig}} tags place fields (tags inside code blocks stay literal). Latin-1 text only: characters outside WinAnsi (emoji, CJK) are dropped from the rendered PDF. Provide markdown or file, not both.",
                   },
                   file: {
                     type: "string",

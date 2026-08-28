@@ -55,6 +55,7 @@ type TextItem = {
   transform: number[];
   width: number;
   height: number;
+  fontName: string;
 };
 
 type LocatedItem = {
@@ -63,6 +64,8 @@ type LocatedItem = {
   y: number;
   w: number;
   h: number;
+  /** Drawn in a monospace font: code samples, never live tags. */
+  mono: boolean;
 };
 
 type TagMatch = {
@@ -139,7 +142,7 @@ function scrubPageTags(
   }
 }
 
-function itemBox(item: TextItem): LocatedItem {
+function itemBox(item: TextItem, mono: boolean): LocatedItem {
   const [a, , , d, e, f] = item.transform;
   const fontSize = Math.hypot(a, item.transform[1] ?? 0) || Math.abs(d) || 12;
   const h = item.height || fontSize;
@@ -150,6 +153,7 @@ function itemBox(item: TextItem): LocatedItem {
     y: f,
     w: item.width || fontSize * item.str.length * 0.5,
     h,
+    mono,
   };
 }
 
@@ -337,6 +341,8 @@ function findTagsOnPage(
       const start = m.index;
       const end = start + m[0].length;
       const contributing = charItems.slice(start, end);
+      // Monospace text is code shown literally, never a live tag.
+      if (contributing.some((c) => c.mono)) continue;
       const unique: LocatedItem[] = [];
       const seen = new Set<LocatedItem>();
       for (const c of contributing) {
@@ -412,7 +418,9 @@ export async function parsePdfTags(bytes: Uint8Array): Promise<ParseTagsResult> 
     const located: LocatedItem[] = [];
     for (const raw of content.items) {
       if (!("str" in raw) || typeof raw.str !== "string") continue;
-      located.push(itemBox(raw as TextItem));
+      const item = raw as TextItem;
+      const mono = content.styles[item.fontName]?.fontFamily === "monospace";
+      located.push(itemBox(item, mono));
     }
     const tags = findTagsOnPage(located, viewport, pageNum);
     const pageTags: string[] = [];

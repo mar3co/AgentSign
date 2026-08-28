@@ -46,6 +46,7 @@ import {
 } from "../lib/pdf/fields.js";
 import { InvalidFieldsError, parsePdfTags } from "../lib/pdf/tags.js";
 import {
+  EmptyMarkdownError,
   MarkdownTooLargeError,
   renderMarkdown,
 } from "../lib/pdf/renderMarkdown.js";
@@ -358,6 +359,7 @@ function parseOriginField(
 export async function parsePdfAndFields(
   bytes: Uint8Array,
   fieldsRaw: unknown,
+  opts: { fromMarkdown?: boolean } = {},
 ): Promise<
   | { ok: true; fields: DocumentField[]; storedBytes: Uint8Array }
   | { ok: false; response: Response }
@@ -373,6 +375,14 @@ export async function parsePdfAndFields(
       return {
         ok: false,
         response: jsonError(400, err.message, "invalid_fields"),
+      };
+    }
+    if (opts.fromMarkdown) {
+      // Our own rendered PDF failed tag parsing: our bug, not the caller's.
+      console.error("markdown render produced an unreadable PDF", err);
+      return {
+        ok: false,
+        response: jsonError(500, "Markdown rendering failed", "render_failed"),
       };
     }
     return {
@@ -769,20 +779,27 @@ export async function inviteFirstSigner(
   return { signers };
 }
 
+/** Store the markdown source blob and row. Returns an error response on failure. */
 async function storeSourceMarkdown(
   db: ReturnType<typeof requireDb>,
   store: NonNullable<ReturnType<typeof requireStore>>,
   documentId: string,
   source: Uint8Array,
-): Promise<void> {
-  const path = objectKey(documentId, "source");
-  await store.put(path, source);
-  await db.insert(files).values({
-    documentId,
-    kind: "source",
-    storagePath: path,
-    fileHash: sha256Hex(source),
-  });
+): Promise<Response | null> {
+  try {
+    const path = objectKey(documentId, "source");
+    await store.put(path, source);
+    await db.insert(files).values({
+      documentId,
+      kind: "source",
+      storagePath: path,
+      fileHash: sha256Hex(source),
+    });
+  } catch (err) {
+    console.error("failed to store markdown source", documentId, err);
+    return storeUnavailableResponse();
+  }
+  return null;
 }
 
 export async function sendPreparedPdf(opts: {
@@ -907,7 +924,10 @@ export async function sendPreparedPdf(opts: {
     storagePath,
     fileHash,
   });
-  if (opts.source) await storeSourceMarkdown(db, store, document.id, opts.source);
+  if (opts.source) {
+    const failed = await storeSourceMarkdown(db, store, document.id, opts.source);
+    if (failed) return failed;
+  }
   await db.insert(signersTable).values(signerInsertValues(document.id, prepared.prepared));
 
   if (opts.holdForConfirmation) {
@@ -998,6 +1018,9 @@ export async function createDocument(req: Request): Promise<Response> {
   }
 
   const markdownField = form.get("markdown");
+  if (markdownField instanceof Blob) {
+    return jsonError(400, "Markdown must be a text field, not a file", "invalid_request");
+  }
   // Multipart encoding CRLF-normalizes string fields; restore the sender's newlines.
   const markdown =
     typeof markdownField === "string"
@@ -1007,7 +1030,9 @@ export async function createDocument(req: Request): Promise<Response> {
     return jsonError(400, "Provide a PDF file or markdown, not both", "invalid_request");
   }
 
-  let bytes: Uint8Array;
+  // Validate the input cheaply here; rendering waits until after auth and
+  // quota so unauthenticated callers cannot burn render CPU.
+  let fileBytes: Uint8Array | null = null;
   let source: Uint8Array | null = null;
   if (markdown != null) {
     if (!markdown.trim()) {
@@ -1017,14 +1042,6 @@ export async function createDocument(req: Request): Promise<Response> {
     if (source.length > MARKDOWN_MAX_BYTES) {
       return jsonError(400, "Markdown exceeds maximum size", "markdown_too_large");
     }
-    try {
-      bytes = await renderMarkdown(markdown);
-    } catch (err) {
-      if (err instanceof MarkdownTooLargeError) {
-        return jsonError(400, "Markdown renders to too many pages", "markdown_too_large");
-      }
-      return jsonError(500, "Markdown rendering failed", "render_failed");
-    }
   } else {
     if (!(file instanceof Blob)) {
       return jsonError(400, "A PDF file or markdown is required", "invalid_pdf");
@@ -1032,14 +1049,11 @@ export async function createDocument(req: Request): Promise<Response> {
     if (file.size > PDF_MAX_BYTES) {
       return jsonError(400, "PDF exceeds maximum size", "file_too_large");
     }
-    bytes = new Uint8Array(await file.arrayBuffer());
-    if (!isPdf(bytes, file.type)) {
+    fileBytes = new Uint8Array(await file.arrayBuffer());
+    if (!isPdf(fileBytes, file.type)) {
       return jsonError(400, "File must be a PDF", "invalid_pdf");
     }
   }
-
-  const tagged = await parsePdfAndFields(bytes, form.get("fields"));
-  if (!tagged.ok) return tagged.response;
   const extras = await parseDocumentExtras({
     valuesRaw: form.get("values"),
     order: form.get("order"),
@@ -1104,6 +1118,47 @@ export async function createDocument(req: Request): Promise<Response> {
       return jsonError(401, "Unauthorized", "unauthorized");
     }
   }
+
+  // Free senders at their cap get turned away before the expensive render.
+  if (!liveUserId) {
+    const [cap] = await db
+      .select({ n: count() })
+      .from(documents)
+      .where(
+        and(
+          eq(documents.senderEmail, senderEmail),
+          gte(documents.createdAt, windowStart),
+          ne(documents.status, "pending_sender"),
+        ),
+      );
+    if (Number(cap?.n ?? 0) >= limit) {
+      return jsonError(429, "Send limit reached. Try again later.", "send_limit");
+    }
+  }
+
+  let bytes: Uint8Array;
+  if (markdown != null) {
+    try {
+      bytes = await renderMarkdown(markdown);
+    } catch (err) {
+      if (err instanceof MarkdownTooLargeError) {
+        return jsonError(400, err.message, "markdown_too_large");
+      }
+      if (err instanceof EmptyMarkdownError) {
+        return jsonError(400, err.message, "invalid_markdown");
+      }
+      // A renderer crash on accepted input is our bug; keep the evidence.
+      console.error("markdown rendering failed", err);
+      return jsonError(500, "Markdown rendering failed", "render_failed");
+    }
+  } else {
+    bytes = fileBytes!;
+  }
+
+  const tagged = await parsePdfAndFields(bytes, form.get("fields"), {
+    fromMarkdown: markdown != null,
+  });
+  if (!tagged.ok) return tagged.response;
 
   if (liveUserId) {
     // OAuth grants are interactive agents: the account owner approves each
@@ -1183,20 +1238,6 @@ export async function createDocument(req: Request): Promise<Response> {
     extras.extras.docValues,
   );
   if (!prepared.ok) return prepared.response;
-
-  const [cap] = await db
-    .select({ n: count() })
-    .from(documents)
-    .where(
-      and(
-        eq(documents.senderEmail, senderEmail),
-        gte(documents.createdAt, windowStart),
-        ne(documents.status, "pending_sender"),
-      ),
-    );
-  if (Number(cap?.n ?? 0) >= limit) {
-    return jsonError(429, "Send limit reached. Try again later.", "send_limit");
-  }
 
   const signingDays = Number(env.SIGNING_WINDOW_DAYS);
   const expiresAt = new Date(at.getTime() + signingDays * 86_400_000);

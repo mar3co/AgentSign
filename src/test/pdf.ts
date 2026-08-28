@@ -45,6 +45,7 @@ export type ExtractedItem = {
   str: string;
   fontName: string;
   x: number;
+  y: number;
   page: number;
 };
 
@@ -71,6 +72,7 @@ export async function pdfTextItems(bytes: Uint8Array): Promise<ExtractedItem[]> 
         str: item.str,
         fontName: String(item.fontName ?? ""),
         x: item.transform[4] ?? 0,
+        y: item.transform[5] ?? 0,
         page: pageNum,
       });
     }

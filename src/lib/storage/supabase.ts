@@ -27,7 +27,7 @@ export function createSupabaseStore(
   return {
     async put(key, bytes) {
       const { error } = await objects().upload(key, bytes, {
-        contentType: "application/pdf",
+        contentType: key.endsWith(".md") ? "text/markdown" : "application/pdf",
         upsert: true,
       });
       if (error) throw error;

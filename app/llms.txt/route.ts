@@ -6,7 +6,7 @@ AgentSign is a signing primitive. Human always signs. Bearer keys authenticate t
 
 ## MCP tools
 
-- send — POST /v1/documents. Prefer markdown: plain text, no file handling; {{sig}} tags place fields and it is rendered to a clean PDF server-side. Or PDF bytes (base64), not a public pdf_url. Exactly one of markdown or pdf. Optional Bearer sign_live_ key. Without a key, send starts an OTP one-off; check sender email. sign_tmp_ cannot send or list. Signer objects may include kind (human|agent) and agent slug.
+- send — POST /v1/documents. Prefer markdown: plain text, no file handling; {{sig}} tags place fields and it is rendered to a clean PDF server-side (Latin-1 text only; tags in code blocks stay literal). Or PDF bytes (base64), not a public pdf_url. Exactly one of markdown or pdf. Optional Bearer sign_live_ key. Without a key, send starts an OTP one-off; check sender email. sign_tmp_ cannot send or list. Signer objects may include kind (human|agent) and agent slug.
 - status — GET /v1/documents/{id}. Requires a tmp or live key.
 - download — GET /v1/documents/{id}.pdf. Requires a tmp or live key. Returns the sealed PDF after the human ceremony.
 - attest — POST /v1/documents/{id}/attest. Current party is an agent this caller may use. Args: document_id, optional agent slug, optional api_key. sign_agent_ infers the slug.
