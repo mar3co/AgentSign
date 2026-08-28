@@ -68,20 +68,132 @@ function AppSidebarTrigger() {
   );
 }
 
+/* On phones the rail lives in a sheet, so surface its trigger and the
+   caller's primary action in a fixed bottom bar. */
+function EditorMobileBar({ children }: { children: ReactNode }) {
+  const { isMobile, toggleSidebar } = useSidebar();
+  if (!isMobile) return null;
+  return (
+    <div className="fixed inset-x-0 bottom-0 z-20 flex items-center gap-2 border-t border-border bg-background p-3">
+      <Button
+        type="button"
+        variant="outline"
+        className="flex-1"
+        onClick={toggleSidebar}
+      >
+        <PanelRightClose />
+        Details
+      </Button>
+      {children}
+    </div>
+  );
+}
+
 export function AppShell({
   widthClassName,
+  rail,
+  mobileBar,
   children,
 }: {
   widthClassName?: string;
+  /** Editor mode: render children as a full-bleed canvas with this content
+      in a second, right-hand sidebar (the left nav starts icon-collapsed). */
+  rail?: ReactNode;
+  /** Editor mode: primary action shown next to the rail trigger on phones. */
+  mobileBar?: ReactNode;
   children: ReactNode;
 }) {
   const pathname = usePathname() ?? "";
   const subtitle = currentNav(pathname)?.subtitle;
+  const header = (
+    <header>
+      <div className="flex items-center justify-between gap-6 px-4 sm:px-6">
+        <div className="flex min-w-0 items-center gap-4">
+          <AppSidebarTrigger />
+          <div className="min-w-0">
+            <h1 className="truncate text-lg font-semibold">
+              {pageTitle(pathname)}
+            </h1>
+            {subtitle ? (
+              <p className="hidden truncate text-sm text-muted-foreground sm:block">
+                {subtitle}
+              </p>
+            ) : null}
+          </div>
+        </div>
+        <SearchDialog
+          className="hidden w-full max-w-72 xl:block"
+          hotkey
+          trigger={
+            <Button
+              variant="outline"
+              className="w-full justify-start font-normal text-muted-foreground shadow-none"
+            >
+              <Search className="size-4" />
+              <span>Type to search...</span>
+              <kbd className="ml-auto rounded border border-border px-1.5 font-sans text-xs text-muted-foreground">
+                ⌘K
+              </kbd>
+            </Button>
+          }
+        />
+        <div className="flex shrink-0 items-center gap-1.5">
+          <SearchDialog
+            className="block xl:hidden"
+            trigger={
+              <Button variant="ghost" size="icon-lg">
+                <Search />
+                <span className="sr-only">Search</span>
+              </Button>
+            }
+          />
+          <ActivityDialog
+            trigger={
+              <Button
+                variant="ghost"
+                size="icon-lg"
+                className="max-sm:hidden"
+              >
+                <Activity />
+                <span className="sr-only">Activity</span>
+              </Button>
+            }
+          />
+          <NotificationDropdown
+            trigger={(unread) => (
+              <Button
+                variant="ghost"
+                size="icon-lg"
+                className="relative"
+              >
+                <Bell />
+                {unread > 0 ? (
+                  <span className="bg-destructive absolute top-[14%] right-[23%] size-2 rounded-full" />
+                ) : null}
+                <span className="sr-only">Notifications</span>
+              </Button>
+            )}
+          />
+          {pathname === "/send" ? null : (
+            <LinkButton
+              href="/send"
+              size="sm"
+              className="ml-1.5 border-transparent bg-brand-wax text-primary-foreground shadow-none hover:bg-brand-wax/90 hover:text-primary-foreground"
+            >
+              <Send className="size-3.5" />
+              <span className="max-sm:sr-only">Send a PDF</span>
+            </LinkButton>
+          )}
+        </div>
+      </div>
+    </header>
+  );
   return (
     <div data-surface="app" className="contents">
       <div className="relative flex min-h-dvh w-full bg-muted">
         <SidebarProvider
           className="bg-transparent"
+          defaultOpen={!rail}
           style={
             {
               "--sidebar-width": "17.5rem",
@@ -150,115 +262,60 @@ export function AppShell({
             </SidebarFooter>
             <SidebarRail />
           </Sidebar>
-          <div className="z-1 flex min-w-0 flex-1 flex-col py-6">
-            <header>
-              <div className="flex items-center justify-between gap-6 px-4 sm:px-6">
-                <div className="flex min-w-0 items-center gap-4">
-                  <AppSidebarTrigger />
-                  <div className="min-w-0">
-                    <h1 className="truncate text-lg font-semibold">
-                      {pageTitle(pathname)}
-                    </h1>
-                    {subtitle ? (
-                      <p className="hidden truncate text-sm text-muted-foreground sm:block">
-                        {subtitle}
-                      </p>
-                    ) : null}
-                  </div>
+          {rail ? (
+            <SidebarProvider
+              className="min-h-0 min-w-0 flex-1 bg-transparent"
+              style={{ "--sidebar-width": "22.5rem" } as CSSProperties}
+            >
+              <div className="z-1 flex min-w-0 flex-1 flex-col py-6">
+                {header}
+                <div className="flex w-full flex-1 flex-col px-4 pt-6 pb-24 sm:px-6 md:pb-0">
+                  <main className="flex w-full flex-1 flex-col">
+                    {children}
+                  </main>
                 </div>
-                <SearchDialog
-                  className="hidden w-full max-w-72 xl:block"
-                  hotkey
-                  trigger={
-                    <Button
-                      variant="outline"
-                      className="w-full justify-start font-normal text-muted-foreground shadow-none"
-                    >
-                      <Search className="size-4" />
-                      <span>Type to search...</span>
-                      <kbd className="ml-auto rounded border border-border px-1.5 font-sans text-xs text-muted-foreground">
-                        ⌘K
-                      </kbd>
-                    </Button>
-                  }
-                />
-                <div className="flex shrink-0 items-center gap-1.5">
-                  <SearchDialog
-                    className="block xl:hidden"
-                    trigger={
-                      <Button variant="ghost" size="icon-lg">
-                        <Search />
-                        <span className="sr-only">Search</span>
-                      </Button>
-                    }
-                  />
-                  <ActivityDialog
-                    trigger={
-                      <Button
-                        variant="ghost"
-                        size="icon-lg"
-                        className="max-sm:hidden"
-                      >
-                        <Activity />
-                        <span className="sr-only">Activity</span>
-                      </Button>
-                    }
-                  />
-                  <NotificationDropdown
-                    trigger={(unread) => (
-                      <Button
-                        variant="ghost"
-                        size="icon-lg"
-                        className="relative"
-                      >
-                        <Bell />
-                        {unread > 0 ? (
-                          <span className="bg-destructive absolute top-[14%] right-[23%] size-2 rounded-full" />
-                        ) : null}
-                        <span className="sr-only">Notifications</span>
-                      </Button>
+              </div>
+              <Sidebar
+                side="right"
+                variant="floating"
+                collapsible="offcanvas"
+                className="p-6 pl-0"
+              >
+                {rail}
+              </Sidebar>
+              <EditorMobileBar>{mobileBar}</EditorMobileBar>
+            </SidebarProvider>
+          ) : (
+            <div className="z-1 flex min-w-0 flex-1 flex-col py-6">
+              {header}
+              <div className="flex w-full flex-1 flex-col px-4 pt-6 sm:px-6">
+                <div className="flex w-full flex-1 flex-col rounded-2xl bg-background p-4 shadow-sm ring-1 ring-sidebar-border md:p-6">
+                  <main
+                    className={cn(
+                      "flex w-full flex-1 flex-col gap-4 md:gap-6",
+                      widthClassName,
                     )}
-                  />
-                  {pathname === "/send" ? null : (
-                    <LinkButton
-                      href="/send"
-                      size="sm"
-                      className="ml-1.5 border-transparent bg-brand-wax text-primary-foreground shadow-none hover:bg-brand-wax/90 hover:text-primary-foreground"
-                    >
-                      <Send className="size-3.5" />
-                      <span className="max-sm:sr-only">Send a PDF</span>
-                    </LinkButton>
-                  )}
+                  >
+                    {children}
+                  </main>
                 </div>
               </div>
-            </header>
-            <div className="flex w-full flex-1 flex-col px-4 pt-6 sm:px-6">
-              <div className="flex w-full flex-1 flex-col rounded-2xl bg-background p-4 shadow-sm ring-1 ring-sidebar-border md:p-6">
-                <main
-                  className={cn(
-                    "flex w-full flex-1 flex-col gap-4 md:gap-6",
-                    widthClassName,
-                  )}
-                >
-                  {children}
-                </main>
-              </div>
+              <footer className="flex items-center justify-between gap-3 px-4 pt-4 text-xs text-muted-foreground max-sm:flex-col sm:px-6">
+                <p>&copy;{new Date().getFullYear()} AgentSign</p>
+                <div className="flex items-center gap-4">
+                  <a href="/docs" className="hover:text-foreground">
+                    Docs
+                  </a>
+                  <a href="/terms" className="hover:text-foreground">
+                    Terms
+                  </a>
+                  <a href="/privacy" className="hover:text-foreground">
+                    Privacy
+                  </a>
+                </div>
+              </footer>
             </div>
-            <footer className="flex items-center justify-between gap-3 px-4 pt-4 text-xs text-muted-foreground max-sm:flex-col sm:px-6">
-              <p>&copy;{new Date().getFullYear()} AgentSign</p>
-              <div className="flex items-center gap-4">
-                <a href="/docs" className="hover:text-foreground">
-                  Docs
-                </a>
-                <a href="/terms" className="hover:text-foreground">
-                  Terms
-                </a>
-                <a href="/privacy" className="hover:text-foreground">
-                  Privacy
-                </a>
-              </div>
-            </footer>
-          </div>
+          )}
         </SidebarProvider>
       </div>
     </div>

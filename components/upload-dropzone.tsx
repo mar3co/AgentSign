@@ -23,6 +23,7 @@ export function UploadDropzone({
   prompt = "Drag & Drop or Choose file to upload",
   hint,
   className,
+  collapseWhenFilled = false,
   onFileChange,
 }: {
   id: string;
@@ -32,6 +33,8 @@ export function UploadDropzone({
   prompt?: string;
   hint?: string;
   className?: string;
+  /** Hide the drop target once a file is chosen, leaving only the file row. */
+  collapseWhenFilled?: boolean;
   onFileChange?: (file: File | null) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -78,7 +81,10 @@ export function UploadDropzone({
         }}
         onDrop={onDrop}
         data-dragging={dragging || undefined}
-        className="border-input has-[input:focus]:border-ring has-[input:focus]:ring-ring/50 data-[dragging=true]:bg-accent/50 flex min-h-40 cursor-pointer flex-col items-center justify-center gap-3 overflow-hidden rounded-lg border border-dashed p-6 text-center transition-colors has-[input:focus]:ring-[3px]"
+        className={cn(
+          "border-input has-[input:focus]:border-ring has-[input:focus]:ring-ring/50 data-[dragging=true]:bg-accent/50 flex min-h-40 cursor-pointer flex-col items-center justify-center gap-3 overflow-hidden rounded-lg border border-dashed p-6 text-center transition-colors has-[input:focus]:ring-[3px]",
+          collapseWhenFilled && file && "hidden",
+        )}
       >
         <input
           ref={inputRef}
