@@ -14,6 +14,13 @@ function formatBytes(bytes: number): string {
 }
 
 const TEXT_FILE_RE = /\.(md|markdown|txt)$/i;
+const DOCX_RE = /\.docx$/i;
+const DOCX_MIME =
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+function isPdf(f: File): boolean {
+  return f.type === "application/pdf" || /\.pdf$/i.test(f.name);
+}
 
 /* Dropzone styled after shadcn studio's file-upload-02 block, but backed by a
    real form input so plain FormData submits keep working. Single file. */
@@ -28,6 +35,7 @@ export function UploadDropzone({
   collapseWhenFilled = false,
   onFileChange,
   onTextFile,
+  onUnsupported,
 }: {
   id: string;
   name: string;
@@ -39,22 +47,47 @@ export function UploadDropzone({
   /** Hide the drop target once a file is chosen, leaving only the file row. */
   collapseWhenFilled?: boolean;
   onFileChange?: (file: File | null) => void;
-  /** When set, .md/.txt files are read client-side and handed here
-      instead of staying in the file input. */
+  /** When set, .md/.txt files are read client-side (and .docx converted
+      to markdown) and handed here instead of staying in the file input. */
   onTextFile?: (file: { name: string; text: string }) => void;
+  /** When set alongside onTextFile, anything that is not a PDF, text, or
+      Word file is cleared from the input and reported here by name. */
+  onUnsupported?: (name: string) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<{ name: string; size: number } | null>(null);
   const [dragging, setDragging] = useState(false);
 
+  const clearAndHandOff = (fn: () => void) => {
+    if (inputRef.current) inputRef.current.value = "";
+    setFile(null);
+    fn();
+  };
+
   const readInput = () => {
     const f = inputRef.current?.files?.[0] ?? null;
     if (f && onTextFile && (TEXT_FILE_RE.test(f.name) || f.type.startsWith("text/"))) {
       void f.text().then((text) => {
-        if (inputRef.current) inputRef.current.value = "";
-        setFile(null);
-        onTextFile({ name: f.name, text });
+        clearAndHandOff(() => onTextFile({ name: f.name, text }));
       });
+      return;
+    }
+    if (f && onTextFile && (DOCX_RE.test(f.name) || f.type === DOCX_MIME)) {
+      void (async () => {
+        try {
+          const mammoth = await import("mammoth/mammoth.browser");
+          const { value } = await mammoth.convertToMarkdown({
+            arrayBuffer: await f.arrayBuffer(),
+          });
+          clearAndHandOff(() => onTextFile({ name: f.name, text: value }));
+        } catch {
+          clearAndHandOff(() => onUnsupported?.(f.name));
+        }
+      })();
+      return;
+    }
+    if (f && onUnsupported && !isPdf(f)) {
+      clearAndHandOff(() => onUnsupported(f.name));
       return;
     }
     setFile(f ? { name: f.name, size: f.size } : null);

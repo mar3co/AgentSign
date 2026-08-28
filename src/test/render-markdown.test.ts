@@ -212,6 +212,12 @@ describe("renderMarkdown", () => {
     expect(text).toContain("{{initials}}");
   });
 
+  it("parses tags that arrive backslash-escaped, as docx conversion emits them", async () => {
+    const pdf = await renderMarkdown("# Deal\n\nSign: __\\{\\{sig\\}\\}__");
+    const parsed = await parsePdfTags(pdf);
+    expect(parsed.fields.map((f) => f.type)).toEqual(["signature"]);
+  });
+
   it("still parses prose tags when code tags are present", async () => {
     const pdf = await renderMarkdown("{{sig}}\n\n```\n{{date}}\n```");
     const parsed = await parsePdfTags(pdf);

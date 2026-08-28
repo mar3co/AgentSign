@@ -213,6 +213,7 @@ export function SendForm(props: {
 
   const [activeSigner, setActiveSigner] = useState(0);
   const [activeType, setActiveType] = useState<FieldType | null>(null);
+  const [fileNotice, setFileNotice] = useState<string | null>(null);
 
   const hasDocument =
     mode === "write" ? markdown.trim().length > 0 : file !== null;
@@ -529,18 +530,32 @@ export function SendForm(props: {
               <UploadDropzone
                 id="file"
                 name="file"
-                accept="application/pdf,.pdf,.md,.markdown,.txt,text/markdown,text/plain"
+                accept="application/pdf,.pdf,.md,.markdown,.txt,text/markdown,text/plain,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 required
                 collapseWhenFilled
                 prompt="Drag & Drop or Choose a file to upload"
-                hint="PDF, markdown, or plain text. Your signer gets an email link in seconds."
-                onFileChange={onFileChange}
+                hint="PDF, Word, markdown, or plain text. Your signer gets an email link in seconds."
+                onFileChange={(f) => {
+                  setFileNotice(null);
+                  onFileChange(f);
+                }}
                 onTextFile={({ text }) => {
+                  setFileNotice(null);
                   setMarkdown(text);
                   setMode("write");
                 }}
+                onUnsupported={(name) =>
+                  setFileNotice(
+                    `${name} isn't a supported file. Use a PDF, a Word document (.docx), markdown, or plain text.`,
+                  )
+                }
                 className={file ? undefined : "mx-auto w-full max-w-xl"}
               />
+              {fileNotice ? (
+                <Alert variant="destructive" className="mx-auto w-full max-w-xl">
+                  <AlertDescription>{fileNotice}</AlertDescription>
+                </Alert>
+              ) : null}
               {file ? null : (
                 <button
                   type="button"

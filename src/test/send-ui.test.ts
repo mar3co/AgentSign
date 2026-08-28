@@ -50,6 +50,13 @@ vi.mock("../../components/app-shell.js", () => ({
     createElement("div", null, children, rail ?? null),
 }));
 
+vi.mock("mammoth/mammoth.browser", () => ({
+  convertToMarkdown: async () => ({
+    value: "# From Word\n\n{{sig}}",
+    messages: [],
+  }),
+}));
+
 vi.mock("../../src/lib/pdf/tags.js", () => ({
   parsePdfTags: async () => ({
     fields: [
@@ -572,5 +579,40 @@ describe("SendClient", () => {
       /document text/i,
     )) as HTMLTextAreaElement;
     expect(textarea.value).toBe("# NDA\n\n{{sig}}");
+  });
+
+  it("converts a chosen .docx into the write view", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => whoamiOk()));
+    render(createElement(SendClient));
+    await railReady();
+    const input = document.querySelector(
+      "input[type=file]",
+    ) as HTMLInputElement;
+    const docx = new File([new Uint8Array([0x50, 0x4b])], "deal.docx", {
+      type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    });
+    Object.defineProperty(input, "files", { value: [docx], configurable: true });
+    fireEvent.change(input);
+    const textarea = (await screen.findByLabelText(
+      /document text/i,
+    )) as HTMLTextAreaElement;
+    expect(textarea.value).toBe("# From Word\n\n{{sig}}");
+  });
+
+  it("rejects an unsupported file with a clear notice", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => whoamiOk()));
+    render(createElement(SendClient));
+    await railReady();
+    const input = document.querySelector(
+      "input[type=file]",
+    ) as HTMLInputElement;
+    const xlsx = new File([new Uint8Array([1])], "sheet.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    Object.defineProperty(input, "files", { value: [xlsx], configurable: true });
+    fireEvent.change(input);
+    expect(await screen.findByText(/isn't a supported file/i)).toBeTruthy();
+    // The bogus file was cleared, not kept as the selection.
+    expect(screen.queryByText("sheet.xlsx")).toBeNull();
   });
 });
