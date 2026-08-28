@@ -4,10 +4,12 @@ export type BlobStore = {
   delete(key: string): Promise<void>;
 };
 
-export type ObjectKind = "original" | "sealed" | "certificate";
+export type ObjectKind = "original" | "sealed" | "certificate" | "source";
 
 export function objectKey(documentId: string, kind: ObjectKind): string {
-  return `${documentId}/${kind}.pdf`;
+  return kind === "source"
+    ? `${documentId}/source.md`
+    : `${documentId}/${kind}.pdf`;
 }
 
 export function appearanceKey(documentId: string, signerId: string): string {

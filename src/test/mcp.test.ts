@@ -449,4 +449,61 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
       else process.env.SIGN_API_KEY = prev;
     }
   });
+
+  it("send accepts markdown instead of pdf", { timeout: 60_000 }, async () => {
+    const db = await createTestDb();
+    const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+    const sent: { to: string; subject: string; text: string }[] = [];
+    setDeps({
+      db,
+      store,
+      mailer: { sendMail: async (m) => { sent.push(m); } },
+    });
+    const { client } = await connectMcp();
+    const result = await client.callTool({
+      name: "send",
+      arguments: {
+        title: "Markdown authorization",
+        sender_email: "shop@example.com",
+        signers: [{ name: "Jane", email: "jane@example.com" }],
+        markdown: "# Authorization\n\nSign below.\n\n{{sig}}",
+      },
+    });
+    const json = JSON.parse(
+      textOf(result as { content: Array<{ type: string; text?: string }> }),
+    ) as { id?: string; status?: string };
+    expect(json.id).toBeTruthy();
+    expect(json.status).toBe("pending_sender");
+  });
+
+  it("send with neither pdf nor markdown is an error", async () => {
+    const db = await createTestDb();
+    const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+    setDeps({ db, store, mailer: { sendMail: async () => {} } });
+    const { client } = await connectMcp();
+    const result = await client.callTool({
+      name: "send",
+      arguments: {
+        title: "No content",
+        sender_email: "shop@example.com",
+        signers: [{ name: "Jane", email: "jane@example.com" }],
+      },
+    });
+    expect((result as { isError?: boolean }).isError).toBe(true);
+    const text = textOf(result as { content: Array<{ type: string; text?: string }> });
+    expect(text).toMatch(/markdown|pdf/i);
+  });
+
+  it("send schema includes markdown and pdf is optional", async () => {
+    const { client } = await connectMcp();
+    const listed = await client.listTools();
+    const send = listed.tools.find((t) => t.name === "send");
+    const schema = send?.inputSchema as {
+      properties?: Record<string, unknown>;
+      required?: string[];
+    };
+    expect(schema.properties?.markdown).toBeTruthy();
+    expect(schema.required ?? []).not.toContain("pdf");
+    expect(schema.required ?? []).not.toContain("markdown");
+  });
 });

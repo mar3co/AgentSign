@@ -50,7 +50,15 @@ With the dev server up:
 # or: BASE_URL=http://localhost:3000 ./scripts/dogfood.sh
 ```
 
-That curls `GET /health` and prints the homepage one-off curl (multipart local `form.pdf` — no network PDF URL). Example:
+That curls `GET /health` and prints the homepage one-off curl (multipart local `form.pdf` — no network PDF URL). Documents can be sent as markdown (rendered to a clean PDF server-side, `{{sig}}` tags place fields, source kept and retrievable via `GET /v1/documents/:id/pdf?kind=source`) or as an existing PDF. Examples:
+
+```bash
+curl -F title=Repair\ authorization \
+     -F sender_email=shop@example.com \
+     -F signers='[{"name":"Jane","email":"jane@example.com"}]' \
+     --form-string markdown=$'# Repair authorization\n\nSign below to approve the repair.\n\n{{sig}}' \
+     http://localhost:3000/v1/documents
+```
 
 ```bash
 curl -F title=Repair\ authorization \

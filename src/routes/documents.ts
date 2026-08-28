@@ -46,6 +46,10 @@ import {
 } from "../lib/pdf/fields.js";
 import { InvalidFieldsError, parsePdfTags } from "../lib/pdf/tags.js";
 import {
+  MarkdownTooLargeError,
+  renderMarkdown,
+} from "../lib/pdf/renderMarkdown.js";
+import {
   fieldAppearanceKey,
   objectKey,
   type BlobStore,
@@ -67,6 +71,7 @@ import { getEnv } from "../env.js";
 import { purgeDocument } from "../jobs/shred.js";
 
 const PDF_MAX_BYTES = 20 * 1024 * 1024;
+const MARKDOWN_MAX_BYTES = 1024 * 1024;
 const OTP_TTL_MS = 10 * 60 * 1000;
 
 const signerSchema = z.object({
@@ -764,6 +769,22 @@ export async function inviteFirstSigner(
   return { signers };
 }
 
+async function storeSourceMarkdown(
+  db: ReturnType<typeof requireDb>,
+  store: NonNullable<ReturnType<typeof requireStore>>,
+  documentId: string,
+  source: Uint8Array,
+): Promise<void> {
+  const path = objectKey(documentId, "source");
+  await store.put(path, source);
+  await db.insert(files).values({
+    documentId,
+    kind: "source",
+    storagePath: path,
+    fileHash: sha256Hex(source),
+  });
+}
+
 export async function sendPreparedPdf(opts: {
   title: string;
   senderEmail: string;
@@ -784,6 +805,8 @@ export async function sendPreparedPdf(opts: {
   holdForConfirmation?: boolean;
   /** Mint a one-time status key in the response (the web flow shows it). */
   includeTmpKey?: boolean;
+  /** Markdown source bytes when the document was submitted as markdown. */
+  source?: Uint8Array | null;
 }): Promise<Response> {
   const db = requireDb();
   const store = requireStore();
@@ -884,6 +907,7 @@ export async function sendPreparedPdf(opts: {
     storagePath,
     fileHash,
   });
+  if (opts.source) await storeSourceMarkdown(db, store, document.id, opts.source);
   await db.insert(signersTable).values(signerInsertValues(document.id, prepared.prepared));
 
   if (opts.holdForConfirmation) {
@@ -973,15 +997,45 @@ export async function createDocument(req: Request): Promise<Response> {
     return jsonError(400, "At least one signer is required", "missing_signers");
   }
 
-  if (!(file instanceof Blob)) {
-    return jsonError(400, "A PDF file is required", "invalid_pdf");
+  const markdownField = form.get("markdown");
+  // Multipart encoding CRLF-normalizes string fields; restore the sender's newlines.
+  const markdown =
+    typeof markdownField === "string"
+      ? markdownField.replace(/\r\n/g, "\n")
+      : null;
+  if (markdown != null && file instanceof Blob) {
+    return jsonError(400, "Provide a PDF file or markdown, not both", "invalid_request");
   }
-  if (file.size > PDF_MAX_BYTES) {
-    return jsonError(400, "PDF exceeds maximum size", "file_too_large");
-  }
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  if (!isPdf(bytes, file.type)) {
-    return jsonError(400, "File must be a PDF", "invalid_pdf");
+
+  let bytes: Uint8Array;
+  let source: Uint8Array | null = null;
+  if (markdown != null) {
+    if (!markdown.trim()) {
+      return jsonError(400, "Markdown must not be empty", "invalid_markdown");
+    }
+    source = new TextEncoder().encode(markdown);
+    if (source.length > MARKDOWN_MAX_BYTES) {
+      return jsonError(400, "Markdown exceeds maximum size", "markdown_too_large");
+    }
+    try {
+      bytes = await renderMarkdown(markdown);
+    } catch (err) {
+      if (err instanceof MarkdownTooLargeError) {
+        return jsonError(400, "Markdown renders to too many pages", "markdown_too_large");
+      }
+      return jsonError(500, "Markdown rendering failed", "render_failed");
+    }
+  } else {
+    if (!(file instanceof Blob)) {
+      return jsonError(400, "A PDF file or markdown is required", "invalid_pdf");
+    }
+    if (file.size > PDF_MAX_BYTES) {
+      return jsonError(400, "PDF exceeds maximum size", "file_too_large");
+    }
+    bytes = new Uint8Array(await file.arrayBuffer());
+    if (!isPdf(bytes, file.type)) {
+      return jsonError(400, "File must be a PDF", "invalid_pdf");
+    }
   }
 
   const tagged = await parsePdfAndFields(bytes, form.get("fields"));
@@ -1069,6 +1123,7 @@ export async function createDocument(req: Request): Promise<Response> {
       userId: liveUserId,
       signers: parsedSigners,
       bytes: tagged.storedBytes,
+      source,
       webhookUrl,
       webhookSecret,
       fields: tagged.fields,
@@ -1186,6 +1241,7 @@ export async function createDocument(req: Request): Promise<Response> {
     storagePath,
     fileHash,
   });
+  if (source) await storeSourceMarkdown(db, store, document.id, source);
 
   await db.insert(signersTable).values(signerInsertValues(document.id, prepared.prepared));
 
@@ -1672,15 +1728,27 @@ export async function getDocumentPdf(req: Request, documentId: string): Promise<
   if (keyExpired(authed)) {
     return jsonError(401, "Unauthorized", "unauthorized");
   }
+  const store = requireStore();
+  if (!store) return storeUnavailableResponse();
+  const kindParam = new URL(req.url).searchParams.get("kind");
+  if (kindParam === "source") {
+    // Markdown source exists from creation; no completed gate.
+    const source = await store.get(objectKey(document.id, "source"));
+    if (!source) {
+      return jsonError(404, "No markdown source for this document", "not_found");
+    }
+    return new Response(Buffer.from(source), {
+      status: 200,
+      headers: {
+        "content-type": "text/markdown; charset=utf-8",
+        "content-disposition": `attachment; filename="${document.id}.md"`,
+      },
+    });
+  }
   if (document.status !== "completed") {
     return jsonError(409, "Document is not completed", "not_completed");
   }
-  const store = requireStore();
-  if (!store) return storeUnavailableResponse();
-  const kind =
-    new URL(req.url).searchParams.get("kind") === "certificate"
-      ? "certificate"
-      : "sealed";
+  const kind = kindParam === "certificate" ? "certificate" : "sealed";
   const bytes = await store.get(objectKey(document.id, kind));
   if (!bytes) {
     return jsonError(410, "Document has been deleted", "deleted");

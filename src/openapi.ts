@@ -218,7 +218,7 @@ export const openapi = {
       post: {
         summary: "Create and send a document",
         description:
-          "Multipart PDF bytes + signers. Optional Bearer. Omit Authorization to start a sender OTP one-off (pending_sender); a session whose email matches sender_email sends directly unless Confirm my sends is on. OAuth callers return pending_sender while Confirm agent sends is on (the default) — the account owner approves with the emailed code. Live keys are standing authorizations and always send immediately. Optional fields/values/order/send_email/completed_redirect_url/embed_origin. Free one-offs accept PDF {{sig}} tags. Human always signs.",
+          "Markdown content or multipart PDF bytes, plus signers — exactly one of markdown or file. Markdown is rendered to a clean PDF server-side; {{sig}} tags place fields. Optional Bearer. Omit Authorization to start a sender OTP one-off (pending_sender); a session whose email matches sender_email sends directly unless Confirm my sends is on. OAuth callers return pending_sender while Confirm agent sends is on (the default) — the account owner approves with the emailed code. Live keys are standing authorizations and always send immediately. Optional fields/values/order/send_email/completed_redirect_url/embed_origin. Free one-offs accept PDF {{sig}} tags. Human always signs.",
         security: optionalBearer,
         requestBody: {
           required: true,
@@ -226,7 +226,7 @@ export const openapi = {
             "multipart/form-data": {
               schema: {
                 type: "object",
-                required: ["title", "sender_email", "signers", "file"],
+                required: ["title", "sender_email", "signers"],
                 properties: {
                   title: { type: "string" },
                   sender_email: { type: "string", format: "email" },
@@ -235,7 +235,16 @@ export const openapi = {
                     description:
                       "JSON array of { name, email, kind?, agent?, role?, values? }. kind is human (default) or agent; agent is the team agent slug when kind is agent.",
                   },
-                  file: { type: "string", format: "binary", description: "PDF bytes" },
+                  markdown: {
+                    type: "string",
+                    description:
+                      "Document content as markdown (max 1 MiB). Rendered to PDF server-side; {{sig}} tags place fields. Provide markdown or file, not both.",
+                  },
+                  file: {
+                    type: "string",
+                    format: "binary",
+                    description: "PDF bytes. Provide markdown or file, not both.",
+                  },
                   ...createExtrasProperties,
                 },
               },

@@ -6,7 +6,7 @@ AgentSign is a signing primitive. Human always signs. Bearer keys authenticate t
 
 ## MCP tools
 
-- send — POST /v1/documents. PDF bytes (base64), not a public pdf_url. Optional Bearer sign_live_ key. Without a key, send starts an OTP one-off; check sender email. sign_tmp_ cannot send or list. Signer objects may include kind (human|agent) and agent slug.
+- send — POST /v1/documents. Prefer markdown: plain text, no file handling; {{sig}} tags place fields and it is rendered to a clean PDF server-side. Or PDF bytes (base64), not a public pdf_url. Exactly one of markdown or pdf. Optional Bearer sign_live_ key. Without a key, send starts an OTP one-off; check sender email. sign_tmp_ cannot send or list. Signer objects may include kind (human|agent) and agent slug.
 - status — GET /v1/documents/{id}. Requires a tmp or live key.
 - download — GET /v1/documents/{id}.pdf. Requires a tmp or live key. Returns the sealed PDF after the human ceremony.
 - attest — POST /v1/documents/{id}/attest. Current party is an agent this caller may use. Args: document_id, optional agent slug, optional api_key. sign_agent_ infers the slug.
@@ -19,7 +19,7 @@ There is no sign, complete, or create_template tool. Branding, agents, and team 
 
 ## On-page fields and embed
 
-Optional on POST /v1/documents: fields JSON (page 1-based, x/y/w/h percent top-left), values prefill, order=parallel, send_email=false, embed_origin, completed_redirect_url. PDF {{sig}} tags work on Free one-offs. Embed: iframe /s/:token and listen for postMessage { source: "agentsign", event }. No sign tool.
+Optional on POST /v1/documents: fields JSON (page 1-based, x/y/w/h percent top-left), values prefill, order=parallel, send_email=false, embed_origin, completed_redirect_url. {{sig}} tags work in markdown and in PDF Free one-offs. Markdown sends keep their source: GET /v1/documents/{id}.pdf?kind=source returns it (any time before shred). Embed: iframe /s/:token and listen for postMessage { source: "agentsign", event }. No sign tool.
 
 ## REST
 
