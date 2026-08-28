@@ -78,8 +78,10 @@ export function LoginForm({ email, next }: { email: string; next: string }) {
     const submitter = (e.nativeEvent as SubmitEvent).submitter as
       | HTMLButtonElement
       | null;
-    const action = submitter?.value ?? "magic";
+    let action = submitter?.value ?? "password";
     const { email: value, password } = values(e.currentTarget);
+    // The password field is optional; with it empty, fall back to a magic link.
+    if (action === "password" && !password) action = "magic";
     if (action === "password") {
       void post("/login/session", { email: value, password, next }, "session");
     } else if (action === "signup") {
@@ -294,20 +296,20 @@ export function LoginForm({ email, next }: { email: string; next: string }) {
             className="h-11 w-full text-base"
             type="submit"
             name="intent"
-            value="magic"
+            value="password"
             disabled={busy}
           >
-            Email me a link
+            Log in
           </Button>
           <Button
             className="h-11 w-full text-base"
             type="submit"
             name="intent"
-            value="password"
+            value="magic"
             disabled={busy}
             variant="secondary"
           >
-            Log in with password
+            Email me a link
           </Button>
           <p className="text-center text-sm text-muted-foreground">
             New here?{" "}
