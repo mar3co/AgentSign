@@ -6,7 +6,7 @@ import { resetEnvCache } from "../env.js";
 import type { AuthAdapter } from "../lib/auth/supabase.js";
 import { resetDeps, setDeps } from "../lib/deps.js";
 
-function authedDeps() {
+function authedDeps(userId = "u1") {
   const adapter: AuthAdapter = {
     sendMagicLink: async () => {},
     signInWithPassword: async () => ({
@@ -17,7 +17,7 @@ function authedDeps() {
     signUp: async () => ({ ok: true }),
     startOAuth: async ({ redirectTo }) => ({ url: redirectTo }),
     userFromCookie: async (header) =>
-      header ? { id: "u1", email: "u@example.com" } : null,
+      header ? { id: userId, email: "u@example.com" } : null,
     exchangeCode: async () => null,
   };
   setDeps({ auth: adapter });
@@ -158,6 +158,28 @@ describe("postDetectFields", () => {
     expect(res.status).toBe(502);
     const json = (await res.json()) as { error: string };
     expect(json.error).toBe("The AI couldn't process this document");
+  });
+
+  it("429s after too many requests from one user", async () => {
+    vi.stubEnv("SIGN_FLAG_AI_FIELD_DETECT", "1");
+    resetEnvCache();
+    authedDeps("rate-limit-user");
+    const make = () =>
+      postDetectFields(
+        new Request("http://test/v1/detect-fields", {
+          method: "POST",
+          headers: { cookie: "sign_session=tok" },
+        }),
+        async () => "[]",
+      );
+    // Without an API key each allowed request stops at 503; the cap comes first.
+    for (let i = 0; i < 10; i++) {
+      expect((await make()).status).toBe(503);
+    }
+    const res = await make();
+    expect(res.status).toBe(429);
+    const json = (await res.json()) as { code: string };
+    expect(json.code).toBe("rate_limited");
   });
 
   it("502s and logs when the model call fails", async () => {

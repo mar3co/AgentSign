@@ -5,6 +5,30 @@ import { aiDetectFields } from "../lib/pdf/aiDetect.js";
 
 const PDF_MAX_BYTES = 20 * 1024 * 1024;
 
+// Each request is a paid model call, so cap how fast one user can burn them.
+// Per-instance state: coarse protection against runaway loops, not a quota.
+const RATE_LIMIT = 10;
+const RATE_WINDOW_MS = 10 * 60 * 1000;
+const recentByUser = new Map<string, number[]>();
+
+function rateLimited(userId: string, now = Date.now()): boolean {
+  if (recentByUser.size > 1000) {
+    const cutoff = now - RATE_WINDOW_MS;
+    for (const [id, times] of recentByUser) {
+      if (times.every((t) => t <= cutoff)) recentByUser.delete(id);
+    }
+  }
+  const cutoff = now - RATE_WINDOW_MS;
+  const times = (recentByUser.get(userId) ?? []).filter((t) => t > cutoff);
+  if (times.length >= RATE_LIMIT) {
+    recentByUser.set(userId, times);
+    return true;
+  }
+  times.push(now);
+  recentByUser.set(userId, times);
+  return false;
+}
+
 function jsonError(status: number, error: string, code: string): Response {
   return Response.json({ error, code }, { status });
 }
@@ -42,6 +66,13 @@ export async function postDetectFields(
   }
   const user = await getAuth().userFromCookie(req.headers.get("cookie"));
   if (!user) return jsonError(401, "Unauthorized", "unauthorized");
+  if (rateLimited(user.id)) {
+    return jsonError(
+      429,
+      "Too many detection requests. Try again in a few minutes.",
+      "rate_limited",
+    );
+  }
   if (!getEnv().ANTHROPIC_API_KEY.trim()) {
     return jsonError(503, "AI detection is not configured", "not_configured");
   }
