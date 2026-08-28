@@ -23,16 +23,27 @@ export function pageSpaceOf(page: PDFPage): PageSpace {
   const angle = ((page.getRotation().angle % 360) + 360) % 360;
   const rotation =
     angle === 90 || angle === 180 || angle === 270 ? angle : 0;
+  // pdfjs displays the CropBox intersected with the MediaBox, falling back
+  // to the MediaBox when they don't overlap, so measure that same box.
+  const media = page.getMediaBox();
   const crop = page.getCropBox();
+  const x1 = Math.max(crop.x, media.x);
+  const y1 = Math.max(crop.y, media.y);
+  const x2 = Math.min(crop.x + crop.width, media.x + media.width);
+  const y2 = Math.min(crop.y + crop.height, media.y + media.height);
+  const box =
+    x2 > x1 && y2 > y1
+      ? { x: x1, y: y1, width: x2 - x1, height: y2 - y1 }
+      : media;
   const sideways = rotation === 90 || rotation === 270;
   return {
     rotation,
-    cropX: crop.x,
-    cropY: crop.y,
-    cropW: crop.width,
-    cropH: crop.height,
-    displayW: sideways ? crop.height : crop.width,
-    displayH: sideways ? crop.width : crop.height,
+    cropX: box.x,
+    cropY: box.y,
+    cropW: box.width,
+    cropH: box.height,
+    displayW: sideways ? box.height : box.width,
+    displayH: sideways ? box.width : box.height,
   };
 }
 

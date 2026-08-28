@@ -117,10 +117,15 @@ export async function applyPatches(
 
     if (patch.text) {
       if (!font) font = await doc.embedFont(StandardFonts.Helvetica);
+      const textHeight = font.heightAtSize(patch.fontSize);
+      // drawText's y is the baseline, so lift it by the descent to center
+      // the glyph box in the patch (never below its bottom edge).
+      const descent =
+        textHeight - font.heightAtSize(patch.fontSize, { descender: false });
       const anchor = displayPointToPage(
         space,
         display.x + 2,
-        Math.max(display.y, display.y + (display.h - patch.fontSize) / 2),
+        Math.max(display.y, display.y + (display.h - textHeight) / 2) + descent,
       );
       try {
         page.drawText(patch.text, {

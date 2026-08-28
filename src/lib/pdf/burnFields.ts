@@ -116,10 +116,13 @@ export async function burnFields(
       if (!text) continue;
       const size = Math.min(display.h * 0.6, 12);
       const textHeight = font.heightAtSize(size);
+      // drawText's y is the baseline, so lift it by the descent to center
+      // the glyph box, not the baseline, in the field.
+      const descent = textHeight - font.heightAtSize(size, { descender: false });
       const anchor = displayPointToPage(
         space,
         display.x,
-        display.y + (display.h - textHeight) / 2,
+        display.y + (display.h - textHeight) / 2 + descent,
       );
       page.pushOperators(
         pushGraphicsState(),

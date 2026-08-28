@@ -51,6 +51,45 @@ describe("pageSpace", () => {
     expect(r.h).toBeCloseTo(175);
   });
 
+  it("intersects the CropBox with the MediaBox like pdfjs does", async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    page.setCropBox(-50, 100, 700, 800);
+    const s = pageSpaceOf(page);
+    expect(s).toMatchObject({ cropX: 0, cropY: 100, cropW: 612, cropH: 692 });
+  });
+
+  it("falls back to the MediaBox when the CropBox misses it entirely", async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    page.setCropBox(1000, 1000, 100, 100);
+    const s = pageSpaceOf(page);
+    expect(s).toMatchObject({ cropX: 0, cropY: 0, cropW: 612, cropH: 792 });
+  });
+
+  it("agrees with pdfjs when the CropBox overflows the MediaBox", async () => {
+    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    page.setRotation(degrees(90));
+    page.setCropBox(-50, 100, 700, 800);
+    const bytes = await doc.save();
+    const libDoc = await PDFDocument.load(bytes);
+    const s = pageSpaceOf(libDoc.getPage(0));
+    const pdf = await pdfjs.getDocument({
+      data: bytes.slice(),
+      disableWorker: true,
+      isEvalSupported: false,
+    } as Parameters<typeof pdfjs.getDocument>[0]).promise;
+    const viewport = (await pdf.getPage(1)).getViewport({ scale: 1 });
+    expect(s.displayW).toBeCloseTo(viewport.width);
+    expect(s.displayH).toBeCloseTo(viewport.height);
+    const got = displayPointToPage(s, 123, viewport.height - 45);
+    const [ex, ey] = viewport.convertToPdfPoint(123, 45) as number[];
+    expect(got.x).toBeCloseTo(ex!, 6);
+    expect(got.y).toBeCloseTo(ey!, 6);
+  });
+
   it("agrees with the pdfjs viewport for every rotation", async () => {
     const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
     for (const rotation of [0, 90, 180, 270]) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PDFDocument, degrees } from "pdf-lib";
+import { PDFDocument, StandardFonts, degrees } from "pdf-lib";
 import {
   applyPatches,
   clampPatch,
@@ -61,6 +61,32 @@ describe("patch model", () => {
     const doc = await PDFDocument.load(out);
     expect(doc.getPageCount()).toBeGreaterThanOrEqual(1);
     expect(out.byteLength).toBeGreaterThan(0);
+  });
+
+  it("places the whiteout and text baseline where the preview showed them", async () => {
+    const doc = await PDFDocument.create();
+    doc.addPage([612, 792]);
+    const bytes = await doc.save();
+    // Display rect for (10%, 80%, 40%, 6%) of 612x792, bottom-left origin.
+    const rx = 61.2;
+    const ry = 110.88;
+    const rh = 47.52;
+    const patch = { ...makePatch(1, 10, 80, 40, 6), text: "Corrected" };
+    const out = await applyPatches(bytes, [patch]);
+    const drawn = await decodedPageContents(out);
+    const cm = drawn.match(/1 0 0 1 ([\d.]+) ([\d.]+) cm/);
+    expect(cm).not.toBeNull();
+    expect(Number(cm![1])).toBeCloseTo(rx);
+    expect(Number(cm![2])).toBeCloseTo(ry);
+    // The baseline sits a descent above the centered glyph-box bottom.
+    const scratch = await PDFDocument.create();
+    const font = await scratch.embedFont(StandardFonts.Helvetica);
+    const textHeight = font.heightAtSize(11);
+    const descent = textHeight - font.heightAtSize(11, { descender: false });
+    const tm = drawn.match(/([\d.-]+) ([\d.-]+) Tm/);
+    expect(tm).not.toBeNull();
+    expect(Number(tm![1])).toBeCloseTo(rx + 2);
+    expect(Number(tm![2])).toBeCloseTo(ry + (rh - textHeight) / 2 + descent);
   });
 
   it("burns the whiteout rect in rotated-page coordinates", async () => {
