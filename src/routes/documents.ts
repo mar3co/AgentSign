@@ -50,7 +50,11 @@ import {
   objectKey,
   type BlobStore,
 } from "../lib/storage.js";
-import { newSigningToken, placeholderSigningTokenHash } from "../lib/tokens.js";
+import {
+  newSigningToken,
+  newTmpKey,
+  placeholderSigningTokenHash,
+} from "../lib/tokens.js";
 import {
   fireAgentPartyReady,
   newWebhookSecret,
@@ -775,6 +779,11 @@ export async function sendPreparedPdf(opts: {
   completedRedirectUrl?: string | null;
   embedOrigin?: string | null;
   message?: string | null;
+  /** Create as pending_sender and email the sender a confirmation code
+      instead of inviting signers right away. */
+  holdForConfirmation?: boolean;
+  /** Mint a one-time status key in the response (the web flow shows it). */
+  includeTmpKey?: boolean;
 }): Promise<Response> {
   const db = requireDb();
   const store = requireStore();
@@ -851,7 +860,7 @@ export async function sendPreparedPdf(opts: {
       title: opts.title,
       senderEmail,
       userId: opts.userId,
-      status: "pending",
+      status: opts.holdForConfirmation ? "pending_sender" : "pending",
       expiresAt,
       shredAt: expiresAt,
       sha256: fileHash,
@@ -877,12 +886,52 @@ export async function sendPreparedPdf(opts: {
   });
   await db.insert(signersTable).values(signerInsertValues(document.id, prepared.prepared));
 
+  if (opts.holdForConfirmation) {
+    const otp = await newOtp();
+    await db.insert(otpChallenges).values({
+      documentId: document.id,
+      codeHash: otp.hash,
+      expiresAt: new Date(at.getTime() + OTP_TTL_MS),
+    });
+    try {
+      await mailer.sendMail({ to: senderEmail, ...otpEmail(otp.digits) });
+      await logEvent(db, { documentId: document.id, event: "otp_sent" });
+    } catch (err) {
+      await logEvent(db, {
+        documentId: document.id,
+        event: "emailed_failed",
+        payload: { error: err instanceof Error ? err.message : "mail_failed" },
+      });
+    }
+    return Response.json(
+      {
+        id: document.id,
+        status: "pending_sender",
+        ...(webhookSecret ? { webhook_secret: webhookSecret } : {}),
+      },
+      { status: 201 },
+    );
+  }
+
   const invited = await inviteFirstSigner(db, mailer, document, at);
+  let tmpKey: string | undefined;
+  if (opts.includeTmpKey) {
+    const tmp = newTmpKey();
+    await db.insert(apiKeys).values({
+      kind: "tmp",
+      prefix: tmp.prefix,
+      tokenHash: tmp.hash,
+      documentId: document.id,
+      expiresAt: document.shredAt,
+    });
+    tmpKey = tmp.raw;
+  }
   return Response.json(
     {
       id: document.id,
       status: "pending",
       signers: invited.signers,
+      ...(tmpKey ? { key: tmpKey } : {}),
       ...(webhookSecret ? { webhook_secret: webhookSecret } : {}),
     },
     { status: 201 },
@@ -968,9 +1017,11 @@ export async function createDocument(req: Request): Promise<Response> {
   const windowStart = new Date(at.getTime() - windowDays * 86_400_000);
 
   let liveUserId: string | null = null;
+  let viaOauth = false;
   const raw = bearerToken(req);
   if (raw) {
     if (raw.startsWith("sign_oauth_")) {
+      viaOauth = true;
       const grant = await lookupOauthGrant(db, raw);
       if (!grant) return jsonError(401, "Unauthorized", "unauthorized");
       const account = await accountForOauthGrant(db, grant);
@@ -1001,6 +1052,17 @@ export async function createDocument(req: Request): Promise<Response> {
   }
 
   if (liveUserId) {
+    // OAuth grants are interactive agents: the account owner approves each
+    // send with an emailed code unless they turned that off. API keys are
+    // standing authorizations for automation and always send immediately.
+    let holdForConfirmation = false;
+    if (viaOauth) {
+      const [acct] = await db
+        .select()
+        .from(accounts)
+        .where(eq(accounts.userId, liveUserId));
+      holdForConfirmation = acct?.confirmAgentSends ?? true;
+    }
     return sendPreparedPdf({
       title,
       senderEmail,
@@ -1016,7 +1078,45 @@ export async function createDocument(req: Request): Promise<Response> {
       completedRedirectUrl: extras.extras.completedRedirectUrl,
       embedOrigin: extras.extras.embedOrigin,
       message: extras.extras.message,
+      holdForConfirmation,
     });
+  }
+
+  // A logged-in user sending as their own verified address skips the code
+  // unless they opted in; anyone else keeps it — the code is the only
+  // proof they control the sender email.
+  const cookie = req.headers.get("cookie");
+  if (cookie) {
+    const sessionUser = await getAuth().userFromCookie(cookie);
+    if (
+      sessionUser &&
+      sessionUser.email.trim().toLowerCase() === senderEmail
+    ) {
+      await ensureAccount(db, sessionUser);
+      const [acct] = await db
+        .select()
+        .from(accounts)
+        .where(eq(accounts.userId, sessionUser.id));
+      if (acct && !acct.confirmHumanSends) {
+        return sendPreparedPdf({
+          title,
+          senderEmail,
+          userId: sessionUser.id,
+          signers: parsedSigners,
+          bytes: tagged.storedBytes,
+          webhookUrl,
+          webhookSecret,
+          fields: tagged.fields,
+          values: extras.extras.docValues,
+          signingMode: extras.extras.signingMode,
+          sendEmail: extras.extras.sendEmail,
+          completedRedirectUrl: extras.extras.completedRedirectUrl,
+          embedOrigin: extras.extras.embedOrigin,
+          message: extras.extras.message,
+          includeTmpKey: true,
+        });
+      }
+    }
   }
 
   const resolved = await resolveSignerParties(db, parsedSigners, liveUserId);

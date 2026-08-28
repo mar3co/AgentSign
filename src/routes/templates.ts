@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { and, count, eq, inArray } from "drizzle-orm";
 import {
+  accounts,
   files,
   documents,
   templateRoles,
@@ -560,6 +561,17 @@ export async function sendTemplate(
   const bytes = await store.get(loaded.template.storagePath);
   if (!bytes) return jsonError(404, "Template not found", "not_found");
 
+  // Same rule as direct sends: OAuth-connected agents hold for the owner's
+  // emailed confirmation unless it's turned off; sessions and API keys send.
+  let holdForConfirmation = false;
+  if (gate.caller.via === "oauth") {
+    const [acct] = await gate.caller.db
+      .select()
+      .from(accounts)
+      .where(eq(accounts.userId, gate.caller.user.id));
+    holdForConfirmation = acct?.confirmAgentSends ?? true;
+  }
+
   return sendPreparedPdf({
     title: loaded.template.title,
     senderEmail: gate.caller.user.email,
@@ -572,6 +584,7 @@ export async function sendTemplate(
     sendEmail: extras.extras.sendEmail,
     completedRedirectUrl: extras.extras.completedRedirectUrl,
     embedOrigin: extras.extras.embedOrigin,
+    holdForConfirmation,
   });
 }
 

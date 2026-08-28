@@ -191,6 +191,11 @@ export const accounts = pgTable("accounts", {
   logoPath: text("logo_path"),
   timezone: text("timezone"),
   description: text("description"),
+  /** OAuth-connected agents need an emailed code per send. API keys are
+      standing authorizations and always send immediately. */
+  confirmAgentSends: boolean("confirm_agent_sends").notNull().default(true),
+  /** Also require the code for the account owner's own web sends. */
+  confirmHumanSends: boolean("confirm_human_sends").notNull().default(false),
   createdAt: timestamptz("created_at").notNull().defaultNow(),
 }).enableRLS();
 

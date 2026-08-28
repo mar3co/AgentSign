@@ -467,6 +467,30 @@ describe("SendClient", () => {
     expect(document.querySelector("input[type=file]")).toBe(inputBefore);
   });
 
+  it("skips the confirm screen when the send goes out directly", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (String(url).includes("whoami")) return whoamiOk();
+        return new Response(
+          JSON.stringify({
+            id: "d1",
+            status: "pending",
+            key: "sign_tmp_abc",
+            signers: [{ email: "jane@example.com", sign_url: "/s/tok" }],
+          }),
+          { status: 201 },
+        );
+      }),
+    );
+    render(createElement(SendClient));
+    await selectPdf();
+    await fillAndSubmit();
+    await screen.findByText("sign_tmp_abc");
+    expect(screen.queryByText(/confirm to send/i)).toBeNull();
+    expect(screen.getByRole("link", { name: "/s/tok" })).toBeTruthy();
+  });
+
   it("reopens the document step with an error when sending without a PDF", async () => {
     stubDocumentsFetch();
     render(createElement(SendClient));

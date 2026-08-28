@@ -218,7 +218,7 @@ export const openapi = {
       post: {
         summary: "Create and send a document",
         description:
-          "Multipart PDF bytes + signers. Optional Bearer. Omit Authorization to start a sender OTP one-off (pending_sender). Live key skips OTP. Optional fields/values/order/send_email/completed_redirect_url/embed_origin. Free one-offs accept PDF {{sig}} tags. Human always signs.",
+          "Multipart PDF bytes + signers. Optional Bearer. Omit Authorization to start a sender OTP one-off (pending_sender); a session whose email matches sender_email sends directly unless Confirm my sends is on. OAuth callers return pending_sender while Confirm agent sends is on (the default) — the account owner approves with the emailed code. Live keys are standing authorizations and always send immediately. Optional fields/values/order/send_email/completed_redirect_url/embed_origin. Free one-offs accept PDF {{sig}} tags. Human always signs.",
         security: optionalBearer,
         requestBody: {
           required: true,

@@ -18,6 +18,7 @@ import {
   type Mailer,
 } from "../lib/email.js";
 import { verifyOtp } from "../lib/otp.js";
+import { teamForUser } from "../lib/team.js";
 import { newTmpKey } from "../lib/tokens.js";
 import { webhookEncryptionReady } from "../lib/webhooks.js";
 import { inviteFirstSigner } from "./documents.js";
@@ -103,22 +104,35 @@ export async function verifyDocumentOtp(
     return jsonError(400, "Invalid code", "invalid_otp");
   }
 
-  const env = getEnv();
-  const limit = Number(env.FREE_SEND_LIMIT);
-  const windowDays = Number(env.FREE_SEND_WINDOW_DAYS);
-  const windowStart = new Date(at.getTime() - windowDays * 86_400_000);
-  const [cap] = await db
-    .select({ n: count() })
-    .from(documents)
-    .where(
-      and(
-        eq(documents.senderEmail, document.senderEmail),
-        gte(documents.createdAt, windowStart),
-        ne(documents.status, "pending_sender"),
-      ),
-    );
-  if (Number(cap?.n ?? 0) >= limit) {
-    return jsonError(429, "Send limit reached. Try again later.", "send_limit");
+  const [owner] = await db
+    .select()
+    .from(accounts)
+    .where(eq(accounts.email, document.senderEmail));
+
+  // The free-send cap only binds unentitled senders; a paid team's held
+  // sends (agent confirmations) must not bounce here.
+  const ownerUserId = owner?.userId ?? document.userId;
+  const entitled = ownerUserId
+    ? (await teamForUser(db, ownerUserId)).entitled
+    : false;
+  if (!entitled) {
+    const env = getEnv();
+    const limit = Number(env.FREE_SEND_LIMIT);
+    const windowDays = Number(env.FREE_SEND_WINDOW_DAYS);
+    const windowStart = new Date(at.getTime() - windowDays * 86_400_000);
+    const [cap] = await db
+      .select({ n: count() })
+      .from(documents)
+      .where(
+        and(
+          eq(documents.senderEmail, document.senderEmail),
+          gte(documents.createdAt, windowStart),
+          ne(documents.status, "pending_sender"),
+        ),
+      );
+    if (Number(cap?.n ?? 0) >= limit) {
+      return jsonError(429, "Send limit reached. Try again later.", "send_limit");
+    }
   }
 
   if (!webhookEncryptionReady()) {
@@ -128,11 +142,6 @@ export async function verifyDocumentOtp(
       "webhook_unconfigured",
     );
   }
-
-  const [owner] = await db
-    .select()
-    .from(accounts)
-    .where(eq(accounts.email, document.senderEmail));
 
   await db
     .update(otpChallenges)

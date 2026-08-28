@@ -347,7 +347,8 @@ describe("MCP OAuth 2.1", () => {
       .join("\n");
     const sent = JSON.parse(text) as { id?: string; status?: string };
     expect(sent.id).toBeTruthy();
-    expect(sent.status).toBe("pending");
+    // OAuth sends default to confirmation: held until the sender enters the code.
+    expect(sent.status).toBe("pending_sender");
   });
 
   it(
