@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type Dispatch, type FormEvent, type ReactNode, type SetStateAction } from "react";
+import { useEffect, useState, type Dispatch, type FormEvent, type ReactNode, type SetStateAction } from "react";
 import { Check, ChevronDown, Plus, X } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -214,6 +214,21 @@ export function SendForm(props: {
   const [activeSigner, setActiveSigner] = useState(0);
   const [activeType, setActiveType] = useState<FieldType | null>(null);
   const [fileNotice, setFileNotice] = useState<string | null>(null);
+
+  // Write mode has no drop target; swallow stray file drops so the browser
+  // doesn't navigate away from typed work.
+  useEffect(() => {
+    if (mode !== "write") return;
+    const swallow = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes("Files")) e.preventDefault();
+    };
+    window.addEventListener("dragover", swallow);
+    window.addEventListener("drop", swallow);
+    return () => {
+      window.removeEventListener("dragover", swallow);
+      window.removeEventListener("drop", swallow);
+    };
+  }, [mode]);
 
   const hasDocument =
     mode === "write" ? markdown.trim().length > 0 : file !== null;
@@ -533,6 +548,7 @@ export function SendForm(props: {
                 accept="application/pdf,.pdf,.md,.markdown,.txt,text/markdown,text/plain,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 required
                 collapseWhenFilled
+                dropAnywhere
                 prompt="Drag & Drop or Choose a file to upload"
                 hint="PDF, Word, markdown, or plain text. Your signer gets an email link in seconds."
                 onFileChange={(f) => {

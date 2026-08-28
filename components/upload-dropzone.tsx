@@ -33,6 +33,7 @@ export function UploadDropzone({
   hint,
   className,
   collapseWhenFilled = false,
+  dropAnywhere = false,
   onFileChange,
   onTextFile,
   onUnsupported,
@@ -46,6 +47,9 @@ export function UploadDropzone({
   className?: string;
   /** Hide the drop target once a file is chosen, leaving only the file row. */
   collapseWhenFilled?: boolean;
+  /** Accept drops anywhere on the page: dragging a file over the window
+      lights up the drop target (and reveals it if collapsed). */
+  dropAnywhere?: boolean;
   onFileChange?: (file: File | null) => void;
   /** When set, .md/.txt files are read client-side (and .docx converted
       to markdown) and handed here instead of staying in the file input. */
@@ -57,6 +61,7 @@ export function UploadDropzone({
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<{ name: string; size: number } | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [receiving, setReceiving] = useState(false);
 
   const clearAndHandOff = (fn: () => void) => {
     if (inputRef.current) inputRef.current.value = "";
@@ -94,6 +99,51 @@ export function UploadDropzone({
     onFileChange?.(f);
   };
 
+  // Keep the latest handler visible to the window listeners below without
+  // re-registering them every render.
+  const readInputRef = useRef(readInput);
+  readInputRef.current = readInput;
+
+  useEffect(() => {
+    if (!dropAnywhere) return;
+    let depth = 0;
+    const hasFiles = (e: globalThis.DragEvent) =>
+      e.dataTransfer?.types.includes("Files") ?? false;
+    const onEnter = (e: globalThis.DragEvent) => {
+      if (!hasFiles(e)) return;
+      depth += 1;
+      setReceiving(true);
+    };
+    const onLeave = () => {
+      depth = Math.max(0, depth - 1);
+      if (depth === 0) setReceiving(false);
+    };
+    // Without preventDefault on dragover, the browser refuses the drop and
+    // navigates to the file instead.
+    const onOver = (e: globalThis.DragEvent) => {
+      if (hasFiles(e)) e.preventDefault();
+    };
+    const onDrop = (e: globalThis.DragEvent) => {
+      depth = 0;
+      setReceiving(false);
+      if (!hasFiles(e) || e.defaultPrevented) return;
+      e.preventDefault();
+      if (!inputRef.current || !e.dataTransfer?.files.length) return;
+      inputRef.current.files = e.dataTransfer.files;
+      readInputRef.current();
+    };
+    window.addEventListener("dragenter", onEnter);
+    window.addEventListener("dragleave", onLeave);
+    window.addEventListener("dragover", onOver);
+    window.addEventListener("drop", onDrop);
+    return () => {
+      window.removeEventListener("dragenter", onEnter);
+      window.removeEventListener("dragleave", onLeave);
+      window.removeEventListener("dragover", onOver);
+      window.removeEventListener("drop", onDrop);
+    };
+  }, [dropAnywhere]);
+
   // form.reset() clears the native input; clear the file row with it.
   useEffect(() => {
     const form = inputRef.current?.form;
@@ -127,10 +177,10 @@ export function UploadDropzone({
           setDragging(true);
         }}
         onDrop={onDrop}
-        data-dragging={dragging || undefined}
+        data-dragging={dragging || receiving || undefined}
         className={cn(
-          "border-input has-[input:focus]:border-ring has-[input:focus]:ring-ring/50 data-[dragging=true]:bg-accent/50 flex min-h-40 cursor-pointer flex-col items-center justify-center gap-3 overflow-hidden rounded-lg border border-dashed p-6 text-center transition-colors has-[input:focus]:ring-[3px]",
-          collapseWhenFilled && file && "hidden",
+          "border-input has-[input:focus]:border-ring has-[input:focus]:ring-ring/50 data-[dragging=true]:border-primary data-[dragging=true]:bg-accent/50 flex min-h-40 cursor-pointer flex-col items-center justify-center gap-3 overflow-hidden rounded-lg border border-dashed p-6 text-center transition-colors has-[input:focus]:ring-[3px]",
+          collapseWhenFilled && file && !receiving && "hidden",
         )}
       >
         <input
@@ -145,7 +195,9 @@ export function UploadDropzone({
           onChange={readInput}
         />
         <Upload aria-hidden className="size-8 stroke-1" />
-        <p className="text-sm font-medium">{prompt}</p>
+        <p className="text-sm font-medium">
+          {receiving ? "Drop your file here" : prompt}
+        </p>
         {hint ? <p className="text-muted-foreground text-xs">{hint}</p> : null}
       </div>
 

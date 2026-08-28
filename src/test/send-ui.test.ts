@@ -615,4 +615,29 @@ describe("SendClient", () => {
     // The bogus file was cleared, not kept as the selection.
     expect(screen.queryByText("sheet.xlsx")).toBeNull();
   });
+
+  it("lights up the drop target while a file drags anywhere over the page", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => whoamiOk()));
+    render(createElement(SendClient));
+    await railReady();
+    const enter = new Event("dragenter", { bubbles: true });
+    Object.assign(enter, { dataTransfer: { types: ["Files"] } });
+    fireEvent(window, enter);
+    expect(screen.getByText(/drop your file here/i)).toBeTruthy();
+    const leave = new Event("dragleave", { bubbles: true });
+    fireEvent(window, leave);
+    expect(screen.queryByText(/drop your file here/i)).toBeNull();
+  });
+
+  it("accepts a file dropped anywhere on the page", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => whoamiOk()));
+    render(createElement(SendClient));
+    await railReady();
+    const drop = new Event("drop", { bubbles: true });
+    Object.assign(drop, {
+      dataTransfer: { types: ["Files"], files: [pdfFile()] },
+    });
+    fireEvent(window, drop);
+    await screen.findByText("a.pdf");
+  });
 });
