@@ -20,6 +20,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.30.0
         version: 1.30.0(zod@4.4.3)
+      '@napi-rs/canvas':
+        specifier: ^1.0.8
+        version: 1.0.8
       '@signpdf/placeholder-pdf-lib':
         specifier: ^3.3.0
         version: 3.3.0(pdf-lib@1.17.1)
@@ -4352,7 +4355,6 @@ snapshots:
       '@napi-rs/canvas-linux-x64-musl': 1.0.8
       '@napi-rs/canvas-win32-arm64-msvc': 1.0.8
       '@napi-rs/canvas-win32-x64-msvc': 1.0.8
-    optional: true
 
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
     optional: true
