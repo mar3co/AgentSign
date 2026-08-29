@@ -9,17 +9,24 @@ const nextConfig: NextConfig = {
     "@sparticuz/chromium",
     "puppeteer-core",
   ],
-  // The Chromium payload is unpacked via runtime-computed paths the file
-  // tracer can't see; without this the DOCX routes deploy without a browser
-  // and every DOCX upload 503s in production. The glob must target pnpm's
-  // real store path: the module resolves there at runtime, and Vercel
-  // refuses packages whose file entries cross the node_modules symlink.
+  // Payloads loaded via runtime-computed paths the file tracer can't see:
+  // @sparticuz/chromium unpacks its browser from bin/, and pdfjs loads its
+  // @napi-rs/canvas polyfill through a platform-specific require — without
+  // it pdfjs throws "DOMMatrix is not defined" and every PDF parse 400s.
+  // Globs must target pnpm's real store path: modules resolve there at
+  // runtime, and Vercel refuses file entries that cross the node_modules
+  // symlink.
   outputFileTracingIncludes: {
     "/v1/documents": [
       "./node_modules/.pnpm/**/node_modules/@sparticuz/chromium/bin/**/*",
+      "./node_modules/.pnpm/**/node_modules/@napi-rs/canvas*/**/*",
     ],
     "/v1/templates": [
       "./node_modules/.pnpm/**/node_modules/@sparticuz/chromium/bin/**/*",
+      "./node_modules/.pnpm/**/node_modules/@napi-rs/canvas*/**/*",
+    ],
+    "/v1/detect-fields": [
+      "./node_modules/.pnpm/**/node_modules/@napi-rs/canvas*/**/*",
     ],
   },
   // app/** imports src/** with .js (NodeNext); webpack needs the same alias Vitest has.
