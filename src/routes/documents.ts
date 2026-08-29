@@ -381,6 +381,9 @@ export async function parsePdfAndFields(
         response: jsonError(400, err.message, "invalid_fields"),
       };
     }
+    // An infrastructure failure here (pdfjs unable to load a runtime file)
+    // is indistinguishable from a bad upload without this line.
+    console.error("pdf tag parse failed:", err);
     return {
       ok: false,
       response: jsonError(400, "File must be a PDF", "invalid_pdf"),
