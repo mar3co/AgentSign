@@ -1,0 +1,2 @@
+-- Placeholder for a migration already applied remotely before the CLI
+-- workflow existed locally. Content intentionally empty.

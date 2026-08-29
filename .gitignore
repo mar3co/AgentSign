@@ -18,3 +18,4 @@ test-results/
 .pnpm-store/
 .dev/
 .playwright-mcp/
+supabase/.temp/
