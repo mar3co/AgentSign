@@ -8,7 +8,7 @@ export const FLAG_DEFAULTS: Record<FlagName, boolean> = {
   ai_field_detect: false,
 };
 
-const ENV_KEYS: Record<
+export const ENV_KEYS: Record<
   FlagName,
   | "SIGN_FLAG_AGENT_PARTIES"
   | "SIGN_FLAG_AGENT_ONLY_ATTEST"
