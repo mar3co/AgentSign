@@ -2,7 +2,7 @@
 
 **Locked: AgentSign** (one word).
 
-Repo: [yohanmarshall/AgentSign](https://github.com/yohanmarshall/AgentSign).  
+Repo: [mar3co/AgentSign](https://github.com/mar3co/AgentSign).  
 Canonical host: **https://agentsign.co**. Alias: **agentsign.net** → 301 to `.co`.  
 DNS: Cloudflare, MAR3 Technologies (zones already active).
 

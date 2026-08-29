@@ -13,7 +13,7 @@ Sources: [v1.2 spec](../specs/2026-08-21-agentsign-v1.2-design.md), [product pla
 ## Global Constraints
 
 - Product name **AgentSign**. Canonical host `https://agentsign.co`. Key prefixes stay `sign_tmp_` / `sign_live_` / `sign_agent_`.
-- Apache-2.0. Public repo `yohanmarshall/AgentSign`. Do not commit `.grok/` or secrets.
+- Apache-2.0. Public repo `mar3co/AgentSign`. Do not commit `.grok/` or secrets.
 - Primitive: **no field placer, `{{sig}}` tags, drafted legal language, `sign` MCP tool, auto-Finish, agent wet-ink PNG.** Those are GitHub #1 and #2.
 - Humans Finish on `/s/:token`. Agents `attest`. Keys never Finish a human party. Certificate must not call attest an electronic signature.
 - Free (including logged-in Free): account OAuth/`sign_live_` for `send`/`status`/`download` only. Named agents, `kind: agent`, `attest` → `403` `{ code: "pro_required" }`. Verify is unauthenticated.
@@ -511,7 +511,7 @@ Payload: no tokens, no `sign_agent_`, no webhook secrets.
 This is ops, not TDD. Still sequential and reviewable.
 
 - [ ] **Step 1:** `pnpm typecheck` and `pnpm test` green on `main`.
-- [ ] **Step 2:** Create Vercel project linked to `yohanmarshall/AgentSign` (Fluid Compute, Node, existing cron `/internal/shred`). Do not use Edge for seal.
+- [ ] **Step 2:** Create Vercel project linked to `mar3co/AgentSign` (Fluid Compute, Node, existing cron `/internal/shred`). Do not use Edge for seal.
 - [ ] **Step 3:** Supabase: list orgs, `get_cost` for a new project, print the cost, then create project (Auth + Postgres + Storage bucket `envelopes`). Apply schema (drizzle push or SQL from `src/db/schema.ts`). Enable Google/GitHub providers only after env is in Vercel. RLS on; no grants to `anon`.
 - [ ] **Step 4:** Vercel env: `DATABASE_URL`, `SUPABASE_*`, `APP_URL=https://agentsign.co`, `CRON_SECRET`, `WEBHOOK_KEK`, `P12_*`, Stripe/Resend when ready, `FLAGS_SECRET`.
 - [ ] **Step 5:** `vercel flags create agent_parties` (boolean, production **enable**). `vercel flags create agent_only_attest` (boolean, production **disable**).
