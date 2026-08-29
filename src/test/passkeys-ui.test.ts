@@ -94,7 +94,7 @@ describe("LoginForm passkey", () => {
     const password = screen.getByLabelText(/^password$/i) as HTMLInputElement;
     email.value = "shop@example.com";
     password.value = "correct-horse";
-    screen.getByRole("button", { name: /log in with password/i }).click();
+    screen.getByRole("button", { name: /^log in$/i }).click();
     expect(await screen.findByRole("button", { name: /save a passkey/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /not now/i })).toBeTruthy();
   });

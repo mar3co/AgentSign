@@ -41,10 +41,16 @@ describe("login form layout", () => {
     ).toBe("/login/github?next=%2Fdocuments");
   });
 
-  it("keeps magic link and password as the email actions", () => {
+  it("keeps password login primary with the magic link as fallback", () => {
     render(createElement(LoginForm, { email: "jane@example.com", next: "/" }));
-    expect(screen.getByRole("button", { name: /email me a link/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /log in with password/i })).toBeTruthy();
+    const login = screen.getByRole("button", { name: /^log in$/i });
+    expect(login.getAttribute("value")).toBe("password");
+    const magic = screen.getByRole("button", { name: /email me a link/i });
+    expect(magic.getAttribute("value")).toBe("magic");
+    // Password first, so Enter submits it when a password is typed.
+    expect(
+      login.compareDocumentPosition(magic) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("offers create account as a text action, not a third stacked button", () => {
