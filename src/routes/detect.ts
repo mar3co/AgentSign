@@ -1,3 +1,4 @@
+import { generateText } from "ai";
 import { getEnv } from "../env.js";
 import { getAuth } from "../lib/auth/supabase.js";
 import { flagOn } from "../lib/flags.js";
@@ -17,37 +18,37 @@ function jsonError(status: number, error: string, code: string): Response {
 /** The model declined or its reply was cut off — not a fact about the document. */
 export class DetectBlockedError extends Error {}
 
-async function claudeGenerate(prompt: string): Promise<string> {
-  const { default: Anthropic } = await import("@anthropic-ai/sdk");
-  const client = new Anthropic({ apiKey: getEnv().ANTHROPIC_API_KEY });
-  const response = await client.messages.create({
-    model: "claude-opus-5",
-    max_tokens: 16000,
-    messages: [{ role: "user", content: prompt }],
+/** Gateway credential: an explicit key locally, Vercel's OIDC token deployed. */
+function gatewayCredential(): string {
+  const env = getEnv();
+  return env.AI_GATEWAY_API_KEY.trim() || env.VERCEL_OIDC_TOKEN.trim();
+}
+
+async function gatewayGenerate(prompt: string): Promise<string> {
+  const { text, finishReason } = await generateText({
+    // A plain "provider/model" string routes through Vercel AI Gateway, so
+    // billing, keys, and fallbacks stay in the Vercel dashboard.
+    model: "anthropic/claude-opus-5",
+    prompt,
+    maxOutputTokens: 16000,
   });
-  if (
-    response.stop_reason === "refusal" ||
-    response.stop_reason === "max_tokens"
-  ) {
-    throw new DetectBlockedError(`unusable model reply: ${response.stop_reason}`);
+  if (finishReason === "content-filter" || finishReason === "length") {
+    throw new DetectBlockedError(`unusable model reply: ${finishReason}`);
   }
-  return response.content
-    .filter((b) => b.type === "text")
-    .map((b) => b.text)
-    .join("");
+  return text;
 }
 
 /** POST /v1/detect-fields — AI field suggestions for an uploaded PDF. */
 export async function postDetectFields(
   req: Request,
-  generate: (prompt: string) => Promise<string> = claudeGenerate,
+  generate: (prompt: string) => Promise<string> = gatewayGenerate,
 ): Promise<Response> {
   if (!(await flagOn("ai_field_detect"))) {
     return jsonError(404, "Not found", "not_found");
   }
   const user = await getAuth().userFromCookie(req.headers.get("cookie"));
   if (!user) return jsonError(401, "Unauthorized", "unauthorized");
-  if (!getEnv().ANTHROPIC_API_KEY.trim()) {
+  if (!gatewayCredential()) {
     return jsonError(503, "AI detection is not configured", "not_configured");
   }
 

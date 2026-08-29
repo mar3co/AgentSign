@@ -27,37 +27,30 @@ function parseEnvFlag(raw: string): boolean | undefined {
   return undefined;
 }
 
+/**
+ * Read the flag from the Vercel dashboard. The shared client reads the
+ * connection string Vercel injects as FLAGS, and caches definitions across
+ * requests on a warm instance. With no connection string, or with the
+ * dashboard unreachable, every path here lands on the built-in default.
+ */
 async function vercelFlagOn(name: FlagName): Promise<boolean> {
   const fallback = FLAG_DEFAULTS[name];
   try {
-    const { createClient } = await import("@vercel/flags-core");
-    const client = createClient({
-      disableMetrics: true,
-      stream: false,
-      polling: false,
-    });
-    try {
-      await client.initialize();
-    } catch {
-      // No definitions / offline — evaluate still returns defaultValue.
-    }
-    const result = await client.evaluate<boolean>(name, fallback);
-    try {
-      await client.shutdown();
-    } catch {
-      // ignore shutdown errors
-    }
-    return Boolean(result.value);
+    const { flagsClient } = await import("@vercel/flags-core");
+    const result = await flagsClient.evaluate<boolean>(name, fallback);
+    return "value" in result ? Boolean(result.value) : fallback;
   } catch {
     return fallback;
   }
 }
 
-/** Env override wins. Else Vercel Flags when FLAGS_SECRET set. Else defaults. */
+/**
+ * The Vercel dashboard owns flag values. SIGN_FLAG_* is a local dev and test
+ * override only — setting one in a deployment takes that flag away from the
+ * dashboard, so leave them unset there.
+ */
 export async function flagOn(name: FlagName): Promise<boolean> {
-  const env = getEnv();
-  const override = parseEnvFlag(env[ENV_KEYS[name]]);
+  const override = parseEnvFlag(getEnv()[ENV_KEYS[name]]);
   if (override !== undefined) return override;
-  if (env.FLAGS_SECRET.trim() !== "") return vercelFlagOn(name);
-  return FLAG_DEFAULTS[name];
+  return vercelFlagOn(name);
 }

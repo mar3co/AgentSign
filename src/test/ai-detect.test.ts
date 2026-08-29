@@ -121,9 +121,10 @@ describe("postDetectFields", () => {
     expect(res.status).toBe(401);
   });
 
-  it("503s when ANTHROPIC_API_KEY is not configured", async () => {
+  it("503s when no AI Gateway credential is configured", async () => {
     vi.stubEnv("SIGN_FLAG_AI_FIELD_DETECT", "1");
-    vi.stubEnv("ANTHROPIC_API_KEY", "");
+    vi.stubEnv("AI_GATEWAY_API_KEY", "");
+    vi.stubEnv("VERCEL_OIDC_TOKEN", "");
     resetEnvCache();
     authedDeps();
     const res = await postDetectFields(detectRequest(await simplePdf()), async () => "[]");
@@ -134,7 +135,7 @@ describe("postDetectFields", () => {
 
   it("returns detected fields for an authenticated request", async () => {
     vi.stubEnv("SIGN_FLAG_AI_FIELD_DETECT", "1");
-    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("AI_GATEWAY_API_KEY", "test-key");
     resetEnvCache();
     // Unique user ids per test: the limiter's map is module-global state.
     authedDeps("happy-user");
@@ -148,7 +149,7 @@ describe("postDetectFields", () => {
 
   it("400s for bytes that are not a PDF", async () => {
     vi.stubEnv("SIGN_FLAG_AI_FIELD_DETECT", "1");
-    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("AI_GATEWAY_API_KEY", "test-key");
     resetEnvCache();
     authedDeps("bad-file-user");
     const res = await postDetectFields(
@@ -160,7 +161,7 @@ describe("postDetectFields", () => {
 
   it("502s distinctly when the model blocks or truncates", async () => {
     vi.stubEnv("SIGN_FLAG_AI_FIELD_DETECT", "1");
-    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("AI_GATEWAY_API_KEY", "test-key");
     resetEnvCache();
     authedDeps("blocked-user");
     const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -175,7 +176,7 @@ describe("postDetectFields", () => {
 
   it("429s after too many model calls, then frees up after the window", { timeout: 120_000 }, async () => {
     vi.stubEnv("SIGN_FLAG_AI_FIELD_DETECT", "1");
-    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("AI_GATEWAY_API_KEY", "test-key");
     resetEnvCache();
     authedDeps("rate-limit-user");
     // Fake only Date so the limiter's clock moves without stalling pdfjs.
@@ -196,7 +197,8 @@ describe("postDetectFields", () => {
 
   it("does not count requests rejected before the model call", async () => {
     vi.stubEnv("SIGN_FLAG_AI_FIELD_DETECT", "1");
-    vi.stubEnv("ANTHROPIC_API_KEY", "");
+    vi.stubEnv("AI_GATEWAY_API_KEY", "");
+    vi.stubEnv("VERCEL_OIDC_TOKEN", "");
     resetEnvCache();
     authedDeps("not-configured-user");
     const make = () =>
@@ -215,7 +217,7 @@ describe("postDetectFields", () => {
 
   it("502s and logs when the model call fails", async () => {
     vi.stubEnv("SIGN_FLAG_AI_FIELD_DETECT", "1");
-    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("AI_GATEWAY_API_KEY", "test-key");
     resetEnvCache();
     authedDeps("api-down-user");
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
