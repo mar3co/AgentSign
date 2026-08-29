@@ -29,8 +29,10 @@ const envSchema = z.object({
   SIGN_FLAG_AGENT_PARTIES: z.string().default(""),
   SIGN_FLAG_AGENT_ONLY_ATTEST: z.string().default(""),
   SIGN_FLAG_AI_FIELD_DETECT: z.string().default(""),
-  FLAGS_SECRET: z.string().default(""),
-  ANTHROPIC_API_KEY: z.string().default(""),
+  // Vercel AI Gateway: an explicit key locally, the OIDC token Vercel injects
+  // into deployments. Either one authenticates the model calls.
+  AI_GATEWAY_API_KEY: z.string().default(""),
+  VERCEL_OIDC_TOKEN: z.string().default(""),
 });
 
 export type Env = z.infer<typeof envSchema>;
