@@ -31,6 +31,7 @@ const nextConfig: NextConfig = {
   serverExternalPackages: [
     "@electric-sql/pglite",
     "pdfjs-dist",
+    "@napi-rs/canvas",
     "@sparticuz/chromium",
     "puppeteer-core",
   ],

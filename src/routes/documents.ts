@@ -54,6 +54,7 @@ import {
   isLegacyDoc,
 } from "../lib/docx.js";
 import { importAcroFields } from "../lib/pdf/acroform.js";
+import { primePdfjsRuntime } from "../lib/pdf/serverPdfjsDeps.js";
 import { InvalidFieldsError, parsePdfTags } from "../lib/pdf/tags.js";
 import {
   fieldAppearanceKey,
@@ -371,6 +372,7 @@ export async function parsePdfAndFields(
   let tagFields: DocumentField[] = [];
   let storedBytes = bytes;
   try {
+    await primePdfjsRuntime();
     const parsed = await parsePdfTags(bytes);
     tagFields = parsed.fields;
     storedBytes = parsed.pdf;

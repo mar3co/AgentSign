@@ -2,6 +2,7 @@ import { getEnv } from "../env.js";
 import { getAuth } from "../lib/auth/supabase.js";
 import { flagOn } from "../lib/flags.js";
 import { aiDetectFields } from "../lib/pdf/aiDetect.js";
+import { primePdfjsRuntime } from "../lib/pdf/serverPdfjsDeps.js";
 import { slidingWindowLimiter } from "../lib/rateLimit.js";
 
 const PDF_MAX_BYTES = 20 * 1024 * 1024;
@@ -77,6 +78,7 @@ export async function postDetectFields(
   }
 
   try {
+    await primePdfjsRuntime();
     const fields = await aiDetectFields(bytes, generate);
     return Response.json({ fields });
   } catch (err) {
