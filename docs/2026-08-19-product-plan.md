@@ -4,7 +4,7 @@
 **Date:** 2026-08-19  
 **Updated:** 2026-08-21  
 **Status:** Agreed direction. v1 + v1.1 implemented locally. v1.2 agent parties spec locked.  
-**Repo:** [yohanmarshall/AgentSign](https://github.com/yohanmarshall/AgentSign)  
+**Repo:** [mar3co/AgentSign](https://github.com/mar3co/AgentSign)  
 **Host:** agentsign.co (Cloudflare). agentsign.net → 301.  
 **Not:** a suite SKU, an industry fork, or a private cloud for one company. This is its own product.
 

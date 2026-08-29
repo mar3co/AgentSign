@@ -1,7 +1,7 @@
 # Enhancement: Agent Finish (`sign` MCP, auto-Finish, wet-ink appearance)
 
 **Status:** Open. Not in the v1.2 agent-parties spec.  
-**GitHub:** https://github.com/yohanmarshall/AgentSign/issues/2  
+**GitHub:** https://github.com/mar3co/AgentSign/issues/2  
 **Type:** Enhancement  
 **Filed:** 2026-08-21  
 **Blocked by:** Locked model — humans Finish (ESIGN), agents Attest (`attested_at`, never `signed_at`). A `sign` tool and auto-Finish would make the certificate lie.

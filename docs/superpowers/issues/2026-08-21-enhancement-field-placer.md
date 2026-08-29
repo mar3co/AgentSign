@@ -1,7 +1,7 @@
 # Enhancement: Field placer, `{{sig}}` tags, drafted legal language
 
 **Status:** Partially shipped. PDF tags and on-page fields JSON are in the on-page-fields slice. Drag-drop placer and drafting remain parked.  
-**GitHub:** https://github.com/yohanmarshall/AgentSign/issues/1  
+**GitHub:** https://github.com/mar3co/AgentSign/issues/1  
 **Type:** Enhancement  
 **Filed:** 2026-08-21  
 **Blocked by:** Product thesis (signing primitive, no suite). Placer still deferred so we do not become DocuSeal in the agent slice.

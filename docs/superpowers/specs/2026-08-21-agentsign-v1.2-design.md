@@ -3,7 +3,7 @@
 **Date:** 2026-08-21  
 **Status:** Locked for implementation  
 **Product:** AgentSign  
-**Repo:** [yohanmarshall/AgentSign](https://github.com/yohanmarshall/AgentSign)  
+**Repo:** [mar3co/AgentSign](https://github.com/mar3co/AgentSign)  
 **Product plan:** [docs/2026-08-19-product-plan.md](../../2026-08-19-product-plan.md)  
 **Depends on:** v1 + v1.1 on `main` (`0598a0c`)
 
@@ -30,7 +30,7 @@ Still **$19 Pro**. No new SKU. No seats.
 | Place | Form |
 |---|---|
 | Spoken / invoices / certificate product line | **AgentSign** (one word) |
-| GitHub | `yohanmarshall/AgentSign` (public, Apache-2.0) |
+| GitHub | `mar3co/AgentSign` (public, Apache-2.0) |
 | Canonical host | **https://agentsign.co** |
 | Alias | **agentsign.net** → 301 to `agentsign.co` |
 | DNS | Cloudflare, account **MAR3 Technologies**. Zones already active. |
@@ -289,8 +289,8 @@ Env stays out of the repo. Tests stay PGlite + `setDeps` + flag env overrides. F
 
 Not this spec:
 
-- Field placer, `{{sig}}` tags, Sign drafting legal language — [#1](https://github.com/yohanmarshall/AgentSign/issues/1)
-- `sign` MCP tool, auto-Finish, agent wet-ink appearance — [#2](https://github.com/yohanmarshall/AgentSign/issues/2)
+- Field placer, `{{sig}}` tags, Sign drafting legal language — [#1](https://github.com/mar3co/AgentSign/issues/1)
+- `sign` MCP tool, auto-Finish, agent wet-ink appearance — [#2](https://github.com/mar3co/AgentSign/issues/2)
 
 Also not this spec: custom sending domain, certificate branding, seats, second Stripe Price, SSO/SAML, signup-to-sign, URL ingest, QES/SOC 2/HIPAA claims.
 

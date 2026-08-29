@@ -3,10 +3,10 @@
 **Date:** 2026-08-25  
 **Status:** Locked for implementation  
 **Product:** AgentSign  
-**Repo:** [yohanmarshall/AgentSign](https://github.com/yohanmarshall/AgentSign)  
+**Repo:** [mar3co/AgentSign](https://github.com/mar3co/AgentSign)  
 **Product plan:** [docs/2026-08-19-product-plan.md](../../2026-08-19-product-plan.md)  
 **Depends on:** v1.2 on `main` (agent parties, OAuth, verify, templates as packets)  
-**Supersedes:** tags half of [issue #1](https://github.com/yohanmarshall/AgentSign/issues/1). Drag-drop placer and drafted legal language stay parked.
+**Supersedes:** tags half of [issue #1](https://github.com/mar3co/AgentSign/issues/1). Drag-drop placer and drafted legal language stay parked.
 
 ---
 
