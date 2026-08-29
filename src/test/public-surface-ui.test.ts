@@ -67,9 +67,9 @@ describe("public chrome", () => {
     expect(lockup.querySelector(".font-heading")?.textContent).toBe("AgentSign");
   });
 
-  it("auth header still offers Send a PDF", () => {
+  it("auth header still offers Send a document", () => {
     render(createElement(SiteHeader, { variant: "auth" }));
-    expect(screen.getByRole("link", { name: "Send a PDF" }).getAttribute("href")).toBe(
+    expect(screen.getByRole("link", { name: "Send a document" }).getAttribute("href")).toBe(
       "/",
     );
   });

@@ -523,4 +523,114 @@ describe("SendClient", () => {
         .getAttribute("aria-expanded"),
     ).toBe("true");
   });
+
+  it("toggles between the dropzone and the write view", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => whoamiOk()));
+    render(createElement(SendClient));
+    await railReady();
+    fireEvent.click(
+      screen.getByRole("button", { name: /write the document instead/i }),
+    );
+    expect(screen.getByLabelText(/document text/i)).toBeTruthy();
+    expect(document.querySelector("input[type=file]")).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: /upload a file instead/i }),
+    );
+    expect(document.querySelector("input[type=file]")).toBeTruthy();
+  });
+
+  it("posts written text as the markdown field, without a file", async () => {
+    const bodies = stubDocumentsFetch();
+    render(createElement(SendClient));
+    await railReady();
+    fireEvent.click(
+      screen.getByRole("button", { name: /write the document instead/i }),
+    );
+    fireEvent.change(screen.getByLabelText(/document text/i), {
+      target: { value: "# Deal\n\n{{sig}}" },
+    });
+    await fillAndSubmit();
+    await screen.findByText(/confirm to send/i);
+    const body = bodies[0]!;
+    expect(String(body.get("markdown"))).toBe("# Deal\n\n{{sig}}");
+    expect(body.get("file")).toBeNull();
+  });
+
+  it("loads a chosen .md file into the write view", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => whoamiOk()));
+    render(createElement(SendClient));
+    await railReady();
+    const input = document.querySelector(
+      "input[type=file]",
+    ) as HTMLInputElement;
+    const md = new File(["# NDA\n\n{{sig}}"], "nda.md", {
+      type: "text/markdown",
+    });
+    Object.defineProperty(input, "files", { value: [md], configurable: true });
+    fireEvent.change(input);
+    const textarea = (await screen.findByLabelText(
+      /document text/i,
+    )) as HTMLTextAreaElement;
+    expect(textarea.value).toBe("# NDA\n\n{{sig}}");
+  });
+
+  it("keeps a chosen .docx as the file; the server converts it on send", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => whoamiOk()));
+    render(createElement(SendClient));
+    await railReady();
+    const input = document.querySelector(
+      "input[type=file]",
+    ) as HTMLInputElement;
+    const docx = new File([new Uint8Array([0x50, 0x4b])], "deal.docx", {
+      type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    });
+    Object.defineProperty(input, "files", { value: [docx], configurable: true });
+    fireEvent.change(input);
+    await screen.findByText("deal.docx");
+    // Not routed into the write view, and not rejected.
+    expect(screen.queryByLabelText(/document text/i)).toBeNull();
+    expect(screen.queryByText(/isn't a supported file/i)).toBeNull();
+  });
+
+  it("rejects an unsupported file with a clear notice", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => whoamiOk()));
+    render(createElement(SendClient));
+    await railReady();
+    const input = document.querySelector(
+      "input[type=file]",
+    ) as HTMLInputElement;
+    const xlsx = new File([new Uint8Array([1])], "sheet.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    Object.defineProperty(input, "files", { value: [xlsx], configurable: true });
+    fireEvent.change(input);
+    expect(await screen.findByText(/isn't a supported file/i)).toBeTruthy();
+    // The bogus file was cleared, not kept as the selection.
+    expect(screen.queryByText("sheet.xlsx")).toBeNull();
+  });
+
+  it("lights up the drop target while a file drags anywhere over the page", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => whoamiOk()));
+    render(createElement(SendClient));
+    await railReady();
+    const enter = new Event("dragenter", { bubbles: true });
+    Object.assign(enter, { dataTransfer: { types: ["Files"] } });
+    fireEvent(window, enter);
+    expect(screen.getByText(/drop your file here/i)).toBeTruthy();
+    const leave = new Event("dragleave", { bubbles: true });
+    fireEvent(window, leave);
+    expect(screen.queryByText(/drop your file here/i)).toBeNull();
+  });
+
+  it("accepts a file dropped anywhere on the page", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => whoamiOk()));
+    render(createElement(SendClient));
+    await railReady();
+    const drop = new Event("drop", { bubbles: true });
+    Object.assign(drop, {
+      dataTransfer: { types: ["Files"], files: [pdfFile()] },
+    });
+    fireEvent(window, drop);
+    await screen.findByText("a.pdf");
+  });
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type Dispatch, type FormEvent, type ReactNode, type SetStateAction } from "react";
+import { useEffect, useState, type Dispatch, type FormEvent, type ReactNode, type SetStateAction } from "react";
 import { Check, ChevronDown, Plus, X } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -147,6 +147,10 @@ export function SendForm(props: {
   setTitle: (v: string) => void;
   file: File | null;
   onFileChange: (f: File | null) => void;
+  mode: "upload" | "write";
+  setMode: (m: "upload" | "write") => void;
+  markdown: string;
+  setMarkdown: (v: string) => void;
   signers: SignerRow[];
   setSigners: Dispatch<SetStateAction<SignerRow[]>>;
   placed: PlacedField[];
@@ -181,6 +185,10 @@ export function SendForm(props: {
     setTitle,
     file,
     onFileChange,
+    mode,
+    setMode,
+    markdown,
+    setMarkdown,
     signers,
     setSigners,
     placed,
@@ -211,9 +219,27 @@ export function SendForm(props: {
 
   const [activeSigner, setActiveSigner] = useState(0);
   const [activeType, setActiveType] = useState<FieldType | null>(null);
+  const [fileNotice, setFileNotice] = useState<string | null>(null);
 
+  // Write mode has no drop target; swallow stray file drops so the browser
+  // doesn't navigate away from typed work.
+  useEffect(() => {
+    if (mode !== "write") return;
+    const swallow = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes("Files")) e.preventDefault();
+    };
+    window.addEventListener("dragover", swallow);
+    window.addEventListener("drop", swallow);
+    return () => {
+      window.removeEventListener("dragover", swallow);
+      window.removeEventListener("drop", swallow);
+    };
+  }, [mode]);
+
+  const hasDocument =
+    mode === "write" ? markdown.trim().length > 0 : file !== null;
   const documentDone =
-    file !== null && title.trim().length > 0 && emailish(senderEmail);
+    hasDocument && title.trim().length > 0 && emailish(senderEmail);
   const signersDone =
     signers.length > 0 &&
     signers.every((s) => s.name.trim().length > 0 && emailish(s.email));
@@ -258,9 +284,10 @@ export function SendForm(props: {
           done={documentDone}
           onToggle={() => toggleStep("document")}
         >
-          {file ? null : (
+          {file || mode === "write" ? null : (
             <p className="text-xs text-muted-foreground">
-              Drop a PDF on the canvas to get started.
+              Drop a PDF on the canvas to get started, or write the document
+              instead.
             </p>
           )}
           <div className="flex flex-col gap-2">
@@ -533,17 +560,75 @@ export function SendForm(props: {
             !file && "justify-center",
           )}
         >
-          <UploadDropzone
-            id="file"
-            name="file"
-            accept="application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            required
-            collapseWhenFilled
-            prompt="Drag & Drop or Choose a PDF or DOCX to upload"
-            hint="Your signer gets an email link in seconds."
-            onFileChange={onFileChange}
-            className={file ? undefined : "mx-auto w-full max-w-xl"}
-          />
+          {mode === "upload" ? (
+            <>
+              <UploadDropzone
+                id="file"
+                name="file"
+                accept="application/pdf,.pdf,.md,.markdown,.txt,text/markdown,text/plain,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                required
+                collapseWhenFilled
+                dropAnywhere
+                prompt="Drag & Drop or Choose a file to upload"
+                hint="PDF, Word, markdown, or plain text. Your signer gets an email link in seconds."
+                onFileChange={(f) => {
+                  setFileNotice(null);
+                  onFileChange(f);
+                }}
+                onTextFile={({ text }) => {
+                  setFileNotice(null);
+                  setMarkdown(text);
+                  setMode("write");
+                }}
+                onUnsupported={(name) =>
+                  setFileNotice(
+                    `${name} isn't a supported file. Use a PDF, a Word document (.docx), markdown, or plain text.`,
+                  )
+                }
+                className={file ? undefined : "mx-auto w-full max-w-xl"}
+              />
+              {fileNotice ? (
+                <Alert variant="destructive" className="mx-auto w-full max-w-xl">
+                  <AlertDescription>{fileNotice}</AlertDescription>
+                </Alert>
+              ) : null}
+              {file ? null : (
+                <button
+                  type="button"
+                  className="mx-auto text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
+                  onClick={() => setMode("write")}
+                >
+                  or write the document instead
+                </button>
+              )}
+            </>
+          ) : (
+            <div className="mx-auto flex w-full max-w-xl flex-col gap-2">
+              <Label htmlFor="markdown" className="sr-only">
+                Document text
+              </Label>
+              <Textarea
+                id="markdown"
+                name="markdown"
+                required
+                value={markdown}
+                onChange={(e) => setMarkdown(e.target.value)}
+                placeholder={"# Service Agreement\n\nSign below to accept.\n\n{{sig}}"}
+                className="min-h-80 bg-card font-mono text-sm"
+              />
+              <p className="text-xs text-muted-foreground">
+                Markdown or plain text. Put {"{{sig}}"} where the signature
+                goes.
+              </p>
+              <button
+                type="button"
+                className="self-start text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
+                onClick={() => setMode("upload")}
+              >
+                or upload a file instead
+              </button>
+            </div>
+          )}
 
           {replaceNotice ? (
             <Alert>

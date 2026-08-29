@@ -43,7 +43,7 @@ export const auditEvent = [
 ] as const;
 export type AuditEvent = (typeof auditEvent)[number];
 
-export const fileKind = ["original", "sealed", "certificate"] as const;
+export const fileKind = ["original", "sealed", "certificate", "source"] as const;
 export type FileKind = (typeof fileKind)[number];
 
 export const apiKeyKind = ["tmp", "live", "agent"] as const;

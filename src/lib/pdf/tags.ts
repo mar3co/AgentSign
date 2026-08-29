@@ -209,6 +209,8 @@ function findTagsOnPage(
       const start = m.index;
       const end = start + m[0].length;
       const contributing = charItems.slice(start, end);
+      // Monospace text is code shown literally, never a live tag.
+      if (contributing.some((c) => c.mono)) continue;
       const unique: LocatedItem[] = [];
       const seen = new Set<LocatedItem>();
       for (const c of contributing) {

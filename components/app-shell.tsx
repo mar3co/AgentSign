@@ -181,7 +181,7 @@ export function AppShell({
               className="ml-1.5 border-transparent bg-brand-wax text-primary-foreground shadow-none hover:bg-brand-wax/90 hover:text-primary-foreground"
             >
               <Send className="size-3.5" />
-              <span className="max-sm:sr-only">Send a PDF</span>
+              <span className="max-sm:sr-only">Send a document</span>
             </LinkButton>
           )}
         </div>

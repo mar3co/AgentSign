@@ -57,6 +57,11 @@ import { importAcroFields } from "../lib/pdf/acroform.js";
 import { primePdfjsRuntime } from "../lib/pdf/serverPdfjsDeps.js";
 import { InvalidFieldsError, parsePdfTags } from "../lib/pdf/tags.js";
 import {
+  EmptyMarkdownError,
+  MarkdownTooLargeError,
+  renderMarkdown,
+} from "../lib/pdf/renderMarkdown.js";
+import {
   fieldAppearanceKey,
   objectKey,
   type BlobStore,
@@ -78,6 +83,7 @@ import { getEnv } from "../env.js";
 import { purgeDocument } from "../jobs/shred.js";
 
 const PDF_MAX_BYTES = 20 * 1024 * 1024;
+const MARKDOWN_MAX_BYTES = 1024 * 1024;
 const OTP_TTL_MS = 10 * 60 * 1000;
 
 const signerSchema = z.object({
@@ -365,6 +371,7 @@ export async function parsePdfAndFields(
   bytes: Uint8Array,
   fieldsRaw: unknown,
   acroRole: string | null = null,
+  opts: { fromMarkdown?: boolean } = {},
 ): Promise<
   | { ok: true; fields: DocumentField[]; storedBytes: Uint8Array }
   | { ok: false; response: Response }
@@ -381,6 +388,14 @@ export async function parsePdfAndFields(
       return {
         ok: false,
         response: jsonError(400, err.message, "invalid_fields"),
+      };
+    }
+    if (opts.fromMarkdown) {
+      // Our own rendered PDF failed tag parsing: our bug, not the caller's.
+      console.error("markdown render produced an unreadable PDF", err);
+      return {
+        ok: false,
+        response: jsonError(500, "Markdown rendering failed", "render_failed"),
       };
     }
     // An infrastructure failure here (pdfjs unable to load a runtime file)
@@ -917,6 +932,29 @@ export async function inviteFirstSigner(
   return { signers };
 }
 
+/** Store the markdown source blob and row. Returns an error response on failure. */
+async function storeSourceMarkdown(
+  db: ReturnType<typeof requireDb>,
+  store: NonNullable<ReturnType<typeof requireStore>>,
+  documentId: string,
+  source: Uint8Array,
+): Promise<Response | null> {
+  try {
+    const path = objectKey(documentId, "source");
+    await store.put(path, source);
+    await db.insert(files).values({
+      documentId,
+      kind: "source",
+      storagePath: path,
+      fileHash: sha256Hex(source),
+    });
+  } catch (err) {
+    console.error("failed to store markdown source", documentId, err);
+    return storeUnavailableResponse();
+  }
+  return null;
+}
+
 export async function sendPreparedPdf(opts: {
   title: string;
   senderEmail: string;
@@ -937,6 +975,8 @@ export async function sendPreparedPdf(opts: {
   holdForConfirmation?: boolean;
   /** Mint a one-time status key in the response (the web flow shows it). */
   includeTmpKey?: boolean;
+  /** Markdown source bytes when the document was submitted as markdown. */
+  source?: Uint8Array | null;
 }): Promise<Response> {
   const db = requireDb();
   const store = requireStore();
@@ -1037,6 +1077,10 @@ export async function sendPreparedPdf(opts: {
     storagePath,
     fileHash,
   });
+  if (opts.source) {
+    const failed = await storeSourceMarkdown(db, store, document.id, opts.source);
+    if (failed) return failed;
+  }
   await db.insert(signersTable).values(signerInsertValues(document.id, prepared.prepared));
 
   if (opts.holdForConfirmation) {
@@ -1126,8 +1170,34 @@ export async function createDocument(req: Request): Promise<Response> {
     return jsonError(400, "At least one signer is required", "missing_signers");
   }
 
-  if (!(file instanceof Blob)) {
-    return jsonError(400, "A PDF file is required", "invalid_pdf");
+  const markdownField = form.get("markdown");
+  if (markdownField instanceof Blob) {
+    return jsonError(400, "Markdown must be a text field, not a file", "invalid_request");
+  }
+  // Multipart encoding CRLF-normalizes string fields; restore the sender's newlines.
+  const markdown =
+    typeof markdownField === "string"
+      ? markdownField.replace(/\r\n/g, "\n")
+      : null;
+  if (markdown != null && file instanceof Blob) {
+    return jsonError(400, "Provide a file or markdown, not both", "invalid_request");
+  }
+  if (markdown == null && !(file instanceof Blob)) {
+    return jsonError(400, "A PDF file or markdown is required", "invalid_pdf");
+  }
+
+  // Validate markdown cheaply here; rendering waits until after auth and
+  // quota so unauthenticated callers cannot burn render CPU. File uploads
+  // are size-checked and DOCX-converted after auth for the same reason.
+  let source: Uint8Array | null = null;
+  if (markdown != null) {
+    if (!markdown.trim()) {
+      return jsonError(400, "Markdown must not be empty", "invalid_markdown");
+    }
+    source = new TextEncoder().encode(markdown);
+    if (source.length > MARKDOWN_MAX_BYTES) {
+      return jsonError(400, "Markdown exceeds maximum size", "markdown_too_large");
+    }
   }
 
   const db = requireDb();
@@ -1179,13 +1249,17 @@ export async function createDocument(req: Request): Promise<Response> {
       : null;
 
   // Conversion cost is capped per validated identity; anonymous callers
-  // share the proxy-reported client IP's bucket.
-  const normalized = await normalizeUploadToPdf(
-    file,
-    liveUserId ?? sessionUser?.id ?? clientIp(req),
-  );
-  if (!normalized.ok) return normalized.response;
-  const bytes = normalized.bytes;
+  // share the proxy-reported client IP's bucket. Markdown renders later,
+  // after the free-send cap.
+  let fileBytes: Uint8Array | null = null;
+  if (file instanceof Blob) {
+    const normalized = await normalizeUploadToPdf(
+      file,
+      liveUserId ?? sessionUser?.id ?? clientIp(req),
+    );
+    if (!normalized.ok) return normalized.response;
+    fileBytes = normalized.bytes;
+  }
 
   // AcroForm fields bind to the first human signer's role. With no human or
   // ambiguous (duplicate) roles, skip the import rather than fail the upload.
@@ -1200,8 +1274,6 @@ export async function createDocument(req: Request): Promise<Response> {
       ? signerRoles[firstHuman]!
       : null;
 
-  const tagged = await parsePdfAndFields(bytes, form.get("fields"), acroRole);
-  if (!tagged.ok) return tagged.response;
   const extras = await parseDocumentExtras({
     valuesRaw: form.get("values"),
     order: form.get("order"),
@@ -1227,6 +1299,47 @@ export async function createDocument(req: Request): Promise<Response> {
   const windowDays = Number(env.FREE_SEND_WINDOW_DAYS);
   const windowStart = new Date(at.getTime() - windowDays * 86_400_000);
 
+  // Free senders at their cap get turned away before the expensive render.
+  if (!liveUserId) {
+    const [cap] = await db
+      .select({ n: count() })
+      .from(documents)
+      .where(
+        and(
+          eq(documents.senderEmail, senderEmail),
+          gte(documents.createdAt, windowStart),
+          ne(documents.status, "pending_sender"),
+        ),
+      );
+    if (Number(cap?.n ?? 0) >= limit) {
+      return jsonError(429, "Send limit reached. Try again later.", "send_limit");
+    }
+  }
+
+  let bytes: Uint8Array;
+  if (markdown != null) {
+    try {
+      bytes = await renderMarkdown(markdown);
+    } catch (err) {
+      if (err instanceof MarkdownTooLargeError) {
+        return jsonError(400, err.message, "markdown_too_large");
+      }
+      if (err instanceof EmptyMarkdownError) {
+        return jsonError(400, err.message, "invalid_markdown");
+      }
+      // A renderer crash on accepted input is our bug; keep the evidence.
+      console.error("markdown rendering failed", err);
+      return jsonError(500, "Markdown rendering failed", "render_failed");
+    }
+  } else {
+    bytes = fileBytes!;
+  }
+
+  const tagged = await parsePdfAndFields(bytes, form.get("fields"), acroRole, {
+    fromMarkdown: markdown != null,
+  });
+  if (!tagged.ok) return tagged.response;
+
   if (liveUserId) {
     // OAuth grants are interactive agents: the account owner approves each
     // send with an emailed code unless they turned that off. API keys are
@@ -1245,6 +1358,7 @@ export async function createDocument(req: Request): Promise<Response> {
       userId: liveUserId,
       signers: parsedSigners,
       bytes: tagged.storedBytes,
+      source,
       webhookUrl,
       webhookSecret,
       fields: tagged.fields,
@@ -1302,20 +1416,6 @@ export async function createDocument(req: Request): Promise<Response> {
   );
   if (!prepared.ok) return prepared.response;
 
-  const [cap] = await db
-    .select({ n: count() })
-    .from(documents)
-    .where(
-      and(
-        eq(documents.senderEmail, senderEmail),
-        gte(documents.createdAt, windowStart),
-        ne(documents.status, "pending_sender"),
-      ),
-    );
-  if (Number(cap?.n ?? 0) >= limit) {
-    return jsonError(429, "Send limit reached. Try again later.", "send_limit");
-  }
-
   const signingDays = Number(env.SIGNING_WINDOW_DAYS);
   const expiresAt = new Date(at.getTime() + signingDays * 86_400_000);
   const fileHash = sha256Hex(tagged.storedBytes);
@@ -1359,6 +1459,7 @@ export async function createDocument(req: Request): Promise<Response> {
     storagePath,
     fileHash,
   });
+  if (source) await storeSourceMarkdown(db, store, document.id, source);
 
   await db.insert(signersTable).values(signerInsertValues(document.id, prepared.prepared));
 
@@ -1845,15 +1946,27 @@ export async function getDocumentPdf(req: Request, documentId: string): Promise<
   if (keyExpired(authed)) {
     return jsonError(401, "Unauthorized", "unauthorized");
   }
+  const store = requireStore();
+  if (!store) return storeUnavailableResponse();
+  const kindParam = new URL(req.url).searchParams.get("kind");
+  if (kindParam === "source") {
+    // Markdown source exists from creation; no completed gate.
+    const source = await store.get(objectKey(document.id, "source"));
+    if (!source) {
+      return jsonError(404, "No markdown source for this document", "not_found");
+    }
+    return new Response(Buffer.from(source), {
+      status: 200,
+      headers: {
+        "content-type": "text/markdown; charset=utf-8",
+        "content-disposition": `attachment; filename="${document.id}.md"`,
+      },
+    });
+  }
   if (document.status !== "completed") {
     return jsonError(409, "Document is not completed", "not_completed");
   }
-  const store = requireStore();
-  if (!store) return storeUnavailableResponse();
-  const kind =
-    new URL(req.url).searchParams.get("kind") === "certificate"
-      ? "certificate"
-      : "sealed";
+  const kind = kindParam === "certificate" ? "certificate" : "sealed";
   const bytes = await store.get(objectKey(document.id, kind));
   if (!bytes) {
     return jsonError(410, "Document has been deleted", "deleted");

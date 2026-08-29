@@ -42,7 +42,8 @@ export default function DocsPage() {
               Docs<span className="text-seal">.</span>
             </h1>
             <p className="max-w-prose text-base leading-relaxed text-muted-foreground">
-              Everything here speaks plain HTTP. Send a PDF with one request.
+              Everything here speaks plain HTTP. Send a document with one
+              request.
               No key needed: we email you a one-time code and hand back a
               throwaway key for that document. Log in to mint live keys.
               On-page fields use PDF tags or fields JSON; there is no placer

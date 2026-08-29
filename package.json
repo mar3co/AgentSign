@@ -38,6 +38,7 @@
     "drizzle-orm": "^0.44.4",
     "lucide-react": "^1.33.0",
     "mammoth": "^1.12.1",
+    "marked": "^18.0.11",
     "nanoid": "^6.0.1",
     "next": "^15.5.0",
     "node-forge": "^1.4.0",

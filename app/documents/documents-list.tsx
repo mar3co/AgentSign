@@ -447,10 +447,10 @@ export function DocumentsList({
         <EmptyState
           icon={Send}
           title="No documents yet"
-          description="Send a PDF and it shows up here with where it stands."
+          description="Send a document and it shows up here with where it stands."
         >
           <LinkButton href="/send" size="sm">
-            Send a PDF
+            Send a document
           </LinkButton>
         </EmptyState>
       </Card>

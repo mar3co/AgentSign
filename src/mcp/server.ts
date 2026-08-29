@@ -99,12 +99,21 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
     {
       title: "Send document",
       description:
-        "Create and send a signing document (POST /v1/documents). Pass PDF bytes as base64, not a public pdf_url. Optional Bearer sign_live_ key. Without a key, starts a sender OTP one-off — tell the operator to check sender email. OAuth callers usually get pending_sender too: the account holds agent sends for an emailed confirmation code unless turned off in Settings. sign_live_ keys always send immediately. sign_tmp_ cannot send or list. Signer objects may include kind (human|agent) and agent slug. Optional fields JSON, message, values, order, send_email, completed_redirect_url, embed_origin. No sign tool. Humans Finish. Agents Attest.",
+        "Create and send a signing document (POST /v1/documents). Prefer markdown — plain text, no file handling; {{sig}} tags place fields and it is rendered to a clean PDF server-side. Or pass PDF bytes as base64 (not a public pdf_url) when you already have a PDF. Exactly one of markdown or pdf. Optional Bearer sign_live_ key. Without a key, starts a sender OTP one-off — tell the operator to check sender email. OAuth callers usually get pending_sender too: the account holds agent sends for an emailed confirmation code unless turned off in Settings. sign_live_ keys always send immediately. sign_tmp_ cannot send or list. Signer objects may include kind (human|agent) and agent slug. Optional fields JSON, message, values, order, send_email, completed_redirect_url, embed_origin. No sign tool. Humans Finish. Agents Attest.",
       inputSchema: {
         title: z.string().min(1),
         sender_email: z.string().min(1),
         signers: z.array(signerSchema).min(1),
-        pdf: z.string().describe("Base64-encoded PDF bytes. Not a URL."),
+        markdown: z
+          .string()
+          .optional()
+          .describe(
+            "Document content as markdown. Rendered to PDF server-side; {{sig}} tags place signature fields (tags inside code blocks stay literal). Latin-1 text only: characters outside WinAnsi (emoji, CJK) are dropped. Preferred over pdf.",
+          ),
+        pdf: z
+          .string()
+          .optional()
+          .describe("Base64-encoded PDF bytes. Not a URL. Use when you already have a PDF."),
         api_key: z.string().optional(),
         fields: z.string().optional().describe("JSON array of on-page fields."),
         message: z.string().max(1000).optional().describe("Message shown to signers in the invite email."),
@@ -116,12 +125,12 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
       },
     },
     async (args, extra) => {
-      let bytes: Uint8Array;
-      try {
-        bytes = Uint8Array.from(Buffer.from(args.pdf, "base64"));
-      } catch {
+      if ((args.markdown == null) === (args.pdf == null)) {
         return toolText(
-          JSON.stringify({ error: "File must be a PDF", code: "invalid_pdf" }),
+          JSON.stringify({
+            error: "Provide exactly one of markdown or pdf",
+            code: "invalid_request",
+          }),
           true,
         );
       }
@@ -129,7 +138,20 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
       form.set("title", args.title);
       form.set("sender_email", args.sender_email);
       form.set("signers", JSON.stringify(args.signers));
-      form.set("file", new Blob([Buffer.from(bytes)], { type: "application/pdf" }), "document.pdf");
+      if (args.markdown != null) {
+        form.set("markdown", args.markdown);
+      } else {
+        let bytes: Uint8Array;
+        try {
+          bytes = Uint8Array.from(Buffer.from(args.pdf!, "base64"));
+        } catch {
+          return toolText(
+            JSON.stringify({ error: "File must be a PDF", code: "invalid_pdf" }),
+            true,
+          );
+        }
+        form.set("file", new Blob([Buffer.from(bytes)], { type: "application/pdf" }), "document.pdf");
+      }
       if (args.fields != null) form.set("fields", args.fields);
       if (args.message != null) form.set("message", args.message);
       if (args.values != null) form.set("values", args.values);

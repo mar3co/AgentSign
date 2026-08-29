@@ -47,6 +47,8 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
   const [senderEmail, setSenderEmail] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [mode, setMode] = useState<"upload" | "write">("upload");
+  const [markdown, setMarkdown] = useState("");
   const [signers, setSigners] = useState<SignerRow[]>([
     { name: "", email: "" },
   ]);
@@ -198,7 +200,8 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
     setError(null);
     // Inputs in collapsed steps are unmounted, so native validation can't
     // reach them; check here and reopen the step that needs attention.
-    if (!file || !title.trim() || !senderEmail || !emailish(senderEmail)) {
+    const hasDocument = mode === "write" ? markdown.trim().length > 0 : file !== null;
+    if (!hasDocument || !title.trim() || !senderEmail || !emailish(senderEmail)) {
       setOpenStep("document");
       setError("Add a document, a title, and your sender email before sending.");
       return;
@@ -230,16 +233,18 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
     }
     if (order === "parallel") data.set("order", "parallel");
     try {
-      if (patches.length > 0) {
-        const bytes = new Uint8Array(await file.arrayBuffer());
+      if (mode === "write") {
+        data.set("markdown", markdown);
+      } else if (patches.length > 0) {
+        const bytes = new Uint8Array(await file!.arrayBuffer());
         const burned = await applyPatches(bytes, patches);
         data.set(
           "file",
           new Blob([new Uint8Array(burned)], { type: "application/pdf" }),
-          file.name,
+          file!.name,
         );
       } else {
-        data.set("file", file, file.name);
+        data.set("file", file!, file!.name);
       }
       const res = await fetch("/v1/documents", {
         method: "POST",
@@ -483,6 +488,10 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
       setTitle={setTitle}
       file={file}
       onFileChange={handleFileChange}
+      mode={mode}
+      setMode={setMode}
+      markdown={markdown}
+      setMarkdown={setMarkdown}
       signers={signers}
       setSigners={setSigners}
       placed={placed}

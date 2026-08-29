@@ -88,6 +88,16 @@ export default function Home() {
     setBusy(true);
     const form = e.currentTarget;
     const data = new FormData(form);
+    // Dropped .md/.txt files go up as the markdown field, not a file.
+    const dropped = fileRef.current?.files?.[0];
+    if (
+      dropped &&
+      (/\.(md|markdown|txt)$/i.test(dropped.name) ||
+        dropped.type.startsWith("text/"))
+    ) {
+      data.delete("file");
+      data.set("markdown", await dropped.text());
+    }
     const name = String(data.get("signer_name") ?? "").trim();
     const email = String(data.get("signer_email") ?? "").trim();
     data.delete("signer_name");
@@ -184,7 +194,7 @@ export default function Home() {
             id="file"
             name="file"
             type="file"
-            accept="application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            accept="application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.md,.markdown,.txt,text/markdown,text/plain"
             required
             className="sr-only"
             onChange={(e) => onFile(e.target.files?.[0]?.name ?? null)}

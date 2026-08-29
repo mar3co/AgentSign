@@ -26,7 +26,7 @@ import {
   openWebhookSecret,
 } from "../lib/webhooks.js";
 
-const KINDS = ["original", "sealed", "certificate"] as const;
+const KINDS = ["original", "sealed", "certificate", "source"] as const;
 const REMIND_AFTER_MS = 3 * 86_400_000;
 const MAX_REMINDERS = 2;
 

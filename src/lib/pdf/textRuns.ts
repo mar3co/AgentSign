@@ -14,6 +14,7 @@ export type TextItem = {
   transform: number[];
   width: number;
   height: number;
+  fontName: string;
 };
 
 export type LocatedItem = {
@@ -22,6 +23,8 @@ export type LocatedItem = {
   y: number;
   w: number;
   h: number;
+  /** Drawn in a monospace font: code samples, never live tags. */
+  mono: boolean;
 };
 
 export type PageViewportLike = {
@@ -30,7 +33,7 @@ export type PageViewportLike = {
   convertToViewportPoint(x: number, y: number): number[];
 };
 
-export function itemBox(item: TextItem): LocatedItem {
+export function itemBox(item: TextItem, mono = false): LocatedItem {
   const [a, , , d, e, f] = item.transform;
   const fontSize = Math.hypot(a, item.transform[1] ?? 0) || Math.abs(d) || 12;
   const h = item.height || fontSize;
@@ -41,6 +44,7 @@ export function itemBox(item: TextItem): LocatedItem {
     y: f,
     w: item.width || fontSize * item.str.length * 0.5,
     h,
+    mono,
   };
 }
 
@@ -206,7 +210,9 @@ export async function locatePdfText(bytes: Uint8Array): Promise<LocatedPage[]> {
     const located: LocatedItem[] = [];
     for (const raw of content.items) {
       if (!("str" in raw) || typeof raw.str !== "string") continue;
-      located.push(itemBox(raw as TextItem));
+      const item = raw as TextItem;
+      const mono = content.styles[item.fontName]?.fontFamily === "monospace";
+      located.push(itemBox(item, mono));
     }
     pages.push({ page: pageNum, viewport, items: located });
   }

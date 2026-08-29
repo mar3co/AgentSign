@@ -77,7 +77,7 @@ export function ActivityDialog({ defaultOpen = false, trigger }: Props) {
               />
               <p className="mt-2 text-sm font-medium">Nothing yet</p>
               <p className="text-muted-foreground mt-1 text-sm">
-                Send a PDF and its progress shows up here.
+                Send a document and its progress shows up here.
               </p>
             </div>
           ) : (
