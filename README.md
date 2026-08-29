@@ -10,7 +10,7 @@ Product of MAR3. Public repo [yohanmarshall/AgentSign](https://github.com/yohanm
 
 **Packaging:** two columns. **Free** (login optional): 7 days to sign, **7-day shredder** after keep window, live keys after login, quiet ~20 sends / 30 days, “Sent with AgentSign” on the appearance page. **Pro $19/mo** (Stripe Checkout): 1-year keep, cap lift, footer off, plus branding, saved templates, team invites (soft cap 10, not billed per person), and **10 named agents**. No seats, no per-document, no Enterprise page. Self-host is forever: set `SELF_HOST=1` to entitle Pro extras without a Stripe plan.
 
-**Surface:** REST (`/v1/documents`, `/v1/verify`; Pro/self-host `/v1/branding`, `/v1/templates`, `/v1/team`, `/v1/agents`) + **OpenAPI** (`/openapi.json`) + **llms.txt** + MCP (stdio and HTTP): `send`, `status`, `download`, `attest`, `reject`, `verify`, `list_templates`, `send_template`. No `sign` tool. Humans Finish. Agents Attest. Ceremony logo is `GET /s/:token/logo` (signing token, not a public account URL).
+**Surface:** REST (`/v1/documents`, `/v1/verify`, `/v1/detect-fields`; Pro/self-host `/v1/branding`, `/v1/templates`, `/v1/team`, `/v1/agents`) + **OpenAPI** (`/openapi.json`) + **llms.txt** + MCP (stdio and HTTP): `send`, `status`, `download`, `attest`, `reject`, `verify`, `list_templates`, `send_template`. No `sign` tool. Humans Finish. Agents Attest. Ceremony logo is `GET /s/:token/logo` (signing token, not a public account URL).
 
 **Platforms:** **Vercel** (Next.js App Router — pages **and** `/v1` Route Handlers, Fluid Compute **Node**, Cron) + **Supabase** (Postgres, Auth, Storage) + **Resend** (app mail) + **Stripe Checkout** (Pro). Pages: **shadcn/ui on Base UI** (Tailwind). Auth stays on Supabase (point custom SMTP at Resend). Self-host is `supabase start` + `next start`. No Hono. **Apache-2.0.**
 
@@ -24,6 +24,9 @@ Product of MAR3. Public repo [yohanmarshall/AgentSign](https://github.com/yohanm
 - [v1.1 implementation plan](docs/superpowers/plans/2026-08-20-sign-v1.1.md)
 - [v1.2 design](docs/superpowers/specs/2026-08-21-agentsign-v1.2-design.md) — mixed parties, OAuth, verify
 - [v1.2 implementation plan](docs/superpowers/plans/2026-08-21-agentsign-v1.2.md)
+- [On-page fields design](docs/superpowers/specs/2026-08-25-on-page-fields-design.md) — placed fields, whiteout corrections
+- [Send flow UI design](docs/superpowers/specs/2026-08-27-send-flow-ui-design.md) — canvas editor, stepped rail
+- [Markdown send design](docs/superpowers/specs/2026-08-28-markdown-send-design.md) — markdown as a send format, write view
 
 License: **Apache-2.0** (`LICENSE`).
 
@@ -50,7 +53,7 @@ With the dev server up:
 # or: BASE_URL=http://localhost:3000 ./scripts/dogfood.sh
 ```
 
-That curls `GET /health` and prints the homepage one-off curl (multipart local `form.pdf` — no network PDF URL). Documents can be sent as markdown (rendered to a clean PDF server-side, `{{sig}}` tags place fields, source kept and retrievable via `GET /v1/documents/:id/pdf?kind=source`) or as an existing PDF. Examples:
+That curls `GET /health` and prints the homepage one-off curl (multipart local `form.pdf` — no network PDF URL). Documents can be sent as markdown (rendered to a clean PDF server-side, `{{sig}}` tags place fields, source kept and retrievable via `GET /v1/documents/:id/pdf?kind=source`), as an existing PDF, or as a Word file (.docx, converted to PDF server-side). Examples:
 
 ```bash
 curl -F title=Repair\ authorization \
