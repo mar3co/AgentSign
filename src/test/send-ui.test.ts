@@ -50,13 +50,6 @@ vi.mock("../../components/app-shell.js", () => ({
     createElement("div", null, children, rail ?? null),
 }));
 
-vi.mock("mammoth/mammoth.browser", () => ({
-  convertToMarkdown: async () => ({
-    value: "# From Word\n\n{{sig}}",
-    messages: [],
-  }),
-}));
-
 vi.mock("../../src/lib/pdf/tags.js", () => ({
   parsePdfTags: async () => ({
     fields: [
@@ -504,7 +497,7 @@ describe("SendClient", () => {
     await railReady();
     ensureStep(/^fields$/i); // move away from the document step
     submitForm();
-    expect(await screen.findByText(/add a pdf/i)).toBeTruthy();
+    expect(await screen.findByText(/add a document/i)).toBeTruthy();
     expect(
       screen
         .getByRole("button", { name: /^document$/i })
@@ -581,7 +574,7 @@ describe("SendClient", () => {
     expect(textarea.value).toBe("# NDA\n\n{{sig}}");
   });
 
-  it("converts a chosen .docx into the write view", async () => {
+  it("keeps a chosen .docx as the file; the server converts it on send", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => whoamiOk()));
     render(createElement(SendClient));
     await railReady();
@@ -593,10 +586,10 @@ describe("SendClient", () => {
     });
     Object.defineProperty(input, "files", { value: [docx], configurable: true });
     fireEvent.change(input);
-    const textarea = (await screen.findByLabelText(
-      /document text/i,
-    )) as HTMLTextAreaElement;
-    expect(textarea.value).toBe("# From Word\n\n{{sig}}");
+    await screen.findByText("deal.docx");
+    // Not routed into the write view, and not rejected.
+    expect(screen.queryByLabelText(/document text/i)).toBeNull();
+    expect(screen.queryByText(/isn't a supported file/i)).toBeNull();
   });
 
   it("rejects an unsupported file with a clear notice", async () => {

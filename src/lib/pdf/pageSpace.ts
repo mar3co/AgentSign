@@ -74,6 +74,45 @@ export function areaToDisplayRect(s: PageSpace, area: FieldArea): Rect {
   return areaToPdfRect(s.displayW, s.displayH, area);
 }
 
+/** PDF user-space point → display-space point (inverse of displayPointToPage). */
+export function pagePointToDisplay(
+  s: PageSpace,
+  x: number,
+  y: number,
+): { x: number; y: number } {
+  switch (s.rotation) {
+    case 90:
+      return { x: y - s.cropY, y: s.cropX + s.cropW - x };
+    case 180:
+      return { x: s.cropX + s.cropW - x, y: s.cropY + s.cropH - y };
+    case 270:
+      return { x: s.cropY + s.cropH - y, y: x - s.cropX };
+    default:
+      return { x: x - s.cropX, y: y - s.cropY };
+  }
+}
+
+/** PDF user-space rect → percent area (top-left origin) on the displayed page. */
+export function pageRectToArea(
+  s: PageSpace,
+  r: Rect,
+  page: number,
+): FieldArea {
+  const a = pagePointToDisplay(s, r.x, r.y);
+  const b = pagePointToDisplay(s, r.x + r.w, r.y + r.h);
+  const left = Math.min(a.x, b.x);
+  const bottom = Math.min(a.y, b.y);
+  const w = Math.abs(b.x - a.x);
+  const h = Math.abs(b.y - a.y);
+  return {
+    page,
+    x: (left / s.displayW) * 100,
+    y: ((s.displayH - (bottom + h)) / s.displayH) * 100,
+    w: (w / s.displayW) * 100,
+    h: (h / s.displayH) * 100,
+  };
+}
+
 export function displayRectToPage(s: PageSpace, r: Rect): Rect {
   const a = displayPointToPage(s, r.x, r.y);
   const b = displayPointToPage(s, r.x + r.w, r.y + r.h);

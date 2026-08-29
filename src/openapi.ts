@@ -218,7 +218,7 @@ export const openapi = {
       post: {
         summary: "Create and send a document",
         description:
-          "Markdown content or multipart PDF bytes, plus signers — exactly one of markdown or file. Markdown is rendered to a clean PDF server-side; {{sig}} tags place fields. Optional Bearer. Omit Authorization to start a sender OTP one-off (pending_sender); a session whose email matches sender_email sends directly unless Confirm my sends is on. OAuth callers return pending_sender while Confirm agent sends is on (the default) — the account owner approves with the emailed code. Live keys are standing authorizations and always send immediately. Optional fields/values/order/send_email/completed_redirect_url/embed_origin. Free one-offs accept PDF {{sig}} tags. Human always signs.",
+          "Markdown content or multipart PDF/DOCX bytes, plus signers — exactly one of markdown or file. Markdown is rendered to a clean PDF server-side; {{sig}} tags place fields. DOCX is converted to PDF (503 docx_unavailable when conversion is down). Optional Bearer. Omit Authorization to start a sender OTP one-off (pending_sender); a session whose email matches sender_email sends directly unless Confirm my sends is on. OAuth callers return pending_sender while Confirm agent sends is on (the default) — the account owner approves with the emailed code. Live keys are standing authorizations and always send immediately. Optional fields/values/order/send_email/completed_redirect_url/embed_origin. Free one-offs accept PDF {{sig}} tags. Human always signs.",
         security: optionalBearer,
         requestBody: {
           required: true,
@@ -243,7 +243,8 @@ export const openapi = {
                   file: {
                     type: "string",
                     format: "binary",
-                    description: "PDF bytes. Provide markdown or file, not both.",
+                    description:
+                      "PDF or DOCX bytes. Provide markdown or file, not both.",
                   },
                   ...createExtrasProperties,
                 },
@@ -270,6 +271,8 @@ export const openapi = {
           "400": errorResponse,
           "401": errorResponse,
           "429": errorResponse,
+          "500": errorResponse,
+          "503": errorResponse,
         },
       },
       get: {
@@ -773,7 +776,7 @@ export const openapi = {
       },
       post: {
         summary: "Save a template (PDF + ordered roles)",
-        description: `${liveKeyNote} Multipart title + roles JSON + file, or document_id to copy the original PDF. Roles are labels, not people. MCP: list_templates / send_template.`,
+        description: `${liveKeyNote} Multipart title + roles JSON + file (PDF or DOCX; DOCX is converted to PDF), or document_id to copy the original PDF. Roles are labels, not people. MCP: list_templates / send_template.`,
         security: liveOrSession,
         requestBody: {
           required: true,
@@ -787,7 +790,7 @@ export const openapi = {
                     type: "string",
                     description: 'JSON array of { role_name }',
                   },
-                  file: { type: "string", format: "binary", description: "PDF bytes" },
+                  file: { type: "string", format: "binary", description: "PDF or DOCX bytes" },
                   document_id: {
                     type: "string",
                     format: "uuid",
@@ -817,6 +820,9 @@ export const openapi = {
           "401": errorResponse,
           "403": errorResponse,
           "404": errorResponse,
+          "429": errorResponse,
+          "500": errorResponse,
+          "503": errorResponse,
         },
       },
     },

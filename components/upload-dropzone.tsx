@@ -22,6 +22,10 @@ function isPdf(f: File): boolean {
   return f.type === "application/pdf" || /\.pdf$/i.test(f.name);
 }
 
+function isDocx(f: File): boolean {
+  return f.type === DOCX_MIME || DOCX_RE.test(f.name);
+}
+
 /* Dropzone styled after shadcn studio's file-upload-02 block, but backed by a
    real form input so plain FormData submits keep working. Single file. */
 export function UploadDropzone({
@@ -51,8 +55,8 @@ export function UploadDropzone({
       lights up the drop target (and reveals it if collapsed). */
   dropAnywhere?: boolean;
   onFileChange?: (file: File | null) => void;
-  /** When set, .md/.txt files are read client-side (and .docx converted
-      to markdown) and handed here instead of staying in the file input. */
+  /** When set, .md/.txt files are read client-side and handed here
+      instead of staying in the file input. */
   onTextFile?: (file: { name: string; text: string }) => void;
   /** When set alongside onTextFile, anything that is not a PDF, text, or
       Word file is cleared from the input and reported here by name. */
@@ -77,21 +81,8 @@ export function UploadDropzone({
       });
       return;
     }
-    if (f && onTextFile && (DOCX_RE.test(f.name) || f.type === DOCX_MIME)) {
-      void (async () => {
-        try {
-          const mammoth = await import("mammoth/mammoth.browser");
-          const { value } = await mammoth.convertToMarkdown({
-            arrayBuffer: await f.arrayBuffer(),
-          });
-          clearAndHandOff(() => onTextFile({ name: f.name, text: value }));
-        } catch {
-          clearAndHandOff(() => onUnsupported?.(f.name));
-        }
-      })();
-      return;
-    }
-    if (f && onUnsupported && !isPdf(f)) {
+    // DOCX stays a file upload; the server converts it to PDF on send.
+    if (f && onUnsupported && !isPdf(f) && !isDocx(f)) {
       clearAndHandOff(() => onUnsupported(f.name));
       return;
     }

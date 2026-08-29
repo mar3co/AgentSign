@@ -614,3 +614,35 @@ describe("templates API", () => {
     expect(env.fields.some((f) => f.name === "sig" && f.role === "Customer")).toBe(true);
   });
 });
+
+describe("templates acroform import", () => {
+  it("binds imported fields to the first template role", { timeout: 60_000 }, async () => {
+    const { db, userFor } = await boot();
+    const { cookie } = await asPro(db, userFor);
+
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    const field = doc.getForm().createTextField("Approved By");
+    field.addToPage(page, { x: 72, y: 700, width: 200, height: 18 });
+    const pdf = await doc.save();
+
+    const body = new FormData();
+    body.set("title", "Order template");
+    body.set("roles", JSON.stringify([{ role_name: "Customer" }]));
+    body.set("file", new Blob([pdf as BlobPart], { type: "application/pdf" }), "form.pdf");
+    const created = await postTemplate(
+      new Request("http://sign.test/v1/templates", {
+        method: "POST",
+        headers: { cookie },
+        body,
+      }),
+    );
+    expect(created.status).toBe(201);
+    const template = (await created.json()) as TemplateJson;
+    expect(
+      (template.fields ?? []).some(
+        (f) => f.name === "acro_Approved By" && f.role === "Customer",
+      ),
+    ).toBe(true);
+  });
+});

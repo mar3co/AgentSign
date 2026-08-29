@@ -21,12 +21,11 @@ import {
 } from "../lib/pdf/fields.js";
 import { objectKey } from "../lib/storage.js";
 import {
+  normalizeUploadToPdf,
   parseDocumentExtras,
   parsePdfAndFields,
   sendPreparedPdf,
 } from "./documents.js";
-
-const PDF_MAX_BYTES = 20 * 1024 * 1024;
 
 type TemplateRow = typeof templates.$inferSelect;
 type RoleRow = typeof templateRoles.$inferSelect;
@@ -37,16 +36,6 @@ function jsonError(status: number, error: string, code: string): Response {
 
 function templateObjectKey(id: string): string {
   return `templates/${id}/original.pdf`;
-}
-
-function isPdf(bytes: Uint8Array, type: string): boolean {
-  const magic =
-    bytes.length >= 4 &&
-    bytes[0] === 0x25 &&
-    bytes[1] === 0x50 &&
-    bytes[2] === 0x44 &&
-    bytes[3] === 0x46;
-  return magic || type === "application/pdf";
 }
 
 function templateJson(template: TemplateRow, roles: RoleRow[]) {
@@ -350,17 +339,14 @@ export async function createTemplate(req: Request): Promise<Response> {
     if (!(file instanceof Blob)) {
       return jsonError(400, "A PDF file is required", "invalid_pdf");
     }
-    if (file.size > PDF_MAX_BYTES) {
-      return jsonError(400, "PDF exceeds maximum size", "invalid_pdf");
-    }
-    bytes = new Uint8Array(await file.arrayBuffer());
-    if (!isPdf(bytes, file.type)) {
-      return jsonError(400, "File must be a PDF", "invalid_pdf");
-    }
+    const normalized = await normalizeUploadToPdf(file, gate.caller.user.id);
+    if (!normalized.ok) return normalized.response;
+    bytes = normalized.bytes;
     const parsed = parseRoles(rolesRaw);
     if (!parsed.ok) return parsed.response;
     roleNames = parsed.names;
-    const tagged = await parsePdfAndFields(bytes, fieldsRaw);
+    // AcroForm fields bind to the template's first role.
+    const tagged = await parsePdfAndFields(bytes, fieldsRaw, roleNames[0] ?? null);
     if (!tagged.ok) return tagged.response;
     bytes = tagged.storedBytes;
     fields = tagged.fields;

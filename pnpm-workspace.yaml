@@ -1,0 +1,9 @@
+allowBuilds:
+  bcrypt: set this to true or false
+  esbuild: set this to true or false
+  sharp: set this to true or false
+# Vercel's packager rejects traced files that cross pnpm's node_modules
+# symlinks, and the tracer misses runtime payloads inside the .pnpm store
+# (Chromium bin, pdfjs worker, @napi-rs/canvas). A hoisted layout gives
+# real files at real paths, like npm, ending that class of deploy failure.
+nodeLinker: hoisted

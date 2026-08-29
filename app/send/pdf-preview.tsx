@@ -19,10 +19,22 @@ export function PdfPreview({
   const [pages, setPages] = useState<PreviewPage[] | null>(null);
   const [failed, setFailed] = useState(false);
 
+  const isDocx =
+    /\.docx$/i.test(file.name) ||
+    file.type ===
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
   useEffect(() => {
     let cancelled = false;
     setPages(null);
     setFailed(false);
+    if (isDocx) {
+      // Word files convert to PDF on the server at send time; there is
+      // nothing pdfjs could render here.
+      setFailed(true);
+      onRenderFailed?.();
+      return;
+    }
     (async () => {
       try {
         const bytes = new Uint8Array(await file.arrayBuffer());
@@ -66,12 +78,14 @@ export function PdfPreview({
     return () => {
       cancelled = true;
     };
-  }, [file, onPagesRendered, onRenderFailed]);
+  }, [file, isDocx, onPagesRendered, onRenderFailed]);
 
   if (failed) {
     return (
       <p className="text-sm text-muted-foreground">
-        Preview unavailable. You can still send this PDF.
+        {isDocx
+          ? "Word documents convert to PDF when you send; no preview before that."
+          : "Preview unavailable. You can still send this PDF."}
       </p>
     );
   }
