@@ -127,6 +127,7 @@ export default function Home() {
       if (json.status === "pending") {
         // A signed-in sender with confirmation off: the document went out
         // directly, so skip the code screen.
+        setDocumentId(json.id);
         setDone({ key: json.key ?? "", signUrl: json.signers?.[0]?.sign_url ?? "" });
         return;
       }
