@@ -75,6 +75,8 @@ async function startVerified(opts: {
     p12: makeDevP12("test"),
     p12Passphrase: "test",
     lookup: async () => [{ address: "93.184.216.34", family: 4 }],
+    // Skip real webhook retry backoff so retry tests stay fast.
+    sleep: async () => {},
   });
   const pdf = await minimalPdf();
   const body = new FormData();
@@ -487,6 +489,123 @@ describe("document.completed webhook", () => {
     const again = await getSigningState(token);
     expect(again.status).toBe(200);
     expect(posts).toHaveLength(0);
+  });
+});
+
+describe("webhook delivery retries", () => {
+  function completedCounterFetch(
+    statuses: number[],
+  ): { fetchMock: typeof fetch; calls: () => number } {
+    let completedCalls = 0;
+    const fetchMock: typeof fetch = async (_input, init) => {
+      const isCompleted = String(init?.body ?? "").includes('"document.completed"');
+      if (!isCompleted) return new Response("ok", { status: 200 });
+      const status = statuses[completedCalls] ?? statuses[statuses.length - 1]!;
+      completedCalls++;
+      return new Response(status >= 200 && status < 300 ? "ok" : "err", { status });
+    };
+    return { fetchMock, calls: () => completedCalls };
+  }
+
+  it(
+    "retries a 500 then succeeds, auditing webhook_sent with attempts=2",
+    { timeout: 60_000 },
+    async () => {
+      const { fetchMock, calls } = completedCounterFetch([500, 200]);
+      const { db, sent, res } = await startVerified({
+        webhookUrl: "https://example.com/hook",
+        fetch: fetchMock,
+      });
+      const created = (await res.json()) as { id: string };
+      const { sign } = await verifyAndSign(created.id, sent);
+      expect(sign.status).toBe(200);
+      expect(calls()).toBe(2);
+      const events = await db
+        .select()
+        .from(auditEvents)
+        .where(eq(auditEvents.documentId, created.id));
+      // document.completed and signer.completed both audit webhook_sent for
+      // this document; match on attempts=2 to pick out the retried one.
+      const sentEvent = events.find(
+        (e) =>
+          e.event === "webhook_sent" &&
+          (e.payload as Record<string, unknown> | null)?.attempts === 2,
+      );
+      expect(sentEvent).toBeTruthy();
+      expect(events.some((e) => e.event === "webhook_failed")).toBe(false);
+    },
+  );
+
+  it("does not retry a 400 response", { timeout: 60_000 }, async () => {
+    const { fetchMock, calls } = completedCounterFetch([400]);
+    const { db, sent, res } = await startVerified({
+      webhookUrl: "https://example.com/hook",
+      fetch: fetchMock,
+    });
+    const created = (await res.json()) as { id: string };
+    const { sign } = await verifyAndSign(created.id, sent);
+    expect(sign.status).toBe(200);
+    expect(calls()).toBe(1);
+    const events = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.documentId, created.id));
+    const failedEvent = events.find(
+      (e) =>
+        e.event === "webhook_failed" &&
+        (e.payload as Record<string, unknown> | null)?.status === 400,
+    );
+    expect(failedEvent).toBeTruthy();
+    expect((failedEvent!.payload as Record<string, unknown>).attempts).toBe(1);
+  });
+
+  it(
+    "retries three times on repeated 503s and records attempts=3",
+    { timeout: 60_000 },
+    async () => {
+      const { fetchMock, calls } = completedCounterFetch([503, 503, 503]);
+      const { db, sent, res } = await startVerified({
+        webhookUrl: "https://example.com/hook",
+        fetch: fetchMock,
+      });
+      const created = (await res.json()) as { id: string };
+      const { sign } = await verifyAndSign(created.id, sent);
+      expect(sign.status).toBe(200);
+      expect(calls()).toBe(3);
+      const events = await db
+        .select()
+        .from(auditEvents)
+        .where(eq(auditEvents.documentId, created.id));
+      const failedEvent = events.find(
+        (e) =>
+          e.event === "webhook_failed" &&
+          (e.payload as Record<string, unknown> | null)?.status === 503,
+      );
+      expect(failedEvent).toBeTruthy();
+      expect((failedEvent!.payload as Record<string, unknown>).attempts).toBe(3);
+    },
+  );
+
+  it("retries a 429 response", { timeout: 60_000 }, async () => {
+    const { fetchMock, calls } = completedCounterFetch([429, 200]);
+    const { db, sent, res } = await startVerified({
+      webhookUrl: "https://example.com/hook",
+      fetch: fetchMock,
+    });
+    const created = (await res.json()) as { id: string };
+    const { sign } = await verifyAndSign(created.id, sent);
+    expect(sign.status).toBe(200);
+    expect(calls()).toBe(2);
+    const events = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.documentId, created.id));
+    const sentEvent = events.find(
+      (e) =>
+        e.event === "webhook_sent" &&
+        (e.payload as Record<string, unknown> | null)?.attempts === 2,
+    );
+    expect(sentEvent).toBeTruthy();
   });
 });
 

@@ -15,6 +15,10 @@ v6Blocks.addSubnet("fc00::", 7, "ipv6");
 v6Blocks.addSubnet("::ffff:0:0", 96, "ipv6");
 
 const WEBHOOK_TIMEOUT_MS = 5_000;
+/** Total attempts (first try + retries) for a single webhook delivery. */
+const WEBHOOK_MAX_ATTEMPTS = 3;
+/** Delay before each retry, in order (index 0 = delay before attempt 2). */
+const WEBHOOK_BACKOFF_MS = [1_000, 3_000];
 
 const BLOCKED_HOSTS = new Set([
   "localhost",
@@ -279,6 +283,18 @@ function now(): Date {
   return getDeps().now?.() ?? new Date();
 }
 
+function sleep(ms: number): Promise<void> {
+  const injected = getDeps().sleep;
+  if (injected) return injected(ms);
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Network errors, timeouts, 408, and 429 are retried; other 4xx are not. */
+function isRetryableStatus(status: number): boolean {
+  if (status === 408 || status === 429) return true;
+  return status >= 500 && status <= 599;
+}
+
 async function auditWebhook(
   db: AuditDb | undefined,
   documentId: string,
@@ -289,7 +305,13 @@ async function auditWebhook(
   await logEvent(db, { documentId, event, payload });
 }
 
-/** One POST; failures audit webhook_failed (when db is available) and do not throw. */
+/**
+ * Delivers with retries (network errors, timeouts, 408, 429, 5xx); other 4xx
+ * fail immediately. The DNS resolution is pinned once and reused across
+ * attempts so a retry cannot land on a different (re-resolved) address.
+ * Failures audit webhook_failed with the attempt count (when db is
+ * available) and do not throw.
+ */
 async function postSignedWebhook(
   url: string,
   secretHash: string,
@@ -302,43 +324,65 @@ async function postSignedWebhook(
     await auditWebhook(db, documentId, "webhook_failed", { error: "blocked_url" });
     return;
   }
-  const timestamp = String(Math.floor(now().getTime() / 1000));
+  let secret: string;
+  let resolved: { address: string; family: number }[];
   try {
-    const secret = openWebhookSecret(secretHash);
-    const signature = webhookSignature(secret, timestamp, rawBody);
+    secret = openWebhookSecret(secretHash);
     const parsed = new URL(url);
-    const resolved = await resolveHost(normalizeHost(parsed.hostname));
+    resolved = await resolveHost(normalizeHost(parsed.hostname));
     if (resolved.length === 0 || resolved.some((row) => isBlockedIp(normalizeHost(row.address)))) {
       await auditWebhook(db, documentId, "webhook_failed", { error: "blocked_url" });
       return;
     }
-    const res = await pinnedFetch(
-      url,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Sign-Timestamp": timestamp,
-          "X-Sign-Signature": signature,
-        },
-        body: rawBody,
-        redirect: "error",
-        signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
-      },
-      resolved,
-    );
-    if (!res.ok) {
-      await auditWebhook(db, documentId, "webhook_failed", { status: res.status });
-      return;
-    }
-    await auditWebhook(db, documentId, "webhook_sent");
   } catch (err) {
     const error = err instanceof Error ? err.message : "webhook_failed";
     await auditWebhook(db, documentId, "webhook_failed", { error });
+    return;
+  }
+
+  for (let attempt = 1; attempt <= WEBHOOK_MAX_ATTEMPTS; attempt++) {
+    const timestamp = String(Math.floor(now().getTime() / 1000));
+    const signature = webhookSignature(secret, timestamp, rawBody);
+    const isLastAttempt = attempt === WEBHOOK_MAX_ATTEMPTS;
+    try {
+      const res = await pinnedFetch(
+        url,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Sign-Timestamp": timestamp,
+            "X-Sign-Signature": signature,
+          },
+          body: rawBody,
+          redirect: "error",
+          signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
+        },
+        resolved,
+      );
+      if (res.ok) {
+        await auditWebhook(db, documentId, "webhook_sent", { attempts: attempt });
+        return;
+      }
+      if (isLastAttempt || !isRetryableStatus(res.status)) {
+        await auditWebhook(db, documentId, "webhook_failed", {
+          status: res.status,
+          attempts: attempt,
+        });
+        return;
+      }
+    } catch (err) {
+      const error = err instanceof Error ? err.message : "webhook_failed";
+      if (isLastAttempt) {
+        await auditWebhook(db, documentId, "webhook_failed", { error, attempts: attempt });
+        return;
+      }
+    }
+    await sleep(WEBHOOK_BACKOFF_MS[attempt - 1]!);
   }
 }
 
-/** One POST; failures audit webhook_failed and do not throw. */
+/** Retries with backoff; failures audit webhook_failed and do not throw. */
 export async function fireDocumentWebhook(
   db: AuditDb,
   document: {
@@ -358,7 +402,7 @@ export async function fireDocumentWebhook(
   );
 }
 
-/** One POST; failures audit webhook_failed and do not throw. */
+/** Retries with backoff; failures audit webhook_failed and do not throw. */
 export async function fireDocumentCompleted(
   db: AuditDb,
   document: {
