@@ -49,7 +49,7 @@ function methodsFor(file: string): HttpMethod[] {
   return HTTP_METHODS.filter((method) => {
     const fnExport = new RegExp(`export\\s+(?:async\\s+)?function\\s+${method}\\b`);
     const constExport = new RegExp(`export\\s+const\\s+${method}\\s*(?::\\s*[^=]+)?=`);
-    const reExport = new RegExp(`export\\s*\\{[^}]*\\bas\\s+${method}\\b[^}]*\\}`);
+    const reExport = new RegExp(`export\\s*\\{[^}]*\\b${method}\\b[^}]*\\}`);
     return fnExport.test(src) || constExport.test(src) || reExport.test(src);
   });
 }
@@ -84,9 +84,10 @@ describe("OpenAPI doc matches app/v1/** routes", () => {
       const routePath = ALIASES[specPath] ?? specPath;
       const methods = routesByPath.get(routePath);
       for (const method of Object.keys(operations)) {
-        const httpMethod = method.toUpperCase() as HttpMethod;
-        if (!methods?.includes(httpMethod)) {
-          missing.push(`${method.toUpperCase()} ${specPath} (no app/v1${routePath}/route.ts export)`);
+        const httpMethod = method.toUpperCase();
+        if (!(HTTP_METHODS as readonly string[]).includes(httpMethod)) continue;
+        if (!methods?.includes(httpMethod as HttpMethod)) {
+          missing.push(`${httpMethod} ${specPath} (no app${routePath}/route.ts export)`);
         }
       }
     }

@@ -16,8 +16,7 @@ const errorResponse = {
   },
 };
 
-const bearer = [{ bearerAuth: [] }];
-const optionalBearer = [{ bearerAuth: [] }, {}];
+const optionalBearer = [{ bearerAuth: [] }, { sessionCookie: [] }, {}];
 const liveOrSession = [{ bearerAuth: [] }, { sessionCookie: [] }];
 
 const idParam = {
@@ -284,7 +283,7 @@ export const openapi = {
       },
       get: {
         summary: "List documents sent or signed",
-        security: bearer,
+        security: liveOrSession,
         responses: {
           "200": {
             description: "List",
@@ -306,7 +305,7 @@ export const openapi = {
     "/v1/documents/{id}": {
       get: {
         summary: "Document status and audit",
-        security: bearer,
+        security: liveOrSession,
         parameters: [idParam],
         responses: {
           "200": {
@@ -359,7 +358,7 @@ export const openapi = {
       },
       delete: {
         summary: "Void and purge a document",
-        security: bearer,
+        security: liveOrSession,
         parameters: [idParam],
         responses: {
           "200": {
@@ -387,7 +386,7 @@ export const openapi = {
     "/v1/documents/{id}.pdf": {
       get: {
         summary: "Download the sealed PDF",
-        security: bearer,
+        security: liveOrSession,
         parameters: [idParam],
         responses: {
           "200": {
@@ -408,7 +407,7 @@ export const openapi = {
         summary: "Attest as the current agent party",
         description:
           "Current party must be an agent this caller may use. sign_agent_ infers the slug. Live/session must JSON { agent }. Completes if last party and a human already Finished, or agent_only_attest is on. Otherwise pending. Keys never Finish. No sign tool. Humans Finish. Agents Attest.",
-        security: bearer,
+        security: liveOrSession,
         parameters: [idParam],
         requestBody: {
           required: false,
@@ -455,7 +454,7 @@ export const openapi = {
         summary: "Reject as the current agent party",
         description:
           "Same auth as attest. Sets rejected_at and declines the document. No sign tool. Humans Finish. Agents Attest.",
-        security: bearer,
+        security: liveOrSession,
         parameters: [idParam],
         requestBody: {
           required: false,
@@ -1511,6 +1510,7 @@ export const openapi = {
           },
           "404": errorResponse,
           "410": errorResponse,
+          "503": errorResponse,
         },
       },
     },
@@ -1528,8 +1528,10 @@ export const openapi = {
               "application/pdf": { schema: { type: "string", format: "binary" } },
             },
           },
+          "404": errorResponse,
           "409": errorResponse,
           "410": errorResponse,
+          "503": errorResponse,
         },
       },
     },
