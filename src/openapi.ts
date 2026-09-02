@@ -197,6 +197,13 @@ export const openapi = {
   },
   components: {
     securitySchemes: {
+      sessionCookie: {
+        type: "apiKey",
+        in: "cookie",
+        name: "sb-access-token",
+        description:
+          "Signed-in browser session. These operations serve the portal and reject API keys and OAuth tokens.",
+      },
       bearerAuth: {
         type: "http",
         scheme: "bearer",
@@ -575,7 +582,7 @@ export const openapi = {
         summary: "Mint a live key",
         description:
           "Session cookie only — never a Bearer key, and ?apiKey= is rejected. Optional JSON { expires_in_days } (positive number; a server default applies otherwise). Returns the sign_live_ key once; it is never shown again.",
-        security: [],
+        security: [{ sessionCookie: [] }],
         requestBody: {
           required: false,
           content: {
@@ -1113,7 +1120,7 @@ export const openapi = {
         summary: "Accept a team invite",
         description:
           "Logged-in session only (not a live key). Session email must match the invite. JSON { token } or form token.",
-        security: [],
+        security: [{ sessionCookie: [] }],
         requestBody: {
           required: true,
           content: {
@@ -1267,7 +1274,7 @@ export const openapi = {
         summary: "Recent notable events on the team's documents",
         description:
           "Session cookie only. Feeds the portal activity feed, not the public API. Up to 30 most recent sent/opened/consented/signed/attested/declined/rejected/reminded/expired events, newest first.",
-        security: [],
+        security: [{ sessionCookie: [] }],
         tags: ["Internal"],
         responses: {
           "200": {
@@ -1306,12 +1313,64 @@ export const openapi = {
         summary: "Dashboard aggregates for the team's documents",
         description:
           "Session cookie only. Feeds the portal dashboard, not the public API. Sends/completions this vs last month, a 14-day daily trend, median signing hours, documents shredding within 7 days, and 30-day webhook counts.",
-        security: [],
+        security: [{ sessionCookie: [] }],
         tags: ["Internal"],
         responses: {
           "200": {
             description: "Stats",
-            content: { "application/json": { schema: { type: "object" } } },
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    total: { type: "integer" },
+                    by_status: {
+                      type: "object",
+                      additionalProperties: { type: "integer" },
+                    },
+                    sent: {
+                      type: "object",
+                      properties: {
+                        this_month: { type: "integer" },
+                        last_month: { type: "integer" },
+                        agent_share: {
+                          type: "number",
+                          description: "Share of documents with an agent party, 0 to 1.",
+                        },
+                      },
+                    },
+                    completed: {
+                      type: "object",
+                      properties: {
+                        this_month: { type: "integer" },
+                        last_month: { type: "integer" },
+                      },
+                    },
+                    daily: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          date: { type: "string", format: "date" },
+                          human: { type: "integer" },
+                          agent: { type: "integer" },
+                          completed: { type: "integer" },
+                        },
+                      },
+                    },
+                    median_signing_hours: { type: ["number", "null"] },
+                    shredding_soon: { type: "integer" },
+                    webhooks_30d: {
+                      type: "object",
+                      properties: {
+                        sent: { type: "integer" },
+                        failed: { type: "integer" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
           },
           "401": errorResponse,
         },
@@ -1322,7 +1381,7 @@ export const openapi = {
         summary: "Get send-confirmation settings",
         description:
           "Session only — an agent or API key must never read or change its own approval gate.",
-        security: [],
+        security: [{ sessionCookie: [] }],
         tags: ["Internal"],
         responses: {
           "200": {
@@ -1347,7 +1406,7 @@ export const openapi = {
         summary: "Update send-confirmation settings",
         description:
           "Session only. JSON confirm_agent_sends and/or confirm_human_sends booleans.",
-        security: [],
+        security: [{ sessionCookie: [] }],
         tags: ["Internal"],
         requestBody: {
           required: false,
@@ -1389,7 +1448,7 @@ export const openapi = {
         summary: "AI field suggestions for an uploaded PDF",
         description:
           "Session cookie only. Behind the ai_field_detect flag (404 not_found when off). Requires an AI Gateway credential (503 not_configured otherwise). Multipart PDF up to 20 MiB. Rate limited to 10 requests per 10 minutes per user.",
-        security: [],
+        security: [{ sessionCookie: [] }],
         tags: ["Internal"],
         requestBody: {
           required: true,
