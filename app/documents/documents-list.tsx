@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef } from "react";
+import { formatSentDate } from "@/app/lib/format-date";
+
+export { formatSentDate };
 import {
   columnFilteringFeature,
   columnSizingFeature,
@@ -177,16 +180,6 @@ export function partyLine(p: DocumentParty): string {
   return `${who} · ${p.kind} · ${state}`;
 }
 
-export function formatSentDate(iso?: string, timeZone?: string | null): string {
-  if (!iso) return "—";
-  const opts: Intl.DateTimeFormatOptions = {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-  };
-  if (timeZone) opts.timeZone = timeZone;
-  return new Date(iso).toLocaleDateString("en-US", opts);
-}
 
 function DocumentCell({ doc }: { doc: DocumentListItem }) {
   return (
@@ -451,8 +444,11 @@ export function DocumentsList({
     jumped.current = true;
     table.setPageIndex(Math.floor(index / pageSize));
   }, [focusId, pageSize, sortedRows, table]);
+  const scrolled = useRef(false);
   useEffect(() => {
-    focusRow.current?.scrollIntoView({ block: "center" });
+    if (scrolled.current || !focusRow.current) return;
+    scrolled.current = true;
+    focusRow.current.scrollIntoView({ block: "center" });
   }, [focusId, pageIndex]);
   const pageCount = table.getPageCount();
   const { pages, leftEllipsis, rightEllipsis } = pageWindow(

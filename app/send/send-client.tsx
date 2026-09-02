@@ -20,6 +20,7 @@ import {
   SidebarFooter,
   SidebarHeader,
 } from "@/components/ui/sidebar";
+import { formatSentDate } from "@/app/lib/format-date";
 import { loadPdfjs } from "@/app/lib/load-pdfjs";
 import {
   dropOutOfRangeFields,
@@ -51,33 +52,33 @@ type Done = {
   signers: DoneSigner[];
 };
 
-function formatDeadline(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-  });
-}
-
-function CopyLinkButton({ url }: { url: string }) {
-  const [copied, setCopied] = useState(false);
+function CopyLinkButton({ url, who }: { url: string; who: string }) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  const href = new URL(url, window.location.origin).href;
+  // No clipboard (plain-http self-host, older browser): show the link itself.
+  if (state === "failed") {
+    return (
+      <a className="break-all text-sm underline underline-offset-4" href={href}>
+        {href}
+      </a>
+    );
+  }
   return (
     <Button
       type="button"
       variant="outline"
       size="sm"
+      aria-label={`Copy link for ${who}`}
       onClick={async () => {
         try {
-          await navigator.clipboard.writeText(new URL(url, window.location.origin).href);
-          setCopied(true);
+          await navigator.clipboard.writeText(href);
+          setState("copied");
         } catch {
-          setCopied(false);
+          setState("failed");
         }
       }}
     >
-      {copied ? "Copied" : "Copy link"}
+      {state === "copied" ? "Copied" : "Copy link"}
     </Button>
   );
 }
@@ -460,7 +461,7 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
   }
 
   if (done) {
-    const deadline = done.expiresAt ? formatDeadline(done.expiresAt) : "";
+    const deadline = done.expiresAt ? formatSentDate(done.expiresAt) : "";
     // The API answers with emails only; names come from the rows just filled in.
     const nameFor = (email: string) =>
       signers.find((s) => s.email.trim().toLowerCase() === email.toLowerCase())
@@ -522,12 +523,16 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
                           {signer.email}
                         </span>
                       </span>
-                      {signer.sign_url ? (
-                        <CopyLinkButton url={signer.sign_url} />
+                      {/* Every link exists up front, but in a sequential
+                          send a later signer's link answers "waiting on the
+                          previous signer" until their turn, so only offer
+                          the one that works now. */}
+                      {signer.sign_url && (order === "parallel" || i === 0) ? (
+                        <CopyLinkButton url={signer.sign_url} who={name} />
                       ) : (
                         <span className="text-sm text-muted-foreground">
                           {i > 0
-                            ? `Gets their link after ${nameFor(done.signers[i - 1]!.email)} signs`
+                            ? `Signs after ${nameFor(done.signers[i - 1]!.email)}`
                             : "Gets their link shortly"}
                         </span>
                       )}

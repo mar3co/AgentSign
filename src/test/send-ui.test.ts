@@ -510,10 +510,12 @@ describe("SendClient", () => {
     ).toBe("/documents?id=d1");
   });
 
-  it("lists every signer in order and explains links that are not out yet", async () => {
+  it("lists every signer in order and offers only the link that works now", async () => {
+    // The API returns a link for every signer; a sequential send gates the
+    // later ones until their turn.
     stubDirectSend([
-      { email: "jane@example.com", sign_url: "/s/tok" },
-      { email: "bob@example.com", sign_url: null },
+      { email: "jane@example.com", sign_url: "/s/tok1" },
+      { email: "bob@example.com", sign_url: "/s/tok2" },
     ]);
     render(createElement(SendClient));
     await selectPdf();
@@ -527,9 +529,10 @@ describe("SendClient", () => {
     expect(rows[0]!.textContent).toContain("jane@example.com");
     expect(rows[1]!.textContent).toContain("Bob");
     expect(rows[1]!.textContent).toContain("bob@example.com");
-    expect(rows[1]!.textContent).toContain("Gets their link after Jane signs");
-    // Only the signer whose link exists gets a copy button.
+    expect(rows[1]!.textContent).toContain("Signs after Jane");
+    // Only the signer whose turn it is gets a copy button, named for them.
     expect(screen.getAllByRole("button", { name: /copy link/i })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Copy link for Jane" })).toBeTruthy();
   });
 
   it("Send another clears the editor without a page load", async () => {
