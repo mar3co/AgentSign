@@ -114,9 +114,20 @@ export default function Home() {
         setError(body?.error ?? "Could not send.");
         return;
       }
-      const json = (await res.json()) as { id?: string };
+      const json = (await res.json()) as {
+        id?: string;
+        status?: string;
+        key?: string;
+        signers?: { sign_url?: string | null }[];
+      };
       if (!json.id) {
         setError("Could not send.");
+        return;
+      }
+      if (json.status === "pending") {
+        // A signed-in sender with confirmation off: the document went out
+        // directly, so skip the code screen.
+        setDone({ key: json.key ?? "", signUrl: json.signers?.[0]?.sign_url ?? "" });
         return;
       }
       setDocumentId(json.id);
@@ -374,11 +385,13 @@ export default function Home() {
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-5">
-        <SecretBlock
-          label="Document key"
-          value={done.key}
-          note="Save it now, it is only shown once. It checks status and downloads the sealed file for this document."
-        />
+        {done.key ? (
+          <SecretBlock
+            label="Document key"
+            value={done.key}
+            note="Save it now, it is only shown once. It checks status and downloads the sealed file for this document."
+          />
+        ) : null}
         {done.signUrl ? (
           <SecretBlock
             label="Signing link"
