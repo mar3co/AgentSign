@@ -1116,6 +1116,8 @@ export async function sendPreparedPdf(opts: {
     {
       id: document.id,
       status: "pending",
+      expires_at: document.expiresAt.toISOString(),
+      shred_at: document.shredAt.toISOString(),
       signers: invited.signers,
       ...(tmpKey ? { key: tmpKey } : {}),
       ...(webhookSecret ? { webhook_secret: webhookSecret } : {}),

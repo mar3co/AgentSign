@@ -1,7 +1,14 @@
 // @vitest-environment happy-dom
 import { createElement, useEffect, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 
 const { applyPatchesMock, previewControls } = vi.hoisted(() => ({
   applyPatchesMock: vi.fn(async () => new Uint8Array([9, 9, 9])),
@@ -100,6 +107,13 @@ async function railReady() {
   await screen.findByRole("button", { name: /^document$/i });
 }
 
+// The same message is shown both next to Send and as an inline hint under
+// the offending field, so scope the query to the alert to get one match.
+async function findAlertText(re: RegExp) {
+  const alert = await screen.findByRole("alert");
+  return within(alert).getByText(re);
+}
+
 async function fillAndSubmit() {
   await railReady();
   ensureStep(/^document$/i);
@@ -156,6 +170,9 @@ function stubDocumentsFetch() {
     "fetch",
     vi.fn(async (url: string, init?: RequestInit) => {
       if (String(url).includes("whoami")) return whoamiOk();
+      if (String(url).includes("/v1/workspace")) {
+        return new Response("{}", { status: 200 });
+      }
       bodies.push(init!.body as FormData);
       return new Response(JSON.stringify({ id: "d1" }), { status: 201 });
     }),
@@ -163,10 +180,33 @@ function stubDocumentsFetch() {
   return bodies;
 }
 
+// Signing links sit behind a disclosure on the done screen.
+function revealLinks() {
+  fireEvent.click(screen.getByRole("button", { name: /show signing links/i }));
+}
+
+let restoreClipboard: (() => void) | null = null;
+
+function stubClipboard(writeText: () => Promise<void>) {
+  const original = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  const spy = vi.fn(writeText);
+  Object.defineProperty(navigator, "clipboard", {
+    value: { writeText: spy },
+    configurable: true,
+  });
+  restoreClipboard = () => {
+    if (original) Object.defineProperty(navigator, "clipboard", original);
+    else delete (navigator as { clipboard?: unknown }).clipboard;
+  };
+  return spy;
+}
+
 describe("SendClient", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    restoreClipboard?.();
+    restoreClipboard = null;
     previewControls.auto = true;
   });
 
@@ -181,6 +221,15 @@ describe("SendClient", () => {
     expect(screen.getByLabelText(/^signer name$/i)).toBeTruthy();
     expect(screen.getByRole("button", { name: /add signer/i })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /remove signer/i })).toBeNull();
+  });
+
+  it("skips native constraint validation so validateSend controls errors", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => whoamiOk()));
+    render(createElement(SendClient));
+    await railReady();
+    const form = document.getElementById("send-form");
+    expect(form).toBeTruthy();
+    expect((form as HTMLFormElement).noValidate).toBe(true);
   });
 
   it("adds and removes signer rows", async () => {
@@ -224,7 +273,7 @@ describe("SendClient", () => {
     expect(screen.getByText(/shop@example\.com/)).toBeTruthy();
   });
 
-  it("shows the key once and the signer link after the code is confirmed", async () => {
+  it("shows the signers and no key after the code is confirmed", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
@@ -238,7 +287,9 @@ describe("SendClient", () => {
         if (String(url) === "/v1/documents/env_1/otp") {
           return new Response(
             JSON.stringify({
-              key: "sign_live_abc123",
+              id: "env_1",
+              key: "sign_tmp_abc123",
+              expires_at: "2026-09-30T12:00:00.000Z",
               signers: [
                 { email: "jane@example.com", sign_url: "https://s.test/sig" },
               ],
@@ -261,13 +312,12 @@ describe("SendClient", () => {
       .closest("form");
     if (!form) throw new Error("confirm form not found");
     fireEvent.submit(form);
-    await screen.findByText("sign_live_abc123");
+    await screen.findByText("jane@example.com");
+    expect(screen.queryByText(/sign_tmp_abc123/)).toBeNull();
+    expect(screen.queryByText(/keep this key/i)).toBeNull();
     expect(
-      screen.getByRole("link", { name: "https://s.test/sig" }).getAttribute("href"),
-    ).toBe("https://s.test/sig");
-    expect(
-      screen.getByRole("link", { name: /open documents/i }).getAttribute("href"),
-    ).toBe("/documents");
+      screen.getByRole("link", { name: /open document/i }).getAttribute("href"),
+    ).toBe("/documents?id=env_1");
   });
 
   it("notifies when a file is chosen", async () => {
@@ -467,7 +517,9 @@ describe("SendClient", () => {
     expect(document.querySelector("input[type=file]")).toBe(inputBefore);
   });
 
-  it("skips the confirm screen when the send goes out directly", async () => {
+  function stubDirectSend(
+    signers: { email: string; sign_url: string | null }[],
+  ) {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
@@ -477,18 +529,106 @@ describe("SendClient", () => {
             id: "d1",
             status: "pending",
             key: "sign_tmp_abc",
-            signers: [{ email: "jane@example.com", sign_url: "/s/tok" }],
+            expires_at: "2026-09-30T12:00:00.000Z",
+            shred_at: "2026-09-30T12:00:00.000Z",
+            signers,
           }),
           { status: 201 },
         );
       }),
     );
+  }
+
+  it("skips the confirm screen and hides the key when the send goes out directly", async () => {
+    stubDirectSend([{ email: "jane@example.com", sign_url: "/s/tok" }]);
     render(createElement(SendClient));
     await selectPdf();
     await fillAndSubmit();
-    await screen.findByText("sign_tmp_abc");
+    await screen.findByText(/^sent$/i);
     expect(screen.queryByText(/confirm to send/i)).toBeNull();
-    expect(screen.getByRole("link", { name: "/s/tok" })).toBeTruthy();
+    // The API still mints a tmp key for curl users; a signed-in sender has a
+    // document list, so the key is noise here.
+    expect(screen.queryByText(/sign_tmp_abc/)).toBeNull();
+    expect(screen.queryByText(/keep this key/i)).toBeNull();
+    expect(screen.getByText("jane@example.com")).toBeTruthy();
+    // A signing link signs as that person, so it stays behind a disclosure.
+    expect(screen.queryByRole("button", { name: /copy link/i })).toBeNull();
+    expect(screen.queryByText(/do not forward/i)).toBeNull();
+    revealLinks();
+    expect(screen.getByText(/do not forward/i)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /copy link/i })).toBeTruthy();
+    expect(screen.getByText(/signers have until sep 30, 2026 to sign/i))
+      .toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: /open document/i }).getAttribute("href"),
+    ).toBe("/documents?id=d1");
+  });
+
+  it("lists every signer in order and offers only the link that works now", async () => {
+    // The API returns a link for every signer; a sequential send gates the
+    // later ones until their turn.
+    stubDirectSend([
+      { email: "jane@example.com", sign_url: "/s/tok1" },
+      { email: "bob@example.com", sign_url: "/s/tok2" },
+    ]);
+    render(createElement(SendClient));
+    await selectPdf();
+    await railReady();
+    ensureStep(/^signers$/i);
+    fireEvent.click(screen.getByRole("button", { name: /add signer/i }));
+    await fillAndSubmitTwoSigners();
+    await screen.findByText(/^sent$/i);
+    const rows = screen.getAllByRole("listitem");
+    expect(rows[0]!.textContent).toContain("Jane");
+    expect(rows[0]!.textContent).toContain("jane@example.com");
+    expect(rows[1]!.textContent).toContain("Bob");
+    expect(rows[1]!.textContent).toContain("bob@example.com");
+    expect(rows[1]!.textContent).toContain("Signs after Jane");
+    // Only the signer whose turn it is gets a copy button, named for them.
+    revealLinks();
+    expect(screen.getAllByRole("button", { name: /copy link/i })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Copy link for Jane" })).toBeTruthy();
+  });
+
+  it("shows the link in place when the clipboard write fails", async () => {
+    stubDirectSend([{ email: "jane@example.com", sign_url: "/s/tok" }]);
+    stubClipboard(async () => Promise.reject(new Error("denied")));
+    render(createElement(SendClient));
+    await selectPdf();
+    await fillAndSubmit();
+    await screen.findByText(/^sent$/i);
+    revealLinks();
+    fireEvent.click(screen.getByRole("button", { name: /copy link/i }));
+    const link = await screen.findByRole("link", { name: /\/s\/tok/i });
+    expect(link.getAttribute("href")).toContain("/s/tok");
+  });
+
+  it("copies the link on the origin the invite emails use", async () => {
+    stubDirectSend([{ email: "jane@example.com", sign_url: "/s/tok" }]);
+    const writeText = stubClipboard(async () => {});
+    render(createElement(SendClient, { origin: "https://sign.example.com" }));
+    await selectPdf();
+    await fillAndSubmit();
+    await screen.findByText(/^sent$/i);
+    revealLinks();
+    fireEvent.click(screen.getByRole("button", { name: /copy link/i }));
+    await screen.findByRole("button", { name: /copied/i });
+    expect(writeText).toHaveBeenCalledWith("https://sign.example.com/s/tok");
+  });
+
+  it("Send another clears the editor without a page load", async () => {
+    stubDirectSend([{ email: "jane@example.com", sign_url: "/s/tok" }]);
+    render(createElement(SendClient));
+    await selectPdf();
+    await fillAndSubmit();
+    await screen.findByText(/^sent$/i);
+    fireEvent.click(screen.getByRole("button", { name: /send another/i }));
+    await railReady();
+    expect((screen.getByLabelText(/^title$/i) as HTMLInputElement).value).toBe("");
+    expect(
+      (screen.getByLabelText(/sender email/i) as HTMLInputElement).value,
+    ).toBe("shop@example.com");
+    expect(screen.queryByText("a.pdf")).toBeNull();
   });
 
   it("reopens the document step with an error when sending without a PDF", async () => {
@@ -497,7 +637,7 @@ describe("SendClient", () => {
     await railReady();
     ensureStep(/^fields$/i); // move away from the document step
     submitForm();
-    expect(await screen.findByText(/add a document/i)).toBeTruthy();
+    expect(await findAlertText(/add a document/i)).toBeTruthy();
     expect(
       screen
         .getByRole("button", { name: /^document$/i })
@@ -514,14 +654,264 @@ describe("SendClient", () => {
       target: { value: "Repair authorization" },
     });
     submitForm();
+    expect(await findAlertText(/signer 1 needs a name/i)).toBeTruthy();
     expect(
-      await screen.findByText(/complete each signer/i),
+      screen
+        .getByRole("button", { name: /^signers$/i })
+        .getAttribute("aria-expanded"),
+    ).toBe("true");
+  });
+
+  it("names the missing sender email", async () => {
+    stubDocumentsFetch();
+    render(createElement(SendClient));
+    await selectPdf();
+    ensureStep(/^document$/i);
+    fireEvent.change(screen.getByLabelText(/^title$/i), {
+      target: { value: "Repair authorization" },
+    });
+    fireEvent.change(screen.getByLabelText(/sender email/i), {
+      target: { value: "" },
+    });
+    submitForm();
+    expect(await findAlertText(/enter your sender email/i)).toBeTruthy();
+    expect(
+      screen
+        .getByRole("button", { name: /^document$/i })
+        .getAttribute("aria-expanded"),
+    ).toBe("true");
+  });
+
+  it("names the missing title", async () => {
+    stubDocumentsFetch();
+    render(createElement(SendClient));
+    await selectPdf();
+    ensureStep(/^document$/i);
+    fireEvent.change(screen.getByLabelText(/^title$/i), {
+      target: { value: "" },
+    });
+    submitForm();
+    expect(
+      await findAlertText(/give the document a title/i),
+    ).toBeTruthy();
+    const title = screen.getByLabelText(/^title$/i);
+    expect(title.getAttribute("aria-invalid")).toBe("true");
+  });
+
+  it("names the specific signer missing an email", async () => {
+    stubDocumentsFetch();
+    render(createElement(SendClient));
+    await selectPdf();
+    ensureStep(/^document$/i);
+    fireEvent.change(screen.getByLabelText(/^title$/i), {
+      target: { value: "Repair authorization" },
+    });
+    ensureStep(/^signers$/i);
+    fireEvent.click(screen.getByRole("button", { name: /add signer/i }));
+    fireEvent.change(screen.getByLabelText(/signer 1 name/i), {
+      target: { value: "Jane" },
+    });
+    fireEvent.change(screen.getByLabelText(/signer 1 email/i), {
+      target: { value: "jane@example.com" },
+    });
+    fireEvent.change(screen.getByLabelText(/signer 2 name/i), {
+      target: { value: "Bob" },
+    });
+    submitForm();
+    expect(
+      await findAlertText(/signer 2 needs an email/i),
     ).toBeTruthy();
     expect(
       screen
         .getByRole("button", { name: /^signers$/i })
         .getAttribute("aria-expanded"),
     ).toBe("true");
+  });
+
+  it("flags an invalid signer email and clears it once fixed", async () => {
+    stubDocumentsFetch();
+    render(createElement(SendClient));
+    await selectPdf();
+    ensureStep(/^document$/i);
+    fireEvent.change(screen.getByLabelText(/^title$/i), {
+      target: { value: "Repair authorization" },
+    });
+    ensureStep(/^signers$/i);
+    fireEvent.change(screen.getByLabelText(/^signer name$/i), {
+      target: { value: "Jane" },
+    });
+    fireEvent.change(screen.getByLabelText(/^signer email$/i), {
+      target: { value: "not-an-email" },
+    });
+    submitForm();
+    expect(
+      await findAlertText(/signer 1's email is not valid/i),
+    ).toBeTruthy();
+    const emailInput = screen.getByLabelText(/^signer email$/i);
+    expect(emailInput.getAttribute("aria-invalid")).toBe("true");
+    fireEvent.change(emailInput, { target: { value: "jane@example.com" } });
+    expect(
+      screen.queryByText(/signer 1's email is not valid/i),
+    ).toBeNull();
+    expect(emailInput.getAttribute("aria-invalid")).not.toBe("true");
+  });
+
+  it("updates the signer email message when cleared to empty after being invalid", async () => {
+    stubDocumentsFetch();
+    render(createElement(SendClient));
+    await selectPdf();
+    ensureStep(/^document$/i);
+    fireEvent.change(screen.getByLabelText(/^title$/i), {
+      target: { value: "Repair authorization" },
+    });
+    ensureStep(/^signers$/i);
+    fireEvent.change(screen.getByLabelText(/^signer name$/i), {
+      target: { value: "Jane" },
+    });
+    fireEvent.change(screen.getByLabelText(/^signer email$/i), {
+      target: { value: "not-an-email" },
+    });
+    submitForm();
+    expect(
+      await findAlertText(/signer 1's email is not valid/i),
+    ).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(/^signer email$/i), {
+      target: { value: "" },
+    });
+    expect(await findAlertText(/signer 1 needs an email/i)).toBeTruthy();
+  });
+
+  it("clears a signer error when that signer is removed", async () => {
+    stubDocumentsFetch();
+    render(createElement(SendClient));
+    await selectPdf();
+    ensureStep(/^document$/i);
+    fireEvent.change(screen.getByLabelText(/^title$/i), {
+      target: { value: "Repair authorization" },
+    });
+    ensureStep(/^signers$/i);
+    fireEvent.click(screen.getByRole("button", { name: /add signer/i }));
+    fireEvent.change(screen.getByLabelText(/signer 1 name/i), {
+      target: { value: "Jane" },
+    });
+    fireEvent.change(screen.getByLabelText(/signer 1 email/i), {
+      target: { value: "jane@example.com" },
+    });
+    submitForm();
+    expect(await findAlertText(/signer 2 needs a name/i)).toBeTruthy();
+    fireEvent.click(screen.getAllByRole("button", { name: /remove signer/i })[1]!);
+    expect(screen.queryByText(/signer 2 needs a name/i)).toBeNull();
+  });
+
+  it("tells a malformed sender email apart from a missing one", async () => {
+    stubDocumentsFetch();
+    render(createElement(SendClient));
+    await selectPdf();
+    ensureStep(/^document$/i);
+    fireEvent.change(screen.getByLabelText(/^title$/i), {
+      target: { value: "Repair authorization" },
+    });
+    fireEvent.change(screen.getByLabelText(/sender email/i), {
+      target: { value: "shop" },
+    });
+    submitForm();
+    expect(await findAlertText(/sender email is not valid/i)).toBeTruthy();
+  });
+
+  it("auto-fills the title from the chosen filename", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => whoamiOk()));
+    render(createElement(SendClient));
+    await railReady();
+    const input = document.querySelector(
+      "input[type=file]",
+    ) as HTMLInputElement;
+    const file = new File(
+      [new Uint8Array([0x25, 0x50, 0x44, 0x46])],
+      "repair_authorization-v2.pdf",
+      { type: "application/pdf" },
+    );
+    Object.defineProperty(input, "files", { value: [file], configurable: true });
+    fireEvent.change(input);
+    await screen.findByText("repair_authorization-v2.pdf");
+    ensureStep(/^document$/i);
+    expect(
+      (screen.getByLabelText(/^title$/i) as HTMLInputElement).value,
+    ).toBe("Repair authorization v2");
+  });
+
+  it("does not overwrite a title the user already typed", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => whoamiOk()));
+    render(createElement(SendClient));
+    await railReady();
+    ensureStep(/^document$/i);
+    fireEvent.change(screen.getByLabelText(/^title$/i), {
+      target: { value: "My custom title" },
+    });
+    const input = document.querySelector(
+      "input[type=file]",
+    ) as HTMLInputElement;
+    Object.defineProperty(input, "files", { value: [pdfFile()], configurable: true });
+    fireEvent.change(input);
+    await screen.findByText("a.pdf");
+    expect(
+      (screen.getByLabelText(/^title$/i) as HTMLInputElement).value,
+    ).toBe("My custom title");
+  });
+
+  it("auto-fills the title from a markdown heading in write mode", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => whoamiOk()));
+    render(createElement(SendClient));
+    await railReady();
+    fireEvent.click(
+      screen.getByRole("button", { name: /write the document instead/i }),
+    );
+    fireEvent.change(screen.getByLabelText(/document text/i), {
+      target: { value: "# Service Agreement\n\nSign here." },
+    });
+    ensureStep(/^document$/i);
+    expect(
+      (screen.getByLabelText(/^title$/i) as HTMLInputElement).value,
+    ).toBe("Service Agreement");
+  });
+
+  it("leaves the title empty when written text has no heading", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => whoamiOk()));
+    render(createElement(SendClient));
+    await railReady();
+    fireEvent.click(
+      screen.getByRole("button", { name: /write the document instead/i }),
+    );
+    fireEvent.change(screen.getByLabelText(/document text/i), {
+      target: { value: "Just plain text, no heading." },
+    });
+    ensureStep(/^document$/i);
+    expect(
+      (screen.getByLabelText(/^title$/i) as HTMLInputElement).value,
+    ).toBe("");
+  });
+
+  it("keeps a title auto-filled from a heading after the heading is edited away", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => whoamiOk()));
+    render(createElement(SendClient));
+    await railReady();
+    fireEvent.click(
+      screen.getByRole("button", { name: /write the document instead/i }),
+    );
+    fireEvent.change(screen.getByLabelText(/document text/i), {
+      target: { value: "# Service Agreement\n\nSign here." },
+    });
+    ensureStep(/^document$/i);
+    expect(
+      (screen.getByLabelText(/^title$/i) as HTMLInputElement).value,
+    ).toBe("Service Agreement");
+    // Delete the leading "# " -- no line matches the heading pattern anymore,
+    // but the title the heading filled in should stick around.
+    fireEvent.change(screen.getByLabelText(/document text/i), {
+      target: { value: "Service Agreement\n\nSign here." },
+    });
+    expect(
+      (screen.getByLabelText(/^title$/i) as HTMLInputElement).value,
+    ).toBe("Service Agreement");
   });
 
   it("toggles between the dropzone and the write view", async () => {

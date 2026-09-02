@@ -1,3 +1,5 @@
+import pkg from "../package.json" with { type: "json" };
+
 const errorSchema = {
   type: "object",
   required: ["error", "code"],
@@ -16,9 +18,8 @@ const errorResponse = {
   },
 };
 
-const bearer = [{ bearerAuth: [] }];
-const optionalBearer = [{ bearerAuth: [] }, {}];
-const liveOrSession = [{ bearerAuth: [] }];
+const optionalBearer = [{ bearerAuth: [] }, { sessionCookie: [] }, {}];
+const liveOrSession = [{ bearerAuth: [] }, { sessionCookie: [] }];
 
 const idParam = {
   name: "id",
@@ -191,12 +192,19 @@ export const openapi = {
   openapi: "3.1.0",
   info: {
     title: "AgentSign",
-    version: "2.1.0",
+    version: pkg.version,
     description:
       "AgentSign is a signing primitive. Human always signs. Bearer keys authenticate the caller and never skip the signer. No sign tool. Humans Finish. Agents Attest. On-page fields via PDF tags or fields JSON. Branding, templates, and team are REST for logged-in Pro or SELF_HOST. Errors are JSON { error, code }.",
   },
   components: {
     securitySchemes: {
+      sessionCookie: {
+        type: "apiKey",
+        in: "cookie",
+        name: "sb-access-token",
+        description:
+          "Signed-in browser session. These operations serve the portal and reject API keys and OAuth tokens.",
+      },
       bearerAuth: {
         type: "http",
         scheme: "bearer",
@@ -262,6 +270,16 @@ export const openapi = {
                   properties: {
                     id: { type: "string" },
                     status: { type: "string" },
+                    expires_at: {
+                      type: "string",
+                      description:
+                        "ISO 8601 deadline for signing. Absent while status is pending_sender.",
+                    },
+                    shred_at: {
+                      type: "string",
+                      description:
+                        "ISO 8601 time the stored file is shredded. Absent while status is pending_sender.",
+                    },
                     signers: { type: "array", items: { type: "object" } },
                   },
                 },
@@ -277,7 +295,7 @@ export const openapi = {
       },
       get: {
         summary: "List documents sent or signed",
-        security: bearer,
+        security: liveOrSession,
         responses: {
           "200": {
             description: "List",
@@ -299,7 +317,7 @@ export const openapi = {
     "/v1/documents/{id}": {
       get: {
         summary: "Document status and audit",
-        security: bearer,
+        security: liveOrSession,
         parameters: [idParam],
         responses: {
           "200": {
@@ -352,7 +370,7 @@ export const openapi = {
       },
       delete: {
         summary: "Void and purge a document",
-        security: bearer,
+        security: liveOrSession,
         parameters: [idParam],
         responses: {
           "200": {
@@ -380,7 +398,7 @@ export const openapi = {
     "/v1/documents/{id}.pdf": {
       get: {
         summary: "Download the sealed PDF",
-        security: bearer,
+        security: liveOrSession,
         parameters: [idParam],
         responses: {
           "200": {
@@ -401,7 +419,7 @@ export const openapi = {
         summary: "Attest as the current agent party",
         description:
           "Current party must be an agent this caller may use. sign_agent_ infers the slug. Live/session must JSON { agent }. Completes if last party and a human already Finished, or agent_only_attest is on. Otherwise pending. Keys never Finish. No sign tool. Humans Finish. Agents Attest.",
-        security: bearer,
+        security: liveOrSession,
         parameters: [idParam],
         requestBody: {
           required: false,
@@ -448,7 +466,7 @@ export const openapi = {
         summary: "Reject as the current agent party",
         description:
           "Same auth as attest. Sets rejected_at and declines the document. No sign tool. Humans Finish. Agents Attest.",
-        security: bearer,
+        security: liveOrSession,
         parameters: [idParam],
         requestBody: {
           required: false,
@@ -487,6 +505,54 @@ export const openapi = {
         },
       },
     },
+    "/v1/documents/{id}/otp": {
+      post: {
+        summary: "Verify the sender's emailed OTP and send",
+        description:
+          "Unauthenticated: completes the sender OTP one-off started by POST /v1/documents without a Bearer. JSON { code }. Wrong code 400 invalid_otp; 5 wrong attempts or an expired/already-used code is 403 otp_locked / 410 otp_expired. On success the document moves to pending, the first signer is invited, and a one-off sign_tmp_ key is returned. 429 send_limit when the sender is over the free-tier cap.",
+        security: [],
+        parameters: [idParam],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["code"],
+                properties: {
+                  code: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Verified and sent",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    id: { type: "string" },
+                    status: { type: "string" },
+                    key: { type: "string" },
+                    signers: { type: "array", items: { type: "object" } },
+                  },
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "410": errorResponse,
+          "429": errorResponse,
+          "503": errorResponse,
+        },
+      },
+    },
     "/v1/verify": {
       post: {
         summary: "Verify a sealed PDF",
@@ -519,6 +585,46 @@ export const openapi = {
             },
           },
           "400": errorResponse,
+        },
+      },
+    },
+    "/v1/keys": {
+      post: {
+        summary: "Mint a live key",
+        description:
+          "Session cookie only — never a Bearer key, and ?apiKey= is rejected. Optional JSON { expires_in_days } (positive number; a server default applies otherwise). Returns the sign_live_ key once; it is never shown again.",
+        security: [{ sessionCookie: [] }],
+        requestBody: {
+          required: false,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  expires_in_days: { type: "number", exclusiveMinimum: 0 },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "201": {
+            description: "Minted",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    key: { type: "string" },
+                    prefix: { type: "string" },
+                    expires_at: { type: "string", format: "date-time" },
+                  },
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
         },
       },
     },
@@ -1025,7 +1131,7 @@ export const openapi = {
         summary: "Accept a team invite",
         description:
           "Logged-in session only (not a live key). Session email must match the invite. JSON { token } or form token.",
-        security: [],
+        security: [{ sessionCookie: [] }],
         requestBody: {
           required: true,
           content: {
@@ -1174,11 +1280,237 @@ export const openapi = {
         },
       },
     },
+    "/v1/activity": {
+      get: {
+        summary: "Recent notable events on the team's documents",
+        description:
+          "Session cookie only. Feeds the portal activity feed, not the public API. Up to 30 most recent sent/opened/consented/signed/attested/declined/rejected/reminded/expired events, newest first.",
+        security: [{ sessionCookie: [] }],
+        tags: ["Internal"],
+        responses: {
+          "200": {
+            description: "Activity",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    events: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          id: { type: "string" },
+                          event: { type: "string" },
+                          document_id: { type: "string", format: "uuid" },
+                          title: { type: "string" },
+                          actor: { type: ["string", "null"] },
+                          actor_kind: { type: ["string", "null"] },
+                          at: { type: "string", format: "date-time" },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "401": errorResponse,
+        },
+      },
+    },
+    "/v1/stats": {
+      get: {
+        summary: "Dashboard aggregates for the team's documents",
+        description:
+          "Session cookie only. Feeds the portal dashboard, not the public API. Sends/completions this vs last month, a 14-day daily trend, median signing hours, documents shredding within 7 days, and 30-day webhook counts.",
+        security: [{ sessionCookie: [] }],
+        tags: ["Internal"],
+        responses: {
+          "200": {
+            description: "Stats",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    total: { type: "integer" },
+                    by_status: {
+                      type: "object",
+                      additionalProperties: { type: "integer" },
+                    },
+                    sent: {
+                      type: "object",
+                      properties: {
+                        this_month: { type: "integer" },
+                        last_month: { type: "integer" },
+                        agent_share: {
+                          type: "number",
+                          description: "Share of documents with an agent party, 0 to 1.",
+                        },
+                      },
+                    },
+                    completed: {
+                      type: "object",
+                      properties: {
+                        this_month: { type: "integer" },
+                        last_month: { type: "integer" },
+                      },
+                    },
+                    daily: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          date: { type: "string", format: "date" },
+                          human: { type: "integer" },
+                          agent: { type: "integer" },
+                          completed: { type: "integer" },
+                        },
+                      },
+                    },
+                    median_signing_hours: { type: ["number", "null"] },
+                    shredding_soon: { type: "integer" },
+                    webhooks_30d: {
+                      type: "object",
+                      properties: {
+                        sent: { type: "integer" },
+                        failed: { type: "integer" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "401": errorResponse,
+        },
+      },
+    },
+    "/v1/sending": {
+      get: {
+        summary: "Get send-confirmation settings",
+        description:
+          "Session only — an agent or API key must never read or change its own approval gate.",
+        security: [{ sessionCookie: [] }],
+        tags: ["Internal"],
+        responses: {
+          "200": {
+            description: "Sending settings",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    confirm_agent_sends: { type: "boolean" },
+                    confirm_human_sends: { type: "boolean" },
+                  },
+                },
+              },
+            },
+          },
+          "401": errorResponse,
+          "403": errorResponse,
+        },
+      },
+      patch: {
+        summary: "Update send-confirmation settings",
+        description:
+          "Session only. JSON confirm_agent_sends and/or confirm_human_sends booleans.",
+        security: [{ sessionCookie: [] }],
+        tags: ["Internal"],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  confirm_agent_sends: { type: "boolean" },
+                  confirm_human_sends: { type: "boolean" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Sending settings",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    confirm_agent_sends: { type: "boolean" },
+                    confirm_human_sends: { type: "boolean" },
+                  },
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+        },
+      },
+    },
+    "/v1/detect-fields": {
+      post: {
+        summary: "AI field suggestions for an uploaded PDF",
+        description:
+          "Session cookie only. Behind the ai_field_detect flag (404 not_found when off). Requires an AI Gateway credential (503 not_configured otherwise). Multipart PDF up to 20 MiB. Rate limited to 10 requests per 10 minutes per user.",
+        security: [{ sessionCookie: [] }],
+        tags: ["Internal"],
+        requestBody: {
+          required: true,
+          content: {
+            "multipart/form-data": {
+              schema: {
+                type: "object",
+                required: ["file"],
+                properties: {
+                  file: {
+                    type: "string",
+                    format: "binary",
+                    description: "PDF bytes, max 20 MiB",
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Suggested fields",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    fields: {
+                      type: "array",
+                      items: { $ref: "#/components/schemas/DocumentField" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "404": errorResponse,
+          "429": errorResponse,
+          "502": errorResponse,
+          "503": errorResponse,
+        },
+      },
+    },
     "/s/{token}/logo": {
       get: {
         summary: "Ceremony logo bytes",
         description:
           "Signing token only. 200 image bytes if that document's team has a logo; 404 otherwise. Not a public account URL.",
+        security: [],
         parameters: [tokenParam],
         responses: {
           "200": {
@@ -1190,6 +1522,7 @@ export const openapi = {
           },
           "404": errorResponse,
           "410": errorResponse,
+          "503": errorResponse,
         },
       },
     },
@@ -1198,6 +1531,7 @@ export const openapi = {
         summary: "Original PDF preview for the ceremony",
         description:
           "Signing token only. Returns the original unsigned PDF while the signer may open the ceremony. 409 sequential_wait / 410 expired as the ceremony state GET.",
+        security: [],
         parameters: [tokenParam],
         responses: {
           "200": {
@@ -1206,8 +1540,10 @@ export const openapi = {
               "application/pdf": { schema: { type: "string", format: "binary" } },
             },
           },
+          "404": errorResponse,
           "409": errorResponse,
           "410": errorResponse,
+          "503": errorResponse,
         },
       },
     },

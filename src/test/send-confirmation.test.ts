@@ -110,11 +110,23 @@ describe("send confirmation", () => {
     const done = (await confirmed.json()) as {
       status: string;
       key: string;
+      expires_at: string;
+      shred_at: string;
       signers: { email: string }[];
     };
     expect(done.status).toBe("pending");
     expect(done.key).toMatch(/^sign_tmp_/);
+    // The send screen shows the signing deadline, so it ships with the result.
+    expect(Number.isNaN(Date.parse(done.expires_at))).toBe(false);
+    expect(done.shred_at).toBe(done.expires_at);
     expect(sent.some((m) => m.to === "jane@example.com")).toBe(true);
+    // The key comes back in this response and nowhere else. It grants
+    // delete and reveals every signer's link, so it never goes out by email.
+    const live = sent.find(
+      (m) => m.to === "shop@example.com" && /is live/i.test(m.subject),
+    );
+    expect(live).toBeTruthy();
+    expect(live!.text).not.toContain(done.key);
   });
 
   it("sends directly when the agent confirmation is turned off", async () => {
@@ -124,8 +136,14 @@ describe("send confirmation", () => {
 
     const res = await postSend({ authorization: auth });
     expect(res.status).toBe(201);
-    const json = (await res.json()) as { status: string };
+    const json = (await res.json()) as {
+      status: string;
+      expires_at: string;
+      shred_at: string;
+    };
     expect(json.status).toBe("pending");
+    expect(Number.isNaN(Date.parse(json.expires_at))).toBe(false);
+    expect(json.shred_at).toBe(json.expires_at);
     expect(sent.some((m) => /verification code/i.test(m.subject))).toBe(false);
     expect(sent.some((m) => m.to === "jane@example.com")).toBe(true);
   });

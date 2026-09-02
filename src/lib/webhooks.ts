@@ -14,7 +14,23 @@ v6Blocks.addSubnet("fe80::", 10, "ipv6");
 v6Blocks.addSubnet("fc00::", 7, "ipv6");
 v6Blocks.addSubnet("::ffff:0:0", 96, "ipv6");
 
+/**
+ * Deadline for one whole delivery, retries included. Deliveries run on the
+ * signer's Finish path and inside the shred sweep, so a retry may only use
+ * time the first attempt left over: a black-holed host still costs 5s, a
+ * host that fails fast gets up to two more tries.
+ */
 const WEBHOOK_TIMEOUT_MS = 5_000;
+/** Delay before each retry, in order (index 0 = delay before attempt 2). */
+const WEBHOOK_BACKOFF_MS = [250, 750];
+const WEBHOOK_MAX_ATTEMPTS = WEBHOOK_BACKOFF_MS.length + 1;
+/**
+ * Minimum time a retry attempt must have left after its backoff to be worth
+ * scheduling. Timers can overshoot their delay, so requiring only that the
+ * backoff itself fits before the deadline can still launch an attempt with
+ * ~0ms left, which then aborts and audits a misleading error.
+ */
+const MIN_ATTEMPT_MS = 100;
 
 const BLOCKED_HOSTS = new Set([
   "localhost",
@@ -195,21 +211,21 @@ export function webhookSignature(
   return `sha256=${hex}`;
 }
 
-async function pinnedFetch(
-  input: string,
-  init: RequestInit,
+type PinnedAgent = InstanceType<typeof import("undici").Agent>;
+
+/** Agent whose connect lookup only ever returns the already-vetted addresses. */
+async function makePinnedAgent(
+  url: string,
   addresses: { address: string; family: number }[],
-): Promise<Response> {
-  const injected = getDeps().fetch;
-  if (injected) return injected(input, init);
-  const { Agent, fetch: undiciFetch } = await import("undici");
-  const parsed = new URL(input);
+): Promise<PinnedAgent> {
+  const { Agent } = await import("undici");
+  const parsed = new URL(url);
   const pinnedHost = normalizeHost(parsed.hostname);
   const mapped = addresses.map((a) => ({
     address: a.address,
     family: (a.family === 6 ? 6 : 4) as 4 | 6,
   }));
-  const agent = new Agent({
+  return new Agent({
     connect: {
       lookup(hostname, _opts, cb) {
         const h = normalizeHost(hostname);
@@ -221,13 +237,25 @@ async function pinnedFetch(
       },
     },
   });
+}
+
+/** Reuses `agent` when given, so one delivery opens one connection pool. */
+async function pinnedFetch(
+  input: string,
+  init: RequestInit,
+  addresses: { address: string; family: number }[],
+  agent?: PinnedAgent,
+): Promise<Response> {
+  const injected = getDeps().fetch;
+  if (injected) return injected(input, init);
+  const { fetch: undiciFetch } = await import("undici");
   return undiciFetch(input, {
     method: init.method,
     headers: init.headers as Record<string, string>,
     body: typeof init.body === "string" ? init.body : undefined,
     redirect: "error",
     signal: init.signal,
-    dispatcher: agent,
+    dispatcher: agent ?? (await makePinnedAgent(input, addresses)),
   }) as unknown as Response;
 }
 
@@ -279,6 +307,18 @@ function now(): Date {
   return getDeps().now?.() ?? new Date();
 }
 
+function sleep(ms: number): Promise<void> {
+  const injected = getDeps().sleep;
+  if (injected) return injected(ms);
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** 408, 429, and 5xx are retried; other 4xx are not. */
+function isRetryableStatus(status: number): boolean {
+  if (status === 408 || status === 429) return true;
+  return status >= 500 && status <= 599;
+}
+
 async function auditWebhook(
   db: AuditDb | undefined,
   documentId: string,
@@ -289,7 +329,16 @@ async function auditWebhook(
   await logEvent(db, { documentId, event, payload });
 }
 
-/** One POST; failures audit webhook_failed (when db is available) and do not throw. */
+/**
+ * Delivers with retries (network errors, 408, 429, 5xx) inside one 5s
+ * deadline; other 4xx fail immediately. The DNS resolution is pinned once
+ * and reused across attempts so a retry cannot land on a different
+ * (re-resolved) address, and the body is signed once so a receiver sees the
+ * same signature on a retry and can dedupe on it. Delivery failures audit
+ * webhook_failed with the attempt count (when db is available) and do not
+ * throw. The audit write happens after the retry loop has settled, so a
+ * failing audit insert can never re-send the request; that write does throw.
+ */
 async function postSignedWebhook(
   url: string,
   secretHash: string,
@@ -302,43 +351,89 @@ async function postSignedWebhook(
     await auditWebhook(db, documentId, "webhook_failed", { error: "blocked_url" });
     return;
   }
-  const timestamp = String(Math.floor(now().getTime() / 1000));
+  let secret: string;
+  let resolved: { address: string; family: number }[];
   try {
-    const secret = openWebhookSecret(secretHash);
-    const signature = webhookSignature(secret, timestamp, rawBody);
+    secret = openWebhookSecret(secretHash);
     const parsed = new URL(url);
-    const resolved = await resolveHost(normalizeHost(parsed.hostname));
+    resolved = await resolveHost(normalizeHost(parsed.hostname));
     if (resolved.length === 0 || resolved.some((row) => isBlockedIp(normalizeHost(row.address)))) {
       await auditWebhook(db, documentId, "webhook_failed", { error: "blocked_url" });
       return;
     }
-    const res = await pinnedFetch(
-      url,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Sign-Timestamp": timestamp,
-          "X-Sign-Signature": signature,
-        },
-        body: rawBody,
-        redirect: "error",
-        signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
-      },
-      resolved,
-    );
-    if (!res.ok) {
-      await auditWebhook(db, documentId, "webhook_failed", { status: res.status });
-      return;
-    }
-    await auditWebhook(db, documentId, "webhook_sent");
   } catch (err) {
     const error = err instanceof Error ? err.message : "webhook_failed";
     await auditWebhook(db, documentId, "webhook_failed", { error });
+    return;
   }
+
+  const timestamp = String(Math.floor(now().getTime() / 1000));
+  const signature = webhookSignature(secret, timestamp, rawBody);
+  const deadline = Date.now() + WEBHOOK_TIMEOUT_MS;
+
+  // Every loop exit assigns one; the initializer only satisfies the type.
+  let outcome: {
+    event: "webhook_sent" | "webhook_failed";
+    payload: Record<string, unknown>;
+  } = {
+    event: "webhook_failed",
+    payload: { error: "webhook_failed", attempts: WEBHOOK_MAX_ATTEMPTS },
+  };
+  const agent = getDeps().fetch ? undefined : await makePinnedAgent(url, resolved);
+  try {
+    for (let attempt = 1; attempt <= WEBHOOK_MAX_ATTEMPTS; attempt++) {
+      const backoff = WEBHOOK_BACKOFF_MS[attempt - 1];
+      // Retry only if the next attempt will still have real time to run once
+      // its backoff elapses, not just enough to squeak in before the deadline.
+      const canRetry = () =>
+        backoff !== undefined && Date.now() + backoff + MIN_ATTEMPT_MS < deadline;
+      try {
+        const res = await pinnedFetch(
+          url,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Sign-Timestamp": timestamp,
+              "X-Sign-Signature": signature,
+            },
+            body: rawBody,
+            redirect: "error",
+            signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
+          },
+          resolved,
+          agent,
+        );
+        // Only the status is used; an unread body holds the socket open.
+        await res.body?.cancel().catch(() => {});
+        if (res.ok) {
+          outcome = { event: "webhook_sent", payload: { attempts: attempt } };
+          break;
+        }
+        if (!isRetryableStatus(res.status) || !canRetry()) {
+          outcome = {
+            event: "webhook_failed",
+            payload: { status: res.status, attempts: attempt },
+          };
+          break;
+        }
+      } catch (err) {
+        const error = err instanceof Error ? err.message : "webhook_failed";
+        if (!canRetry()) {
+          outcome = { event: "webhook_failed", payload: { error, attempts: attempt } };
+          break;
+        }
+      }
+      await sleep(backoff!);
+    }
+  } finally {
+    await agent?.close();
+  }
+
+  await auditWebhook(db, documentId, outcome.event, outcome.payload);
 }
 
-/** One POST; failures audit webhook_failed and do not throw. */
+/** Retries with backoff; failures audit webhook_failed and do not throw. */
 export async function fireDocumentWebhook(
   db: AuditDb,
   document: {
@@ -358,7 +453,7 @@ export async function fireDocumentWebhook(
   );
 }
 
-/** One POST; failures audit webhook_failed and do not throw. */
+/** Retries with backoff; failures audit webhook_failed and do not throw. */
 export async function fireDocumentCompleted(
   db: AuditDb,
   document: {

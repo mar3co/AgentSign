@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,17 +10,19 @@ import { GET as getLlms } from "../../app/llms.txt/route.js";
 import { GET as getOpenApi } from "../../app/openapi.json/route.js";
 import { openapi } from "../openapi.js";
 import { resetEnvCache } from "../env.js";
+import pkg from "../../package.json" with { type: "json" };
 import { POST as postMcp } from "../../app/mcp/route.js";
 import { POST as postOtp } from "../../app/v1/documents/[id]/otp/route.js";
 import { POST as postConsent } from "../../app/s/[token]/consent/route.js";
 import { POST as postSign } from "../../app/s/[token]/sign/route.js";
 import { setDeps } from "../lib/deps.js";
 import { makeDevP12 } from "../lib/pdf/devP12.js";
-import { createFsStore } from "../lib/storage.js";
-import { createSignMcpServer } from "../mcp/server.js";
+import { createFsStore, objectKey } from "../lib/storage.js";
+import { MCP_DOWNLOAD_MAX_BYTES, createSignMcpServer } from "../mcp/server.js";
+import { newLiveKey } from "../lib/tokens.js";
 import { createTestDb } from "./db.js";
 import { minimalPdf } from "./pdf.js";
-import { documents } from "../db/schema.js";
+import { accounts, apiKeys, documents } from "../db/schema.js";
 
 const png = Uint8Array.from(
   Buffer.from(
@@ -37,6 +40,25 @@ function textOf(result: { content: Array<{ type: string; text?: string }> }): st
 
 function tokenFromUrl(signUrl: string) {
   return signUrl.replace(/^\/s\//, "");
+}
+
+type ResourceContent = {
+  type: string;
+  text?: string;
+  resource?: { uri?: string; mimeType?: string; blob?: string };
+};
+
+/** The byte count the download tool states in its text line. */
+function statedSize(result: { content: ResourceContent[] }): number {
+  const match = /\((\d+) bytes\)/.exec(textOf(result));
+  if (!match) throw new Error("no byte count in text content");
+  return Number(match[1]);
+}
+
+function resourceOf(result: { content: ResourceContent[] }) {
+  const resource = result.content.find((c) => c.type === "resource")?.resource;
+  if (!resource) throw new Error("no resource content item");
+  return resource;
 }
 
 async function connectMcp() {
@@ -112,10 +134,12 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
     void server;
     const init = await client.getServerVersion();
     expect(init?.name).toBe("agentsign");
-    expect(init?.version).toBe("2.1.0");
+    // Both surfaces read package.json, so the handshake and the spec agree.
+    expect(init?.version).toBe(pkg.version);
+    expect(openapi.info.version).toBe(pkg.version);
   });
 
-  it("GET /openapi.json lists the five HTTP paths", async () => {
+  it("GET /openapi.json lists the core document/agent/verify paths", async () => {
     const res = await getOpenApi(new Request("http://sign.test/openapi.json"));
     expect(res.status).toBe(200);
     const spec = (await res.json()) as {
@@ -138,7 +162,7 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
   });
 
   it("documents v1.2 rest and MCP tools without a sign tool", async () => {
-    expect(openapi.info.version).toBe("2.1.0");
+    expect(openapi.info.version).toBe(pkg.version);
     expect(openapi.openapi).toBe("3.1.0");
     expect(openapi.paths["/v1/branding"]).toBeTruthy();
     expect(openapi.paths["/v1/templates"]).toBeTruthy();
@@ -362,6 +386,142 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
   });
 
   it(
+    "POST /mcp download returns a base64 PDF resource for a sign_live_ key",
+    { timeout: 60_000 },
+    async () => {
+      const db = await createTestDb();
+      const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+      const sent: { to: string; subject: string; text: string }[] = [];
+      setDeps({
+        db,
+        store,
+        mailer: { sendMail: async (m) => { sent.push(m); } },
+        p12: makeDevP12("test"),
+        p12Passphrase: "test",
+      });
+
+      const userId = randomUUID();
+      await db.insert(accounts).values({ userId, email: "shop@example.com" });
+      const live = newLiveKey();
+      await db.insert(apiKeys).values({
+        kind: "live",
+        prefix: live.prefix,
+        tokenHash: live.hash,
+        userId,
+        expiresAt: new Date(Date.now() + 3_600_000),
+      });
+      const headers = {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        "mcp-protocol-version": "2025-11-25",
+        authorization: `Bearer ${live.raw}`,
+      };
+
+      const pdf = await minimalPdf();
+      const sendRes = await postMcp(
+        new Request("http://sign.test/mcp", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: {
+              name: "send",
+              arguments: {
+                title: "Repair authorization",
+                sender_email: "shop@example.com",
+                signers: [{ name: "Jane", email: "jane@example.com" }],
+                pdf: Buffer.from(pdf).toString("base64"),
+              },
+            },
+          }),
+        }),
+      );
+      const sendBody = (await sendRes.json()) as {
+        result?: { content?: Array<{ type: string; text?: string }> };
+      };
+      const sendJson = JSON.parse(
+        sendBody.result?.content?.find((c) => c.type === "text")?.text ?? "{}",
+      ) as { id: string; status: string; signers: { sign_url: string }[] };
+      expect(sendJson.status).toBe("pending");
+      const documentId = sendJson.id;
+      const token = tokenFromUrl(sendJson.signers[0]!.sign_url);
+
+      const consent = await postConsent(
+        new Request(`http://sign.test/s/${token}/consent`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ consent: true }),
+        }),
+        { params: Promise.resolve({ token }) },
+      );
+      expect(consent.status).toBe(200);
+      const signBody = new FormData();
+      signBody.set("png", new Blob([png], { type: "image/png" }), "sig.png");
+      const signed = await postSign(
+        new Request(`http://sign.test/s/${token}/sign`, { method: "POST", body: signBody }),
+        { params: Promise.resolve({ token }) },
+      );
+      expect(signed.status).toBe(200);
+
+      const downloadRes = await postMcp(
+        new Request("http://sign.test/mcp", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 2,
+            method: "tools/call",
+            params: { name: "download", arguments: { id: documentId } },
+          }),
+        }),
+      );
+      const downloadBody = (await downloadRes.json()) as {
+        result?: { content?: ResourceContent[]; isError?: boolean };
+      };
+      expect(downloadBody.result?.isError).toBeFalsy();
+      const resource = resourceOf({ content: downloadBody.result?.content ?? [] });
+      expect(resource.mimeType).toBe("application/pdf");
+      expect(resource.uri).toBe(`agentsign://documents/${documentId}.pdf`);
+      const pdfBytes = Buffer.from(resource.blob!, "base64");
+      expect(pdfBytes.subarray(0, 4).toString("latin1")).toBe("%PDF");
+      const sealed = await store.get(objectKey(documentId, "sealed"));
+      expect(sealed).not.toBeNull();
+      expect(pdfBytes.equals(Buffer.from(sealed!))).toBe(true);
+      expect(statedSize({ content: downloadBody.result?.content ?? [] })).toBe(
+        pdfBytes.byteLength,
+      );
+
+      const oversized = MCP_DOWNLOAD_MAX_BYTES + 1;
+      await store.put(objectKey(documentId, "sealed"), new Uint8Array(oversized));
+      const tooBigRes = await postMcp(
+        new Request("http://sign.test/mcp", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 3,
+            method: "tools/call",
+            params: { name: "download", arguments: { id: documentId } },
+          }),
+        }),
+      );
+      const tooBigBody = (await tooBigRes.json()) as {
+        result?: { content?: ResourceContent[]; isError?: boolean };
+      };
+      expect(tooBigBody.result?.isError).toBe(true);
+      expect(
+        tooBigBody.result?.content?.some((c) => c.type === "resource"),
+      ).toBeFalsy();
+      const tooBigText = textOf({ content: tooBigBody.result?.content ?? [] });
+      expect(tooBigText).toContain("too large for MCP");
+      expect(tooBigText).toContain(`/v1/documents/${documentId}.pdf`);
+      expect(tooBigText).toContain(String(oversized));
+    },
+  );
+
+  it(
     "registers MCP tools; send then status then download returns %PDF",
     { timeout: 60_000 },
     async () => {
@@ -457,8 +617,18 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
         name: "download",
         arguments: { id: sendJson.id, api_key: key },
       });
-      const pdfText = textOf(download as { content: Array<{ type: string; text?: string }> });
-      expect(pdfText.startsWith("%PDF")).toBe(true);
+      expect((download as { isError?: boolean }).isError).toBeFalsy();
+      const resource = resourceOf(download as { content: ResourceContent[] });
+      expect(resource.mimeType).toBe("application/pdf");
+      expect(resource.uri).toBe(`agentsign://documents/${sendJson.id}.pdf`);
+      const pdfBytes = Buffer.from(resource.blob!, "base64");
+      expect(pdfBytes.subarray(0, 4).toString("latin1")).toBe("%PDF");
+      const sealed = await store.get(objectKey(sendJson.id, "sealed"));
+      expect(sealed).not.toBeNull();
+      expect(pdfBytes.equals(Buffer.from(sealed!))).toBe(true);
+      expect(statedSize(download as { content: ResourceContent[] })).toBe(
+        pdfBytes.byteLength,
+      );
     },
   );
 

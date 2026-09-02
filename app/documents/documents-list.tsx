@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
+import { formatSentDate } from "@/app/lib/format-date";
 import {
   columnFilteringFeature,
   columnSizingFeature,
@@ -177,16 +178,6 @@ export function partyLine(p: DocumentParty): string {
   return `${who} · ${p.kind} · ${state}`;
 }
 
-export function formatSentDate(iso?: string, timeZone?: string | null): string {
-  if (!iso) return "—";
-  const opts: Intl.DateTimeFormatOptions = {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-  };
-  if (timeZone) opts.timeZone = timeZone;
-  return new Date(iso).toLocaleDateString("en-US", opts);
-}
 
 function DocumentCell({ doc }: { doc: DocumentListItem }) {
   return (
@@ -356,11 +347,14 @@ export function DocumentsList({
   onVoid,
   onSaveTemplate,
   timeZone,
+  focusId,
 }: {
   documents: DocumentListItem[];
   onVoid?: (id: string) => void;
   onSaveTemplate?: (id: string) => void;
   timeZone?: string | null;
+  /** Deep link target (`/documents?id=…`): paged to and highlighted on load. */
+  focusId?: string | null;
 }) {
   const columns = useMemo<ColumnDef<ListFeatures, DocumentListItem>[]>(
     () => [
@@ -435,6 +429,25 @@ export function DocumentsList({
 
   const filteredCount = table.getFilteredRowModel().rows.length;
   const { pageIndex, pageSize } = table.state.pagination;
+
+  // Jump once to the page holding the deep-linked row, then bring it into
+  // view; later paging by hand is left alone.
+  const focusRow = useRef<HTMLTableRowElement | null>(null);
+  const jumped = useRef(false);
+  const sortedRows = table.getSortedRowModel().rows;
+  useEffect(() => {
+    if (!focusId || jumped.current) return;
+    const index = sortedRows.findIndex((r) => r.original.id === focusId);
+    if (index < 0) return;
+    jumped.current = true;
+    table.setPageIndex(Math.floor(index / pageSize));
+  }, [focusId, pageSize, sortedRows, table]);
+  const scrolled = useRef(false);
+  useEffect(() => {
+    if (scrolled.current || !focusRow.current) return;
+    scrolled.current = true;
+    focusRow.current.scrollIntoView({ block: "center" });
+  }, [focusId, pageIndex]);
   const pageCount = table.getPageCount();
   const { pages, leftEllipsis, rightEllipsis } = pageWindow(
     pageIndex + 1,
@@ -605,7 +618,11 @@ export function DocumentsList({
               </TableRow>
             ) : (
               table.getRowModel().rows.map((row) => (
-                <TableRow key={row.id}>
+                <TableRow
+                  key={row.id}
+                  ref={row.original.id === focusId ? focusRow : undefined}
+                  className={cn(row.original.id === focusId && "bg-muted/60")}
+                >
                   {row.getAllCells().map((cell) => (
                     <TableCell
                       key={cell.id}

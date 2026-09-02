@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useWorkspaceTimezone } from "@/app/lib/use-workspace-timezone";
 import { LoadingList } from "@/components/loading-list";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -10,8 +11,14 @@ import {
 
 export function DocumentsClient() {
   const [documents, setDocuments] = useState<DocumentListItem[] | null>(null);
-  const [timeZone, setTimeZone] = useState<string | null>(null);
+  const timeZone = useWorkspaceTimezone();
   const [error, setError] = useState<string | null>(null);
+  // `/documents?id=…` deep link, e.g. from the screen shown after a send.
+  const [focusId, setFocusId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setFocusId(new URLSearchParams(window.location.search).get("id"));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -43,15 +50,6 @@ export function DocumentsClient() {
               signers: e.signers ?? [],
             })),
           );
-        }
-        try {
-          const ws = await fetch("/v1/workspace", { credentials: "include" });
-          if (ws.ok) {
-            const body = (await ws.json()) as { timezone?: string | null };
-            if (!cancelled && body.timezone) setTimeZone(body.timezone);
-          }
-        } catch {
-          /* timezone is optional */
         }
       } catch {
         if (!cancelled) setError("Could not load documents.");
@@ -117,6 +115,7 @@ export function DocumentsClient() {
       onVoid={onVoid}
       onSaveTemplate={onSaveTemplate}
       timeZone={timeZone}
+      focusId={focusId}
     />
   );
 }
