@@ -75,6 +75,6 @@ curl -F title=Repair\ authorization \
 
 Sender gets an OTP email (or log-only in dev without `RESEND_API_KEY`). After OTP, a `sign_tmp_…` key and signer link are issued. Signers finish at `/s/[token]` with no account.
 
-MCP bin is `sign-mcp` (`pnpm sign-mcp`). HTTP MCP is `POST /mcp`.
+**MCP.** HTTP is the supported path: `POST /mcp` (streamable HTTP), one endpoint, eight tools (`send`, `status`, `download`, `attest`, `reject`, `verify`, `list_templates`, `send_template`) and no `sign` tool. Hosts that speak OAuth need only the URL: discovery lives at `/.well-known/oauth-protected-resource` and `/.well-known/oauth-authorization-server`, registration at `POST /oauth/register`, OAuth 2.1 with PKCE (S256); an unauthenticated `POST /mcp` answers 401 with the resource metadata. Hosts that take a secret can pass `Authorization: Bearer sign_live_…` instead. Setup snippets, the agent party rules, per-agent webhooks, and the error codes are at `/docs#mcp` and `/docs#agents`. The `sign-mcp` bin (`pnpm sign-mcp`) is stdio for local work only: it boots the TypeScript source through `tsx`, so it runs from a checkout of this repo and nowhere else.
 
 **Shred note:** Free documents hard-delete PDF bytes when `shred_at` is due (7 days to sign if never completed; 7 days after completion on Free). Cron hits `GET /internal/shred` daily with `Authorization: Bearer $CRON_SECRET`; the same sweep also sends signing reminders. Void is `DELETE /v1/documents/:id` (immediate purge). There is no restore.

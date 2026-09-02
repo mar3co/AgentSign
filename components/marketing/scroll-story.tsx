@@ -150,8 +150,8 @@ const CHAPTERS: readonly Chapter[] = [
         body: "Get the whole rail: REST, OpenAPI, MCP tools, and webhooks.",
       },
     ],
-    cta: { label: "Connect your AI agent", href: "/llms.txt" },
-    links: [{ href: "/docs", label: "MCP tools →" }],
+    cta: { label: "Connect your AI agent", href: "/docs#mcp" },
+    links: [{ href: "/docs#mcp", label: "MCP tools →" }],
     clients: true,
     terminal: {
       address: "POST /v1/documents/{id}/attest",

@@ -392,7 +392,7 @@ export default function Home() {
         <div className="flex flex-wrap items-center gap-3">
           <a
             className="text-sm font-medium text-tint underline-offset-4 hover:underline"
-            href="/llms.txt"
+            href="/docs#mcp"
           >
             Connect your AI agent &rarr;
           </a>

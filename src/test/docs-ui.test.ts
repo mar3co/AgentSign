@@ -30,6 +30,58 @@ describe("docs page", () => {
     expect(text).not.toMatch(/court|SOC 2|HIPAA|QES/);
   });
 
+  it("documents MCP under a linkable anchor", () => {
+    render(createElement(DocsPage));
+    const mcp = document.getElementById("mcp");
+    expect(mcp?.textContent).toMatch(/mcp/i);
+    expect(document.getElementById("agents")).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: /connect over mcp/i }).getAttribute("href"),
+    ).toBe("#mcp");
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("claude mcp add --transport http agentsign");
+    expect(text).toContain('"mcpServers"');
+    expect(text).toContain("/.well-known/oauth-authorization-server");
+    expect(text).toContain("/oauth/register");
+    for (const tool of [
+      "send",
+      "status",
+      "download",
+      "attest",
+      "reject",
+      "verify",
+      "list_templates",
+      "send_template",
+    ]) {
+      expect(text).toContain(tool);
+    }
+    expect(text).toMatch(/no\s+sign\s+tool/i);
+  });
+
+  it("documents agent parties without calling attestation signing", () => {
+    render(createElement(DocsPage));
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("party.ready");
+    expect(text).toContain("document.completed");
+    expect(text).toContain("document.declined");
+    expect(text).toContain("document.expired");
+    expect(text).toContain("X-Sign-Signature");
+    expect(text).toContain("X-Sign-Timestamp");
+    expect(text).toContain("pending_sender");
+    for (const code of [
+      "human_required",
+      "cannot_attest",
+      "unknown_agent",
+      "agent_limit",
+      "pro_required",
+      "flag_off",
+    ]) {
+      expect(text).toContain(code);
+    }
+    expect(text).not.toMatch(/agents signed/i);
+    expect(text).not.toMatch(/signed off/i);
+  });
+
   it("shows the real endpoints as addresses", () => {
     render(createElement(DocsPage));
     const text = document.body.textContent ?? "";

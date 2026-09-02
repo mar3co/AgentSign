@@ -65,6 +65,31 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
     expect(body).not.toMatch(/^- sign —/m);
   });
 
+  it("GET /llms.txt gives the MCP endpoint, OAuth discovery, and agent facts", async () => {
+    const res = await getLlms(new Request("http://sign.test/llms.txt"));
+    const body = await res.text();
+    expect(body).toContain("/mcp");
+    expect(body).toContain("oauth-authorization-server");
+    expect(body).toContain("oauth-protected-resource");
+    expect(body).toContain("/oauth/register");
+    expect(body).toMatch(/PKCE/);
+    expect(body).toContain("claude mcp add --transport http agentsign");
+    expect(body).toContain("party.ready");
+    expect(body).toContain("document.expired");
+    expect(body).toContain("X-Sign-Signature");
+    expect(body).toContain("pending_sender");
+    for (const code of [
+      "human_required",
+      "cannot_attest",
+      "unknown_agent",
+      "agent_limit",
+      "pro_required",
+      "flag_off",
+    ]) {
+      expect(body).toContain(code);
+    }
+  });
+
   it("documents AgentSign in OpenAPI and MCP server metadata", async () => {
     expect(openapi.info.title).toBe("AgentSign");
     const { client, server } = await connectMcp();
