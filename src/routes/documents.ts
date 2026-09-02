@@ -1,4 +1,4 @@
-import { and, count, eq, gte, inArray, ne, or } from "drizzle-orm";
+import { and, count, countDistinct, eq, gte, inArray, ne, or } from "drizzle-orm";
 import { z } from "zod";
 import { PDFDocument } from "pdf-lib";
 import { getDb } from "../db/client.js";
@@ -37,6 +37,7 @@ import {
 } from "../lib/keys.js";
 import { accountForOauthGrant, lookupOauthGrant } from "../lib/oauth.js";
 import { newOtp } from "../lib/otp.js";
+import { clientIp } from "../lib/clientIp.js";
 import { parseEmbedOrigin } from "../lib/embed.js";
 import {
   defaultRoleName,
@@ -85,6 +86,8 @@ import { purgeDocument } from "../jobs/shred.js";
 const PDF_MAX_BYTES = 20 * 1024 * 1024;
 const MARKDOWN_MAX_BYTES = 1024 * 1024;
 const OTP_TTL_MS = 10 * 60 * 1000;
+const PENDING_WINDOW_MS = 24 * 60 * 60 * 1000;
+const anonymousCreateLimited = slidingWindowLimiter(30, 10 * 60 * 1000);
 
 const signerSchema = z.object({
   name: z.string().min(1),
@@ -623,20 +626,6 @@ function isPdf(bytes: Uint8Array, type: string): boolean {
 // DOCX conversion launches a browser, so cap how fast one caller can invoke
 // it — POST /v1/documents is reachable without credentials by design.
 const convertLimited = slidingWindowLimiter(10, 10 * 60 * 1000);
-
-/**
- * Client IP for anonymous rate keys, as reported by the deployment's proxy.
- * Vercel strips the client's copies of these headers; a self-hosted reverse
- * proxy must overwrite them too, or callers can pick their own bucket.
- */
-function clientIp(req: Request): string {
-  return (
-    req.headers.get("x-vercel-forwarded-for")?.split(",")[0]?.trim() ||
-    req.headers.get("x-real-ip")?.trim() ||
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    "anonymous"
-  );
-}
 
 /**
  * Uploads may be a PDF or a DOCX (converted to PDF here); everything after
@@ -1255,7 +1244,7 @@ export async function createDocument(req: Request): Promise<Response> {
   if (file instanceof Blob) {
     const normalized = await normalizeUploadToPdf(
       file,
-      liveUserId ?? sessionUser?.id ?? clientIp(req),
+      liveUserId ?? sessionUser?.id ?? clientIp(req) ?? "unknown",
     );
     if (!normalized.ok) return normalized.response;
     fileBytes = normalized.bytes;
@@ -1300,18 +1289,48 @@ export async function createDocument(req: Request): Promise<Response> {
   const windowStart = new Date(at.getTime() - windowDays * 86_400_000);
 
   // Free senders at their cap get turned away before the expensive render.
+  // Unverified documents are capped on their own, per client IP over a day:
+  // each one stores a file and emails a code to an address nobody has proven
+  // they own, and keying them on that address would let anyone lock it out.
+  // The IP is on the OTP audit event whether or not the mail went out. A
+  // deployment that reports no IP gets no per-IP cap rather than one shared
+  // bucket for everyone. The counts are not transactional, so an in-memory
+  // window in front of them bounds what one burst can slip past. A logged-in
+  // sender proved who they are at login, so neither per-IP check applies.
   if (!liveUserId) {
-    const [cap] = await db
-      .select({ n: count() })
-      .from(documents)
-      .where(
-        and(
-          eq(documents.senderEmail, senderEmail),
-          gte(documents.createdAt, windowStart),
-          ne(documents.status, "pending_sender"),
+    const ip = sessionUser ? undefined : clientIp(req);
+    if (ip && anonymousCreateLimited(ip)) {
+      return jsonError(429, "Too many requests. Try again later.", "rate_limited");
+    }
+    const pendingWindowStart = new Date(at.getTime() - PENDING_WINDOW_MS);
+    const [[sent], pendingRows] = await Promise.all([
+      db
+        .select({ n: count() })
+        .from(documents)
+        .where(
+          and(
+            eq(documents.senderEmail, senderEmail),
+            gte(documents.createdAt, windowStart),
+            ne(documents.status, "pending_sender"),
+          ),
         ),
-      );
-    if (Number(cap?.n ?? 0) >= limit) {
+      ip
+        ? db
+            .select({ n: countDistinct(documents.id) })
+            .from(documents)
+            .innerJoin(auditEvents, eq(auditEvents.documentId, documents.id))
+            .where(
+              and(
+                eq(documents.status, "pending_sender"),
+                gte(documents.createdAt, pendingWindowStart),
+                inArray(auditEvents.event, ["otp_sent", "emailed_failed"]),
+                eq(auditEvents.ip, ip),
+              ),
+            )
+        : [],
+    ]);
+    const pending = Number(pendingRows[0]?.n ?? 0);
+    if (Number(sent?.n ?? 0) >= limit || pending >= limit) {
       return jsonError(429, "Send limit reached. Try again later.", "send_limit");
     }
   }
@@ -1471,11 +1490,12 @@ export async function createDocument(req: Request): Promise<Response> {
   });
   try {
     await mailer.sendMail({ to: senderEmail, ...otpEmail(otp.digits) });
-    await logEvent(db, { documentId: document.id, event: "otp_sent" });
+    await logEvent(db, { documentId: document.id, event: "otp_sent", ip: clientIp(req) });
   } catch (err) {
     await logEvent(db, {
       documentId: document.id,
       event: "emailed_failed",
+      ip: clientIp(req),
       payload: { error: err instanceof Error ? err.message : "mail_failed" },
     });
   }

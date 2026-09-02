@@ -65,6 +65,16 @@ function resolveKey(
   return envKey || null;
 }
 
+/** The caller's IP headers, so verify's rate limit keys on them, not on one shared bucket. */
+function clientIpHeaders(extra: Extra): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const name of ["x-vercel-forwarded-for", "x-real-ip", "x-forwarded-for"]) {
+    const value = headerValue(extra.requestInfo?.headers, name);
+    if (value) out[name] = value;
+  }
+  return out;
+}
+
 function toolText(text: string, isError = false) {
   return { content: [{ type: "text" as const, text }], isError };
 }
@@ -316,7 +326,7 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
         pdf: z.string().describe("Base64-encoded PDF bytes. Not a URL."),
       },
     },
-    async (args) => {
+    async (args, extra) => {
       let bytes: Uint8Array;
       try {
         bytes = Uint8Array.from(Buffer.from(args.pdf, "base64"));
@@ -329,7 +339,7 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
       const res = await verifyDocument(
         new Request("http://sign.local/v1/verify", {
           method: "POST",
-          headers: { "content-type": "application/pdf" },
+          headers: { "content-type": "application/pdf", ...clientIpHeaders(extra) },
           body: Buffer.from(bytes),
         }),
       );
