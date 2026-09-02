@@ -156,6 +156,9 @@ function stubDocumentsFetch() {
     "fetch",
     vi.fn(async (url: string, init?: RequestInit) => {
       if (String(url).includes("whoami")) return whoamiOk();
+      if (String(url).includes("/v1/workspace")) {
+        return new Response("{}", { status: 200 });
+      }
       bodies.push(init!.body as FormData);
       return new Response(JSON.stringify({ id: "d1" }), { status: 201 });
     }),
@@ -533,6 +536,21 @@ describe("SendClient", () => {
     // Only the signer whose turn it is gets a copy button, named for them.
     expect(screen.getAllByRole("button", { name: /copy link/i })).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Copy link for Jane" })).toBeTruthy();
+  });
+
+  it("shows the link in place when the clipboard write fails", async () => {
+    stubDirectSend([{ email: "jane@example.com", sign_url: "/s/tok" }]);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: vi.fn(async () => Promise.reject(new Error("denied"))) },
+      configurable: true,
+    });
+    render(createElement(SendClient));
+    await selectPdf();
+    await fillAndSubmit();
+    await screen.findByText(/^sent$/i);
+    fireEvent.click(screen.getByRole("button", { name: /copy link/i }));
+    const link = await screen.findByRole("link", { name: /\/s\/tok/i });
+    expect(link.getAttribute("href")).toContain("/s/tok");
   });
 
   it("Send another clears the editor without a page load", async () => {

@@ -120,6 +120,12 @@ describe("send confirmation", () => {
     expect(Number.isNaN(Date.parse(done.expires_at))).toBe(false);
     expect(done.shred_at).toBe(done.expires_at);
     expect(sent.some((m) => m.to === "jane@example.com")).toBe(true);
+    // The done screen no longer displays the key, so the sender's "is live"
+    // email is the only place it reaches them.
+    const live = sent.find(
+      (m) => m.to === "shop@example.com" && /is live/i.test(m.subject),
+    );
+    expect(live?.text).toContain(done.key);
   });
 
   it("sends directly when the agent confirmation is turned off", async () => {

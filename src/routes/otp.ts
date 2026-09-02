@@ -196,7 +196,8 @@ export async function verifyDocumentOtp(
   try {
     const live = sendLiveEmail({
       title: document.title,
-      tmpKeyShownInResponse: true,
+      tmpKeyShownInResponse: false,
+      tmpKey: tmp.raw,
       senderEmail: document.senderEmail,
       brand: mailBrand,
     });

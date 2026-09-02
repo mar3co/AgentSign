@@ -2,8 +2,6 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { formatSentDate } from "@/app/lib/format-date";
-
-export { formatSentDate };
 import {
   columnFilteringFeature,
   columnSizingFeature,

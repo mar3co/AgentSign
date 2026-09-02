@@ -3,10 +3,8 @@ import { createElement } from "react";
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { DocumentsClient } from "../../app/documents/documents-client.js";
-import {
-  DocumentsList,
-  formatSentDate,
-} from "../../app/documents/documents-list.js";
+import { DocumentsList } from "../../app/documents/documents-list.js";
+import { formatSentDate } from "@/app/lib/format-date";
 
 describe("formatSentDate", () => {
   it("uses the workspace timezone when given one", () => {

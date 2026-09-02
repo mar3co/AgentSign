@@ -68,7 +68,6 @@ function CopyLinkButton({ url, who }: { url: string; who: string }) {
       type="button"
       variant="outline"
       size="sm"
-      aria-label={`Copy link for ${who}`}
       onClick={async () => {
         try {
           await navigator.clipboard.writeText(href);
@@ -79,6 +78,7 @@ function CopyLinkButton({ url, who }: { url: string; who: string }) {
       }}
     >
       {state === "copied" ? "Copied" : "Copy link"}
+      <span className="sr-only"> for {who}</span>
     </Button>
   );
 }
@@ -106,6 +106,7 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
   const [previewSettled, setPreviewSettled] = useState(true);
   const [replaceNotice, setReplaceNotice] = useState<string | null>(null);
   const [documentId, setDocumentId] = useState<string | null>(null);
+  const [timeZone, setTimeZone] = useState<string | null>(null);
   const [done, setDone] = useState<Done | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -132,6 +133,15 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
         if (!cancelled) setSenderEmail(json?.email ?? "");
       } catch {
         if (!cancelled) setSenderEmail("");
+      }
+      try {
+        const ws = await fetch("/v1/workspace", { credentials: "include" });
+        if (ws.ok) {
+          const body = (await ws.json()) as { timezone?: string | null };
+          if (!cancelled && body.timezone) setTimeZone(body.timezone);
+        }
+      } catch {
+        /* timezone is optional */
       }
     })();
     return () => {
@@ -461,7 +471,7 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
   }
 
   if (done) {
-    const deadline = done.expiresAt ? formatSentDate(done.expiresAt) : "";
+    const deadline = done.expiresAt ? formatSentDate(done.expiresAt, timeZone) : "";
     // The API answers with emails only; names come from the rows just filled in.
     const nameFor = (email: string) =>
       signers.find((s) => s.email.trim().toLowerCase() === email.toLowerCase())
