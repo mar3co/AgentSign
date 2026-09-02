@@ -9,14 +9,15 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { GET as getLlms } from "../../app/llms.txt/route.js";
 import { GET as getOpenApi } from "../../app/openapi.json/route.js";
 import { openapi } from "../openapi.js";
+import pkg from "../../package.json" with { type: "json" };
 import { POST as postMcp } from "../../app/mcp/route.js";
 import { POST as postOtp } from "../../app/v1/documents/[id]/otp/route.js";
 import { POST as postConsent } from "../../app/s/[token]/consent/route.js";
 import { POST as postSign } from "../../app/s/[token]/sign/route.js";
 import { setDeps } from "../lib/deps.js";
 import { makeDevP12 } from "../lib/pdf/devP12.js";
-import { createFsStore } from "../lib/storage.js";
-import { createSignMcpServer } from "../mcp/server.js";
+import { createFsStore, objectKey } from "../lib/storage.js";
+import { MCP_DOWNLOAD_MAX_BYTES, createSignMcpServer } from "../mcp/server.js";
 import { newLiveKey } from "../lib/tokens.js";
 import { createTestDb } from "./db.js";
 import { minimalPdf } from "./pdf.js";
@@ -42,8 +43,16 @@ function tokenFromUrl(signUrl: string) {
 
 type ResourceContent = {
   type: string;
+  text?: string;
   resource?: { uri?: string; mimeType?: string; blob?: string };
 };
+
+/** The byte count the download tool states in its text line. */
+function statedSize(result: { content: ResourceContent[] }): number {
+  const match = /\((\d+) bytes\)/.exec(textOf(result));
+  if (!match) throw new Error("no byte count in text content");
+  return Number(match[1]);
+}
 
 function resourceOf(result: { content: ResourceContent[] }) {
   const resource = result.content.find((c) => c.type === "resource")?.resource;
@@ -84,7 +93,9 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
     void server;
     const init = await client.getServerVersion();
     expect(init?.name).toBe("agentsign");
-    expect(init?.version).toBe("0.1.0");
+    // Both surfaces read package.json, so the handshake and the spec agree.
+    expect(init?.version).toBe(pkg.version);
+    expect(openapi.info.version).toBe(pkg.version);
   });
 
   it("GET /openapi.json lists the five HTTP paths", async () => {
@@ -434,6 +445,38 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
       expect(resource.uri).toBe(`agentsign://documents/${documentId}.pdf`);
       const pdfBytes = Buffer.from(resource.blob!, "base64");
       expect(pdfBytes.subarray(0, 4).toString("latin1")).toBe("%PDF");
+      const sealed = await store.get(objectKey(documentId, "sealed"));
+      expect(sealed).not.toBeNull();
+      expect(pdfBytes.equals(Buffer.from(sealed!))).toBe(true);
+      expect(statedSize({ content: downloadBody.result?.content ?? [] })).toBe(
+        pdfBytes.byteLength,
+      );
+
+      const oversized = MCP_DOWNLOAD_MAX_BYTES + 1;
+      await store.put(objectKey(documentId, "sealed"), new Uint8Array(oversized));
+      const tooBigRes = await postMcp(
+        new Request("http://sign.test/mcp", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 3,
+            method: "tools/call",
+            params: { name: "download", arguments: { id: documentId } },
+          }),
+        }),
+      );
+      const tooBigBody = (await tooBigRes.json()) as {
+        result?: { content?: ResourceContent[]; isError?: boolean };
+      };
+      expect(tooBigBody.result?.isError).toBe(true);
+      expect(
+        tooBigBody.result?.content?.some((c) => c.type === "resource"),
+      ).toBeFalsy();
+      const tooBigText = textOf({ content: tooBigBody.result?.content ?? [] });
+      expect(tooBigText).toContain("too large for MCP");
+      expect(tooBigText).toContain(`/v1/documents/${documentId}.pdf`);
+      expect(tooBigText).toContain(String(oversized));
     },
   );
 
@@ -539,6 +582,12 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
       expect(resource.uri).toBe(`agentsign://documents/${sendJson.id}.pdf`);
       const pdfBytes = Buffer.from(resource.blob!, "base64");
       expect(pdfBytes.subarray(0, 4).toString("latin1")).toBe("%PDF");
+      const sealed = await store.get(objectKey(sendJson.id, "sealed"));
+      expect(sealed).not.toBeNull();
+      expect(pdfBytes.equals(Buffer.from(sealed!))).toBe(true);
+      expect(statedSize(download as { content: ResourceContent[] })).toBe(
+        pdfBytes.byteLength,
+      );
     },
   );
 

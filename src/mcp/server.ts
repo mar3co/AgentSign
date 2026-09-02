@@ -1,4 +1,3 @@
-import { createRequire } from "node:module";
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -22,6 +21,7 @@ import {
 } from "../routes/documents.js";
 import { listTemplates, sendTemplate } from "../routes/templates.js";
 import { verifyDocument } from "../routes/verify.js";
+import pkg from "../../package.json" with { type: "json" };
 
 const signerSchema = z.object({
   name: z.string().min(1),
@@ -87,8 +87,12 @@ function bearerFromRequest(req: Request): string | null {
   return token || null;
 }
 
-const require = createRequire(import.meta.url);
-const packageVersion = (require("../../package.json") as { version: string }).version;
+/**
+ * Vercel buffers a function response at 4.5 MB and base64 inflates bytes by a
+ * third, so a sealed PDF past this cap cannot come back through MCP at all.
+ * Uploads allow 20 MB, so oversized documents are real: they go over REST.
+ */
+export const MCP_DOWNLOAD_MAX_BYTES = 3 * 1024 * 1024;
 
 async function jsonOrText(res: Response): Promise<string> {
   const type = res.headers.get("content-type") ?? "";
@@ -101,7 +105,7 @@ async function jsonOrText(res: Response): Promise<string> {
 export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer {
   const allowEnvKey = opts?.allowEnvKey === true;
   const server = new McpServer(
-    { name: "agentsign", version: packageVersion },
+    { name: "agentsign", version: pkg.version },
     {
       instructions:
         "AgentSign is a signing primitive. Human always signs. Keys authenticate the caller and never sign. No sign tool. Humans Finish. Agents Attest. Tools: send, status, download, attest, reject, verify, list_templates, send_template. Optional send fields (JSON); message, send/send_template values, order, send_email, completed_redirect_url, embed_origin. PDF {{sig}} tags work on Free one-offs.",
@@ -236,7 +240,7 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
     {
       title: "Download sealed PDF",
       description:
-        "GET /v1/documents/{id}.pdf. Requires a tmp or live Bearer key. Returns the sealed PDF after the human ceremony as a base64-encoded embedded resource (application/pdf). 409 if not completed.",
+        "GET /v1/documents/{id}.pdf. Requires a tmp or live Bearer key. Returns the sealed PDF after the human ceremony as a base64-encoded embedded resource (application/pdf). 409 if not completed. PDFs over 3 MB are not returned here; fetch those over HTTP from GET /v1/documents/{id}.pdf.",
       inputSchema: {
         id: z.string().min(1),
         api_key: z.string().optional(),
@@ -260,6 +264,15 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
         return toolText(await jsonOrText(res), true);
       }
       const bytes = new Uint8Array(await res.arrayBuffer());
+      if (bytes.byteLength > MCP_DOWNLOAD_MAX_BYTES) {
+        return toolText(
+          JSON.stringify({
+            error: `Sealed PDF is ${bytes.byteLength} bytes, too large for MCP (limit ${MCP_DOWNLOAD_MAX_BYTES} bytes). Download it from GET /v1/documents/${args.id}.pdf instead.`,
+            code: "too_large",
+          }),
+          true,
+        );
+      }
       const fileName = `${args.id}.pdf`;
       return {
         content: [

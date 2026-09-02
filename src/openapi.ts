@@ -1,3 +1,5 @@
+import pkg from "../package.json" with { type: "json" };
+
 const errorSchema = {
   type: "object",
   required: ["error", "code"],
@@ -191,7 +193,7 @@ export const openapi = {
   openapi: "3.1.0",
   info: {
     title: "AgentSign",
-    version: "2.1.0",
+    version: pkg.version,
     description:
       "AgentSign is a signing primitive. Human always signs. Bearer keys authenticate the caller and never skip the signer. No sign tool. Humans Finish. Agents Attest. On-page fields via PDF tags or fields JSON. Branding, templates, and team are REST for logged-in Pro or SELF_HOST. Errors are JSON { error, code }.",
   },
