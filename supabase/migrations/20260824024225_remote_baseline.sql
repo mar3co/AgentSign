@@ -1,2 +1,3 @@
--- Placeholder for a migration already applied remotely before the CLI
--- workflow existed locally. Content intentionally empty.
+-- Empty placeholder: production records this version as applied, so it must
+-- stay in the history. The real schema lives in the sibling file
+-- 20260824024016_remote_baseline.sql.
