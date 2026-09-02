@@ -363,13 +363,15 @@ export async function postToken(req: Request): Promise<Response> {
 
 /**
  * RFC 7009. Public clients, so no client authentication: the token is the
- * credential. Always 200, even for an unknown or already dead token, so a
- * caller cannot probe which tokens exist.
+ * credential. 200 even for an unknown or already dead token, so a caller
+ * cannot probe which tokens exist; a missing token parameter is a malformed
+ * request, and section 2.1 asks for invalid_request there.
  */
 export async function postRevoke(req: Request): Promise<Response> {
   const params = await readTokenParams(req);
   const token = (params.token ?? "").trim();
-  if (token) await revokeGrantByToken(requireDb(), token);
+  if (!token) return jsonError(400, "invalid_request", "token is required");
+  await revokeGrantByToken(requireDb(), token);
   return new Response(null, {
     status: 200,
     headers: { "cache-control": "no-store" },

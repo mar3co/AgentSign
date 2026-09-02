@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { and, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { getDb } from "../db/client.js";
 import {
   accounts,
@@ -25,6 +25,8 @@ const UUID_RE =
 const CODE_TTL_MS = 10 * 60 * 1000;
 const ACCESS_TTL_MS = 60 * 60 * 1000;
 const CIMD_TIMEOUT_MS = 5_000;
+/** Settings > Security lists at most this many connected apps. */
+const GRANT_LIST_LIMIT = 100;
 
 export type OauthGrantRow = typeof oauthGrants.$inferSelect;
 export type OauthClientRow = typeof oauthClients.$inferSelect;
@@ -220,7 +222,9 @@ export async function listGrants(
   const rows = await conn
     .select()
     .from(oauthGrants)
-    .where(and(eq(oauthGrants.userId, userId), isNull(oauthGrants.revokedAt)));
+    .where(and(eq(oauthGrants.userId, userId), isNull(oauthGrants.revokedAt)))
+    .orderBy(desc(oauthGrants.createdAt))
+    .limit(GRANT_LIST_LIMIT);
   if (rows.length === 0) return [];
 
   const clientIds = [...new Set(rows.map((row) => row.clientId))];
@@ -236,20 +240,18 @@ export async function listGrants(
     : [];
   const agentById = new Map(agentRows.map((a) => [a.id, a]));
 
-  return rows
-    .map((row) => ({
-      id: row.id,
-      clientId: row.clientId,
-      clientName: clientNames.get(row.clientId) ?? "MCP client",
-      scopes: [...OAUTH_SCOPES],
-      agents: (row.allowedAgentIds ?? []).flatMap((id) => {
-        const agent = agentById.get(id);
-        if (!agent || agent.revokedAt) return [];
-        return [{ id: agent.id, slug: agent.slug, name: agent.name }];
-      }),
-      createdAt: row.createdAt,
-    }))
-    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  return rows.map((row) => ({
+    id: row.id,
+    clientId: row.clientId,
+    clientName: clientNames.get(row.clientId) ?? "MCP client",
+    scopes: [...OAUTH_SCOPES],
+    agents: (row.allowedAgentIds ?? []).flatMap((id) => {
+      const agent = agentById.get(id);
+      if (!agent || agent.revokedAt) return [];
+      return [{ id: agent.id, slug: agent.slug, name: agent.name }];
+    }),
+    createdAt: row.createdAt,
+  }));
 }
 
 /** Disconnect one app. Kills the access token and the refresh family, the
@@ -457,14 +459,30 @@ export async function issueGrantTokens(
   const access = newOauthToken();
   const refresh = newOauthToken();
   const expiresAt = new Date(at.getTime() + ACCESS_TTL_MS);
-  await db.insert(oauthGrants).values({
-    userId: input.userId,
-    clientId: input.clientId,
-    allowedAgentIds: input.allowedAgentIds,
-    accessHash: access.hash,
-    refreshHash: refresh.hash,
-    resource: input.resource,
-    expiresAt,
+  await db.transaction(async (tx) => {
+    // Re-authorizing replaces the connection instead of stacking a second one.
+    // Settings > Security shows one row per app, so an older live grant would
+    // keep working after someone disconnects the one they can see.
+    await tx
+      .update(oauthGrants)
+      .set({ revokedAt: at })
+      .where(
+        and(
+          eq(oauthGrants.userId, input.userId),
+          eq(oauthGrants.clientId, input.clientId),
+          eq(oauthGrants.resource, input.resource),
+          isNull(oauthGrants.revokedAt),
+        ),
+      );
+    await tx.insert(oauthGrants).values({
+      userId: input.userId,
+      clientId: input.clientId,
+      allowedAgentIds: input.allowedAgentIds,
+      accessHash: access.hash,
+      refreshHash: refresh.hash,
+      resource: input.resource,
+      expiresAt,
+    });
   });
   return {
     access_token: access.raw,

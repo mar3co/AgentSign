@@ -798,6 +798,46 @@ describe("MCP OAuth 2.1", () => {
     expect((await revokeReq(tokens.access_token)).status).toBe(200);
     expect((await revokeReq("sign_oauth_nope")).status).toBe(200);
     expect((await revokeReq("not-a-token")).status).toBe(200);
+
+    // RFC 7009 section 2.1: a missing token parameter is a malformed request.
+    const missing = await postRevoke(
+      new Request("http://sign.test/oauth/revoke", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: "",
+      }),
+    );
+    expect(missing.status).toBe(400);
+    expect(((await missing.json()) as { error?: string }).error).toBe("invalid_request");
+    expect((await revokeReq("   ")).status).toBe(400);
+  });
+
+  it("re-authorizing a client replaces its grant instead of stacking one", {
+    timeout: 60_000,
+  }, async () => {
+    await boot();
+    const cookie = await magicCookie("shop@example.com");
+    const redirectUri = "https://client.example/cb";
+    const clientId = await registerPublicClient(redirectUri, "Claude Desktop");
+
+    const first = await issueTokens({ cookie, clientId, redirectUri });
+    expect((await mcpInitialize(first.access_token)).status).toBe(200);
+
+    const second = await issueTokens({ cookie, clientId, redirectUri });
+    expect((await mcpInitialize(second.access_token)).status).toBe(200);
+
+    // The older connection is dead, not just hidden from the list.
+    expect((await mcpInitialize(first.access_token)).status).toBe(401);
+    expect((await refreshReq(first.refresh_token)).status).toBe(400);
+
+    const listed = await listGrantsReq(cookie);
+    expect(listed.status).toBe(200);
+    const { grants } = (await listed.json()) as { grants: GrantJson[] };
+    expect(grants).toHaveLength(1);
+
+    // So disconnecting the one row on screen ends the app's access right away.
+    expect((await deleteGrantReq(grants[0]!.id, cookie)).status).toBe(204);
+    expect((await mcpInitialize(second.access_token)).status).toBe(401);
   });
 
   it("grants list and delete need a session and only show the caller's", {

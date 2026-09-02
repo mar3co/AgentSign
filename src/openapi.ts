@@ -220,6 +220,13 @@ export const openapi = {
   },
   components: {
     securitySchemes: {
+      sessionCookie: {
+        type: "apiKey",
+        in: "cookie",
+        name: "sb-access-token",
+        description:
+          "Signed-in browser session. These operations serve the portal and reject API keys and OAuth tokens.",
+      },
       bearerAuth: {
         type: "http",
         scheme: "bearer",
@@ -1239,7 +1246,7 @@ export const openapi = {
       post: {
         summary: "Revoke an OAuth token (RFC 7009)",
         description:
-          "Public client, so no client authentication: the token is the credential. Revokes the whole grant, so the access token and the refresh family both die. Always 200, even for an unknown token.",
+          "Public client, so no client authentication: the token is the credential. Revokes the whole grant, so the access token and the refresh family both die. 200 even for an unknown token; a missing token parameter is 400 invalid_request.",
         security: [],
         requestBody: {
           required: true,
@@ -1261,6 +1268,7 @@ export const openapi = {
         },
         responses: {
           "200": { description: "Revoked, or the token was already unknown" },
+          "400": errorResponse,
         },
       },
     },
@@ -1269,7 +1277,7 @@ export const openapi = {
         summary: "List connected MCP clients",
         description:
           "Logged-in session only (not a live key or an OAuth token). Live grants for the signed-in person, newest first.",
-        security: [],
+        security: [{ sessionCookie: [] }],
         responses: {
           "200": {
             description: "List",
@@ -1297,7 +1305,7 @@ export const openapi = {
         summary: "Disconnect an MCP client",
         description:
           "Logged-in session only. Revokes the grant: its access token and refresh family stop working right away.",
-        security: [],
+        security: [{ sessionCookie: [] }],
         parameters: [idParam],
         responses: {
           "204": { description: "Disconnected" },
