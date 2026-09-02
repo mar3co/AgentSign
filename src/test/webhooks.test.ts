@@ -2,13 +2,14 @@ import { createHmac } from "node:crypto";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { POST as postDocument } from "../../app/v1/documents/route.js";
 import { POST as postOtp } from "../../app/v1/documents/[id]/otp/route.js";
 import { POST as postConsent } from "../../app/s/[token]/consent/route.js";
 import { POST as postSign } from "../../app/s/[token]/sign/route.js";
 import { auditEvents, documents } from "../db/schema.js";
+import type { AuditDb } from "../lib/audit.js";
 import { setDeps } from "../lib/deps.js";
 import { makeDevP12 } from "../lib/pdf/devP12.js";
 import { createFsStore } from "../lib/storage.js";
@@ -619,6 +620,86 @@ describe("webhook delivery retries", () => {
         (e.payload as Record<string, unknown> | null)?.attempts === 2,
     );
     expect(sentEvent).toBeTruthy();
+  });
+});
+
+const AGENT_DOC_ID = "11111111-1111-1111-1111-111111111111";
+
+/** logEvent only ever calls insert().values(), so a two-method stub is enough. */
+function stubAuditDb(onInsert: (row: Record<string, unknown>) => void): AuditDb {
+  return {
+    insert: () => ({
+      values: async (row: Record<string, unknown>) => {
+        onInsert(row);
+      },
+    }),
+  } as unknown as AuditDb;
+}
+
+function agentHook() {
+  return {
+    webhookUrl: "https://example.com/agent-hook",
+    webhookSecretHash: sealWebhookSecret(newWebhookSecret()),
+  };
+}
+
+const agentPayload = {
+  event: "party.ready",
+  id: AGENT_DOC_ID,
+  agent: "grok-legal",
+  status: "pending",
+};
+
+describe("webhook delivery deadline and audit", () => {
+  it("does not resend when the audit insert rejects after a 200", async () => {
+    let posts = 0;
+    setDeps({
+      db: stubAuditDb(() => {
+        throw new Error("audit down");
+      }),
+      fetch: async () => {
+        posts++;
+        return new Response("ok", { status: 200 });
+      },
+      lookup: async () => [{ address: "93.184.216.34", family: 4 }],
+    });
+    await expect(fireAgentWebhook(agentHook(), agentPayload)).rejects.toThrow(
+      "audit down",
+    );
+    expect(posts).toBe(1);
+  });
+
+  it("stops retrying once the injected sleep burns the deadline", async () => {
+    const rows: Record<string, unknown>[] = [];
+    let clock = Date.now();
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => clock);
+    try {
+      let posts = 0;
+      setDeps({
+        db: stubAuditDb((row) => {
+          rows.push(row);
+        }),
+        now: () => new Date(clock),
+        fetch: async () => {
+          posts++;
+          return new Response("err", { status: 503 });
+        },
+        lookup: async () => [{ address: "93.184.216.34", family: 4 }],
+        // Overshoot the backoff so the 5s budget runs out after one retry.
+        sleep: async (ms) => {
+          clock += ms + 4_000;
+        },
+      });
+      await fireAgentWebhook(agentHook(), agentPayload);
+      // Three attempts fit the backoff schedule; the deadline allows only two.
+      expect(posts).toBe(2);
+      const failed = rows.find((r) => r.event === "webhook_failed");
+      expect(failed).toBeTruthy();
+      expect((failed!.payload as Record<string, unknown>).attempts).toBe(2);
+      expect((failed!.payload as Record<string, unknown>).status).toBe(503);
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 });
 
