@@ -8,12 +8,14 @@ import {
   Card,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageShell } from "@/components/page-shell";
+import { SecretBlock } from "@/components/secret-block";
 import {
   MACHINE_EYEBROW,
   ScrollStory,
@@ -348,23 +350,49 @@ export default function Home() {
     </div>
   );
 
+  // Back to an empty form without a page load, keeping the sender email.
+  function sendAnother() {
+    setDone(null);
+    setSent(false);
+    setDocumentId(null);
+    setFileName(null);
+    setExpanded(false);
+    setTitle("");
+    setSignerName("");
+    setSignerEmail("");
+    setError(null);
+  }
+
+  const signer = signerName.trim() || signerEmail.trim();
   const sealed = done ? (
-    <Alert>
-      <AlertDescription className="flex flex-col gap-2">
-        <p>Keep this key; it is shown once.</p>
-        <pre className="overflow-x-auto whitespace-pre-wrap text-xs">
-          {done.key}
-        </pre>
+    <Card>
+      <CardHeader>
+        <CardTitle>Sent to {signerEmail.trim()}</CardTitle>
+        <CardDescription>
+          {signer} gets an email with a link to sign. No account needed. You
+          get the sealed PDF and audit trail once they finish.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-5">
+        <SecretBlock
+          label="Document key"
+          value={done.key}
+          note="Save it now, it is only shown once. It checks status and downloads the sealed file for this document."
+        />
         {done.signUrl ? (
-          <p>
-            Signer:{" "}
-            <a className="underline" href={done.signUrl}>
-              {done.signUrl}
-            </a>
-          </p>
+          <SecretBlock
+            label="Signing link"
+            value={new URL(done.signUrl, window.location.origin).href}
+            note={`Already emailed to ${signer}. It signs as them, so do not forward it.`}
+          />
         ) : null}
-      </AlertDescription>
-    </Alert>
+      </CardContent>
+      <CardFooter>
+        <Button type="button" variant="outline" onClick={sendAnother}>
+          Send another
+        </Button>
+      </CardFooter>
+    </Card>
   ) : null;
 
   function scrollToHero() {

@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SecretBlock } from "@/components/secret-block";
 
 export type AgentItem = {
   id: string;
@@ -260,18 +261,18 @@ export function AgentsList({
           </Alert>
         ) : null}
         {shownKey ? (
-          <Alert>
-            <AlertDescription>
-              Copy this key now. {shownKey}
-            </AlertDescription>
-          </Alert>
+          <SecretBlock
+            label="Agent key"
+            value={shownKey}
+            note="Save it now, it is only shown once."
+          />
         ) : null}
         {shownSecret ? (
-          <Alert>
-            <AlertDescription>
-              Copy this webhook secret now. {shownSecret}
-            </AlertDescription>
-          </Alert>
+          <SecretBlock
+            label="Webhook secret"
+            value={shownSecret}
+            note="Save it now, it is only shown once."
+          />
         ) : null}
         {items.length === 0 ? (
           <p className="text-base text-muted-foreground">No agents yet.</p>
