@@ -24,6 +24,13 @@ const WEBHOOK_TIMEOUT_MS = 5_000;
 /** Delay before each retry, in order (index 0 = delay before attempt 2). */
 const WEBHOOK_BACKOFF_MS = [250, 750];
 const WEBHOOK_MAX_ATTEMPTS = WEBHOOK_BACKOFF_MS.length + 1;
+/**
+ * Minimum time a retry attempt must have left after its backoff to be worth
+ * scheduling. Timers can overshoot their delay, so requiring only that the
+ * backoff itself fits before the deadline can still launch an attempt with
+ * ~0ms left, which then aborts and audits a misleading error.
+ */
+const MIN_ATTEMPT_MS = 100;
 
 const BLOCKED_HOSTS = new Set([
   "localhost",
@@ -353,9 +360,10 @@ async function postSignedWebhook(
 
   for (let attempt = 1; attempt <= WEBHOOK_MAX_ATTEMPTS; attempt++) {
     const backoff = WEBHOOK_BACKOFF_MS[attempt - 1];
-    // Retry only if, after this attempt, the backoff still leaves time.
+    // Retry only if the next attempt will still have real time to run once
+    // its backoff elapses, not just enough to squeak in before the deadline.
     const canRetry = () =>
-      backoff !== undefined && Date.now() + backoff < deadline;
+      backoff !== undefined && Date.now() + backoff + MIN_ATTEMPT_MS < deadline;
     try {
       const res = await pinnedFetch(
         url,
