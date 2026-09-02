@@ -11,7 +11,7 @@ AgentSign is a signing primitive. Human always signs. Bearer keys authenticate t
 
 Endpoint: ${origin}/mcp (streamable HTTP, POST).
 Claude Code: claude mcp add --transport http agentsign ${origin}/mcp
-Cursor / Windsurf (mcp.json): {"mcpServers":{"agentsign":{"url":"${origin}/mcp"}}}
+Cursor (mcp.json): {"mcpServers":{"agentsign":{"url":"${origin}/mcp"}}}
 Claude Desktop / claude.ai: Settings > Connectors > Add custom connector, URL ${origin}/mcp.
 Auth: OAuth 2.1 + PKCE (S256), or Authorization: Bearer sign_live_ / sign_agent_. An unauthenticated POST /mcp returns 401 with WWW-Authenticate resource_metadata.
 Discovery: GET /.well-known/oauth-protected-resource, GET /.well-known/oauth-authorization-server. Client registration: CIMD https client_id, else dynamic registration at POST /oauth/register. Consent at GET /oauth/authorize, tokens at POST /oauth/token. A grant carries the agents it may attest as.
@@ -24,7 +24,7 @@ stdio MCP does not do OAuth: env or pasted sign_agent_ / SIGN_API_KEY only.
 - download — GET /v1/documents/{id}.pdf. Requires a tmp or live key. Returns the sealed PDF after the human ceremony.
 - attest — POST /v1/documents/{id}/attest. Current party is an agent this caller may use. Args: document_id, optional agent slug, optional api_key. sign_agent_ infers the slug.
 - reject — POST /v1/documents/{id}/reject. Agent decline. Same args as attest.
-- verify — POST /v1/verify. Unauthenticated. Base64 PDF bytes. Checks our seal.
+- verify — POST /v1/verify. Unauthenticated on the REST endpoint; every MCP call still needs a bearer. Base64 PDF bytes. Checks our seal.
 - list_templates — GET /v1/templates. Requires a live key.
 - send_template — POST /v1/templates/{id}/send. Requires a live key. Signers in role order.
 

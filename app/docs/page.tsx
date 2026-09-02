@@ -43,7 +43,7 @@ function mcpBlock(origin: string): string {
 $ claude mcp add --transport http agentsign \\
        ${origin}/mcp
 
-# Cursor, Windsurf (mcp.json)
+# Cursor (mcp.json)
 { "mcpServers": { "agentsign": {
     "url": "${origin}/mcp" } } }
 
@@ -253,7 +253,7 @@ export default function DocsPage() {
                 </li>
                 <li>
                   <code className={CODE}>verify</code> checks a sealed file. No
-                  key.
+                  key on the REST endpoint.
                 </li>
                 <li>
                   <code className={CODE}>list_templates</code> lists your saved
