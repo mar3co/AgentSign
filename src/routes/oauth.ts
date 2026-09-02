@@ -384,7 +384,6 @@ function grantJson(grant: GrantSummary) {
     scopes: grant.scopes,
     agents: grant.agents,
     created_at: grant.createdAt.toISOString(),
-    revoked_at: grant.revokedAt ? grant.revokedAt.toISOString() : null,
   };
 }
 

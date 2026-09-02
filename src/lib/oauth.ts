@@ -209,7 +209,6 @@ export type GrantSummary = {
   scopes: string[];
   agents: { id: string; slug: string; name: string }[];
   createdAt: Date;
-  revokedAt: Date | null;
 };
 
 /** Live grants for one person, newest first, with client and agent names. */
@@ -249,7 +248,6 @@ export async function listGrants(
         return [{ id: agent.id, slug: agent.slug, name: agent.name }];
       }),
       createdAt: row.createdAt,
-      revokedAt: row.revokedAt,
     }))
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 }

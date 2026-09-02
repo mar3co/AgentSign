@@ -836,6 +836,17 @@ describe("MCP OAuth 2.1", () => {
     expect((await listGrantsReq()).status).toBe(401);
     // An OAuth token is not a session: a connector cannot list or disconnect.
     expect((await listGrantsReq(undefined, mine.access_token)).status).toBe(403);
+    // Nor can an API key: a machine must not disconnect the grants that gate it.
+    const minted = await postKeys(
+      new Request("http://sign.test/v1/keys", {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    const { key: liveKey } = (await minted.json()) as { key: string };
+    expect(liveKey).toMatch(/^sign_live_/);
+    expect((await listGrantsReq(undefined, liveKey)).status).toBe(403);
     expect((await deleteGrantReq(grants[0]!.id)).status).toBe(401);
     // Another person's session does not reach this grant.
     expect((await deleteGrantReq(grants[0]!.id, otherCookie)).status).toBe(404);

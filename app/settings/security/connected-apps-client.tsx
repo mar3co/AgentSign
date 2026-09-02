@@ -44,22 +44,27 @@ export function ConnectedAppsClient() {
   const [busy, setBusy] = useState(false);
 
   async function load() {
-    const res = await fetch("/v1/oauth/grants", { credentials: "include" });
-    if (res.status === 401) {
-      window.location.href = `/login?next=${encodeURIComponent("/settings/security")}`;
-      return;
-    }
-    const json = (await res.json().catch(() => null)) as {
-      error?: string;
-      grants?: Grant[];
-    } | null;
-    if (!res.ok) {
-      setError(json?.error ?? "Could not load connected apps.");
+    try {
+      const res = await fetch("/v1/oauth/grants", { credentials: "include" });
+      if (res.status === 401) {
+        window.location.href = `/login?next=${encodeURIComponent("/settings/security")}`;
+        return;
+      }
+      const json = (await res.json().catch(() => null)) as {
+        error?: string;
+        grants?: Grant[];
+      } | null;
+      if (!res.ok) {
+        setError(json?.error ?? "Could not load connected apps.");
+        setGrants([]);
+        return;
+      }
+      setGrants(json?.grants ?? []);
+      setError(null);
+    } catch {
+      setError("Could not load connected apps.");
       setGrants([]);
-      return;
     }
-    setGrants(json?.grants ?? []);
-    setError(null);
   }
 
   useEffect(() => {
@@ -124,12 +129,17 @@ export function ConnectedAppsClient() {
                   <p className="truncate text-sm font-medium">
                     {grant.client_name}
                   </p>
+                  {/* Any client can register under any name, so show the id
+                      that actually identifies it. */}
+                  <p className="truncate font-mono text-xs text-muted-foreground">
+                    {grant.client_id}
+                  </p>
                   <p className="text-xs text-muted-foreground">
                     {grant.scopes.join(", ")}
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {grant.agents.length === 0
-                      ? "Cannot attest as any agent"
+                      ? "No agents allowed"
                       : `Can attest as ${grant.agents.map((a) => a.name).join(", ")}`}
                   </p>
                   <p className="text-xs text-muted-foreground">

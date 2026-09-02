@@ -152,7 +152,6 @@ const oauthGrantSchema = {
       },
     },
     created_at: { type: "string", format: "date-time" },
-    revoked_at: { type: ["string", "null"], format: "date-time" },
   },
 } as const;
 
