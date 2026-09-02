@@ -153,3 +153,22 @@ export async function requireCaller(
     via: "session",
   };
 }
+
+/**
+ * A signed-in person only. Settings that govern machine access (send
+ * confirmation, connected apps) must never be reachable by the machines.
+ */
+export async function requireSessionCaller(
+  req: Request,
+  forbidden: string,
+): Promise<CallerOk | CallerFail> {
+  const caller = await requireCaller(req, { allowOauth: false });
+  if (!caller.ok) return caller;
+  if (caller.via !== "session") {
+    return {
+      ok: false,
+      response: Response.json({ error: forbidden, code: "forbidden" }, { status: 403 }),
+    };
+  }
+  return caller;
+}

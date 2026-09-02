@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { accounts } from "../db/schema.js";
 import type { AuditDb } from "../lib/audit.js";
-import { requireCaller, type CallerOk } from "../lib/caller.js";
+import { requireSessionCaller } from "../lib/caller.js";
 
 function jsonError(status: number, error: string, code: string): Response {
   return Response.json({ error, code }, { status });
@@ -9,18 +9,8 @@ function jsonError(status: number, error: string, code: string): Response {
 
 /** Only a signed-in person may read or change send confirmation — an agent
  *  or API key must never be able to switch off its own approval gate. */
-async function requireSession(
-  req: Request,
-): Promise<{ ok: true; caller: CallerOk } | { ok: false; response: Response }> {
-  const caller = await requireCaller(req, { allowOauth: false });
-  if (!caller.ok) return caller;
-  if (caller.via !== "session") {
-    return {
-      ok: false,
-      response: jsonError(403, "Sign in to manage sending", "forbidden"),
-    };
-  }
-  return { ok: true, caller };
+function requireSession(req: Request) {
+  return requireSessionCaller(req, "Sign in to manage sending");
 }
 
 async function sendingJson(db: AuditDb, userId: string): Promise<Response> {
@@ -37,7 +27,7 @@ async function sendingJson(db: AuditDb, userId: string): Promise<Response> {
 export async function getSending(req: Request): Promise<Response> {
   const gate = await requireSession(req);
   if (!gate.ok) return gate.response;
-  return sendingJson(gate.caller.db, gate.caller.user.id);
+  return sendingJson(gate.db, gate.user.id);
 }
 
 export async function patchSending(req: Request): Promise<Response> {
@@ -73,10 +63,10 @@ export async function patchSending(req: Request): Promise<Response> {
   }
 
   if (Object.keys(patch).length > 0) {
-    await gate.caller.db
+    await gate.db
       .update(accounts)
       .set(patch)
-      .where(eq(accounts.userId, gate.caller.user.id));
+      .where(eq(accounts.userId, gate.user.id));
   }
-  return sendingJson(gate.caller.db, gate.caller.user.id);
+  return sendingJson(gate.db, gate.user.id);
 }
