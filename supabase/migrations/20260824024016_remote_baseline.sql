@@ -1,9 +1,11 @@
--- Baseline: the full schema as of the Aug 24 2026 remote database, generated
--- from src/db/schema.ts (drizzle-kit generate). The production database
--- already records this version as applied, so supabase db push never runs it
--- there; it exists so a fresh database (self-host, local supabase start,
--- tests) can be built from supabase/migrations alone. Later migrations use
--- IF NOT EXISTS and apply cleanly on top of it.
+-- Baseline: the schema in src/db/schema.ts as of Sep 2026 (drizzle-kit
+-- generate), including columns the later bridge migrations add with IF NOT
+-- EXISTS, so those apply cleanly on top. It is not a dump of the Aug 24 2026
+-- production database: production already records this version as applied,
+-- so supabase db push never runs it there, and production may carry a
+-- foreign key to auth.users that schema.ts does not declare. This file exists
+-- so a fresh database (self-host, supabase start, tests) can be built from
+-- supabase/migrations alone.
 
 CREATE TABLE "accounts" (
 	"user_id" uuid PRIMARY KEY NOT NULL,

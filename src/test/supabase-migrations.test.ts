@@ -1,9 +1,15 @@
 import { readdir, readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { getTableName, isTable } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/pglite";
+import type * as DrizzleKitApi from "drizzle-kit/api";
 import { describe, expect, it } from "vitest";
 import * as schema from "../db/schema.js";
+
+const require = createRequire(import.meta.url);
+const { pushSchema } = require("drizzle-kit/api") as typeof DrizzleKitApi;
 
 const MIGRATIONS = join(process.cwd(), "supabase", "migrations");
 
@@ -31,6 +37,12 @@ describe("supabase/migrations", () => {
     expect(rows.map((r) => r.tablename)).toEqual(schemaTables);
   });
 
+  it("match the drizzle schema column for column", async () => {
+    const client = await freshDbFromMigrations();
+    const { statementsToExecute } = await pushSchema(schema, drizzle(client, { schema }));
+    expect(statementsToExecute).toEqual([]);
+  });
+
   it("enable row level security on every table", async () => {
     const client = await freshDbFromMigrations();
     const { rows } = await client.query<{ tablename: string }>(
@@ -40,10 +52,9 @@ describe("supabase/migrations", () => {
   });
 
   it("carry a dedicated RLS migration for databases created before the baseline had it", async () => {
-    const files = await readdir(MIGRATIONS);
-    const rls = files.find((f) => f.endsWith("_enable_rls.sql"));
-    expect(rls).toBeTruthy();
-    const sql = await readFile(join(MIGRATIONS, rls!), "utf8");
+    const rls = (await readdir(MIGRATIONS)).filter((f) => f.endsWith("_enable_rls.sql"));
+    expect(rls).toHaveLength(1);
+    const sql = await readFile(join(MIGRATIONS, rls[0]!), "utf8");
     for (const table of schemaTables) {
       expect(sql).toMatch(new RegExp(`ALTER TABLE "?${table}"? ENABLE ROW LEVEL SECURITY`));
     }
