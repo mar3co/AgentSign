@@ -630,6 +630,31 @@ describe("SendClient", () => {
     expect(emailInput.getAttribute("aria-invalid")).not.toBe("true");
   });
 
+  it("updates the signer email message when cleared to empty after being invalid", async () => {
+    stubDocumentsFetch();
+    render(createElement(SendClient));
+    await selectPdf();
+    ensureStep(/^document$/i);
+    fireEvent.change(screen.getByLabelText(/^title$/i), {
+      target: { value: "Repair authorization" },
+    });
+    ensureStep(/^signers$/i);
+    fireEvent.change(screen.getByLabelText(/^signer name$/i), {
+      target: { value: "Jane" },
+    });
+    fireEvent.change(screen.getByLabelText(/^signer email$/i), {
+      target: { value: "not-an-email" },
+    });
+    submitForm();
+    expect(
+      await findAlertText(/signer 1's email is not valid/i),
+    ).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(/^signer email$/i), {
+      target: { value: "" },
+    });
+    expect(await findAlertText(/signer 1 needs an email/i)).toBeTruthy();
+  });
+
   it("clears a signer error when that signer is removed", async () => {
     stubDocumentsFetch();
     render(createElement(SendClient));
@@ -737,6 +762,30 @@ describe("SendClient", () => {
     expect(
       (screen.getByLabelText(/^title$/i) as HTMLInputElement).value,
     ).toBe("");
+  });
+
+  it("keeps a title auto-filled from a heading after the heading is edited away", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => whoamiOk()));
+    render(createElement(SendClient));
+    await railReady();
+    fireEvent.click(
+      screen.getByRole("button", { name: /write the document instead/i }),
+    );
+    fireEvent.change(screen.getByLabelText(/document text/i), {
+      target: { value: "# Service Agreement\n\nSign here." },
+    });
+    ensureStep(/^document$/i);
+    expect(
+      (screen.getByLabelText(/^title$/i) as HTMLInputElement).value,
+    ).toBe("Service Agreement");
+    // Delete the leading "# " -- no line matches the heading pattern anymore,
+    // but the title the heading filled in should stick around.
+    fireEvent.change(screen.getByLabelText(/document text/i), {
+      target: { value: "Service Agreement\n\nSign here." },
+    });
+    expect(
+      (screen.getByLabelText(/^title$/i) as HTMLInputElement).value,
+    ).toBe("Service Agreement");
   });
 
   it("toggles between the dropzone and the write view", async () => {

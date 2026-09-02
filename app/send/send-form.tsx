@@ -275,9 +275,9 @@ export function SendForm(props: {
     mode === "write" ? markdown.trim().length > 0 : file !== null;
   const documentDone =
     hasDocument && title.trim().length > 0 && validEmail(senderEmail);
-  const signersDone = signers.every(
-    (s) => s.name.trim().length > 0 && validEmail(s.email),
-  );
+  const signersDone =
+    signers.length > 0 &&
+    signers.every((s) => s.name.trim().length > 0 && validEmail(s.email));
   const fieldsDone = placed.length > 0 || patches.length > 0;
 
   function toggleStep(id: StepId) {

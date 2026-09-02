@@ -182,7 +182,10 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
     setMarkdown(v);
     setTitle((prev) => {
       if (prev.trim() !== "" && prev !== autoTitleRef.current) return prev;
-      const auto = firstHeadingTitle(v) ?? "";
+      const auto = firstHeadingTitle(v);
+      // No heading yet — leave whatever title is there (blank, or an
+      // auto-fill from a previous file/heading) rather than blanking it.
+      if (!auto) return prev;
       autoTitleRef.current = auto;
       return auto;
     });
@@ -243,6 +246,9 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
         message: "That sender email is not valid.",
       };
     }
+    if (signers.length === 0) {
+      return { field: "signerName", message: "Add at least one signer." };
+    }
     for (let i = 0; i < signers.length; i++) {
       const s = signers[i]!;
       if (s.name.trim().length === 0) {
@@ -278,6 +284,11 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
     if (!now || now.field !== fieldError.field || now.index !== fieldError.index) {
       setError(null);
       setFieldError(null);
+    } else if (now.message !== fieldError.message) {
+      // Same field, but the failure kind changed (e.g. "not valid" ->
+      // cleared to empty) — show the fresh message instead of the stale one.
+      setError(now.message);
+      setFieldError(now);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [title, senderEmail, file, markdown, mode, signers, fieldError]);
