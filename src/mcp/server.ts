@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -86,6 +87,9 @@ function bearerFromRequest(req: Request): string | null {
   return token || null;
 }
 
+const require = createRequire(import.meta.url);
+const packageVersion = (require("../../package.json") as { version: string }).version;
+
 async function jsonOrText(res: Response): Promise<string> {
   const type = res.headers.get("content-type") ?? "";
   if (type.includes("application/json")) {
@@ -97,7 +101,7 @@ async function jsonOrText(res: Response): Promise<string> {
 export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer {
   const allowEnvKey = opts?.allowEnvKey === true;
   const server = new McpServer(
-    { name: "agentsign", version: "2.1.0" },
+    { name: "agentsign", version: packageVersion },
     {
       instructions:
         "AgentSign is a signing primitive. Human always signs. Keys authenticate the caller and never sign. No sign tool. Humans Finish. Agents Attest. Tools: send, status, download, attest, reject, verify, list_templates, send_template. Optional send fields (JSON); message, send/send_template values, order, send_email, completed_redirect_url, embed_origin. PDF {{sig}} tags work on Free one-offs.",
@@ -232,7 +236,7 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
     {
       title: "Download sealed PDF",
       description:
-        "GET /v1/documents/{id}.pdf. Requires a tmp or live Bearer key. Returns the sealed PDF after the human ceremony. 409 if not completed.",
+        "GET /v1/documents/{id}.pdf. Requires a tmp or live Bearer key. Returns the sealed PDF after the human ceremony as a base64-encoded embedded resource (application/pdf). 409 if not completed.",
       inputSchema: {
         id: z.string().min(1),
         api_key: z.string().optional(),
@@ -256,7 +260,21 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
         return toolText(await jsonOrText(res), true);
       }
       const bytes = new Uint8Array(await res.arrayBuffer());
-      return toolText(new TextDecoder("latin1").decode(bytes));
+      const fileName = `${args.id}.pdf`;
+      return {
+        content: [
+          { type: "text" as const, text: `${fileName} (${bytes.byteLength} bytes)` },
+          {
+            type: "resource" as const,
+            resource: {
+              uri: `agentsign://documents/${fileName}`,
+              mimeType: "application/pdf",
+              blob: Buffer.from(bytes).toString("base64"),
+            },
+          },
+        ],
+        isError: false,
+      };
     },
   );
 
