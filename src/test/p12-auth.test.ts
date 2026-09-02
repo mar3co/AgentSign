@@ -4,13 +4,15 @@ import { sessionCookieAttrs } from "../lib/auth/supabase.js";
 import { loadSigningP12, makeDevP12 } from "../lib/pdf/devP12.js";
 
 describe("production P12 and session cookie flags", () => {
-  it("loadSigningP12 throws when P12_PATH is empty outside tests", () => {
+  it("loadSigningP12 throws when P12_BASE64 and P12_PATH are blank outside tests", () => {
     const prevVitest = process.env.VITEST;
     const prevNode = process.env.NODE_ENV;
     const prevPath = process.env.P12_PATH;
+    const prevBase64 = process.env.P12_BASE64;
     delete process.env.VITEST;
     process.env.NODE_ENV = "production";
-    process.env.P12_PATH = "";
+    process.env.P12_PATH = " ";
+    process.env.P12_BASE64 = "";
     resetEnvCache();
     try {
       expect(() => loadSigningP12()).toThrow(/P12_PATH/);
@@ -21,6 +23,8 @@ describe("production P12 and session cookie flags", () => {
       else process.env.NODE_ENV = prevNode;
       if (prevPath === undefined) delete process.env.P12_PATH;
       else process.env.P12_PATH = prevPath;
+      if (prevBase64 === undefined) delete process.env.P12_BASE64;
+      else process.env.P12_BASE64 = prevBase64;
       resetEnvCache();
     }
   });

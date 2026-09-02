@@ -52,17 +52,13 @@ function allowDevP12(): boolean {
  */
 export function loadSigningP12(): { p12: Buffer; passphrase: string } {
   const env = getEnv();
-  if (env.P12_BASE64.trim()) {
-    return {
-      p12: Buffer.from(env.P12_BASE64.trim(), "base64"),
-      passphrase: env.P12_PASSPHRASE,
-    };
+  const base64 = env.P12_BASE64.trim();
+  const path = env.P12_PATH.trim();
+  if (base64) {
+    return { p12: Buffer.from(base64, "base64"), passphrase: env.P12_PASSPHRASE };
   }
-  if (env.P12_PATH) {
-    return {
-      p12: readFileSync(env.P12_PATH),
-      passphrase: env.P12_PASSPHRASE,
-    };
+  if (path) {
+    return { p12: readFileSync(path), passphrase: env.P12_PASSPHRASE };
   }
   if (!allowDevP12()) {
     throw new Error("P12_BASE64 or P12_PATH is required");
