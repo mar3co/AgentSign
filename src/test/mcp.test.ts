@@ -2,13 +2,14 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { GET as getLlms } from "../../app/llms.txt/route.js";
 import { GET as getOpenApi } from "../../app/openapi.json/route.js";
 import { openapi } from "../openapi.js";
+import { resetEnvCache } from "../env.js";
 import pkg from "../../package.json" with { type: "json" };
 import { POST as postMcp } from "../../app/mcp/route.js";
 import { POST as postOtp } from "../../app/v1/documents/[id]/otp/route.js";
@@ -85,6 +86,46 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
     expect(body.toLowerCase()).toMatch(/human always signs/);
     expect(body).toMatch(/No sign tool/);
     expect(body).not.toMatch(/^- sign —/m);
+  });
+
+  it("GET /llms.txt prints the MCP endpoint on the configured origin", async () => {
+    vi.stubEnv("APP_URL", "https://agentsign.example");
+    resetEnvCache();
+    try {
+      const body = await (await getLlms(new Request("http://sign.test/llms.txt"))).text();
+      expect(body).toContain("https://agentsign.example/mcp");
+      expect(body).toContain("agentsign https://agentsign.example/mcp");
+    } finally {
+      vi.unstubAllEnvs();
+      resetEnvCache();
+    }
+  });
+
+  it("GET /llms.txt gives the MCP endpoint, OAuth discovery, and agent facts", async () => {
+    const res = await getLlms(new Request("http://sign.test/llms.txt"));
+    const body = await res.text();
+    expect(body).toContain("/mcp");
+    expect(body).toContain("oauth-authorization-server");
+    expect(body).toContain("oauth-protected-resource");
+    expect(body).toContain("/oauth/register");
+    expect(body).toMatch(/PKCE/);
+    expect(body).toContain("claude mcp add --transport http agentsign");
+    expect(body).toContain("party.ready");
+    expect(body).toContain("document.expired");
+    expect(body).toContain("X-Sign-Signature");
+    expect(body).toContain("pending_sender");
+    for (const code of [
+      "human_required",
+      "cannot_attest",
+      "unknown_agent",
+      "agent_limit",
+      "pro_required",
+      "flag_off",
+      "invalid_request",
+      "slug_taken",
+    ]) {
+      expect(body).toContain(code);
+    }
   });
 
   it("documents AgentSign in OpenAPI and MCP server metadata", async () => {

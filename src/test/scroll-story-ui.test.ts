@@ -122,7 +122,7 @@ describe("home scroll story", () => {
       screen
         .getByRole("link", { name: "Connect your AI agent" })
         .getAttribute("href"),
-    ).toBe("/llms.txt");
+    ).toBe("/docs#mcp");
     expect(
       screen.getByRole("link", { name: "See pricing" }).getAttribute("href"),
     ).toBe("/upgrade");
