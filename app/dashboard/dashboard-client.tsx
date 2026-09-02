@@ -7,6 +7,7 @@ import {
   StatusBadge,
   type DocumentListItem,
 } from "@/app/documents/documents-list";
+import { useWorkspaceTimezone } from "@/app/lib/use-workspace-timezone";
 import { DocumentsFigure } from "@/components/documents-figure";
 import { LinkButton } from "@/components/link-button";
 import { LoadingList } from "@/components/loading-list";
@@ -66,7 +67,7 @@ const COMPLETED_SERIES = [
 export function DashboardClient() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [documents, setDocuments] = useState<DocumentListItem[] | null>(null);
-  const [timeZone, setTimeZone] = useState<string | null>(null);
+  const timeZone = useWorkspaceTimezone();
   const [error, setError] = useState<string | null>(null);
   const { items: activity } = useActivity();
 
@@ -74,10 +75,9 @@ export function DashboardClient() {
     let cancelled = false;
     (async () => {
       try {
-        const [statsRes, envRes, wsRes] = await Promise.all([
+        const [statsRes, envRes] = await Promise.all([
           fetch("/v1/stats", { credentials: "include" }),
           fetch("/v1/documents", { credentials: "include" }),
-          fetch("/v1/workspace", { credentials: "include" }),
         ]);
         if (statsRes.status === 401 || envRes.status === 401) {
           window.location.href = `/login?next=${encodeURIComponent("/dashboard")}`;
@@ -100,10 +100,6 @@ export function DashboardClient() {
               signers: e.signers ?? [],
             })),
           );
-          if (wsRes.ok) {
-            const ws = (await wsRes.json()) as { timezone?: string | null };
-            if (ws.timezone) setTimeZone(ws.timezone);
-          }
         }
       } catch {
         if (!cancelled) setError("Could not load the dashboard.");

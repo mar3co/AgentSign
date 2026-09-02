@@ -196,7 +196,6 @@ export async function verifyDocumentOtp(
   try {
     const live = sendLiveEmail({
       title: document.title,
-      tmpKeyShownInResponse: true,
       senderEmail: document.senderEmail,
       brand: mailBrand,
     });
@@ -216,6 +215,8 @@ export async function verifyDocumentOtp(
   return Response.json({
     id: document.id,
     status: "pending",
+    expires_at: document.expiresAt.toISOString(),
+    shred_at: document.shredAt.toISOString(),
     key: tmp.raw,
     signers: invited.signers,
   });

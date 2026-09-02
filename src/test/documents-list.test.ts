@@ -3,10 +3,8 @@ import { createElement } from "react";
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { DocumentsClient } from "../../app/documents/documents-client.js";
-import {
-  DocumentsList,
-  formatSentDate,
-} from "../../app/documents/documents-list.js";
+import { DocumentsList } from "../../app/documents/documents-list.js";
+import { formatSentDate } from "@/app/lib/format-date";
 
 describe("formatSentDate", () => {
   it("uses the workspace timezone when given one", () => {
@@ -108,6 +106,23 @@ describe("DocumentsList", () => {
     );
     expect(screen.getByRole("link", { name: /download/i })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /void/i })).toBeNull();
+  });
+
+  it("pages to and highlights the row a ?id= deep link names", () => {
+    // Page size is 10, so the 12th document is off the first page until the
+    // deep link jumps to it.
+    const documents = Array.from({ length: 12 }, (_, i) => ({
+      id: `env_${i}`,
+      title: `Document ${i}`,
+      status: "pending",
+      createdAt: new Date(2026, 0, 12 - i).toISOString(),
+    }));
+    render(
+      createElement(DocumentsList, { documents, focusId: "env_11" }),
+    );
+    const row = screen.getByText("Document 11").closest("tr");
+    expect(row).toBeTruthy();
+    expect(row!.className).toContain("bg-muted");
   });
 
   it("shows empty state copy when there are no documents", () => {

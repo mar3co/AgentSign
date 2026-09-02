@@ -270,6 +270,16 @@ export const openapi = {
                   properties: {
                     id: { type: "string" },
                     status: { type: "string" },
+                    expires_at: {
+                      type: "string",
+                      description:
+                        "ISO 8601 deadline for signing. Absent while status is pending_sender.",
+                    },
+                    shred_at: {
+                      type: "string",
+                      description:
+                        "ISO 8601 time the stored file is shredded. Absent while status is pending_sender.",
+                    },
                     signers: { type: "array", items: { type: "object" } },
                   },
                 },

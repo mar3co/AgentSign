@@ -187,10 +187,11 @@ export function reminderEmail(input: {
   };
 }
 
+/** Sender's "it went out" note. Never carries the tmp key: that key deletes
+ *  the document and reveals every signer's link, so it stays in the API
+ *  response to the caller that made the send. */
 export function sendLiveEmail(input: {
   title: string;
-  tmpKeyShownInResponse: boolean;
-  tmpKey?: string;
   senderEmail?: string;
   brand?: MailBrand;
 }): Pick<MailMessage, "subject" | "text" | "html"> {
@@ -199,9 +200,6 @@ export function sendLiveEmail(input: {
   ];
   if (input.brand?.displayName && input.senderEmail) {
     lines.unshift(`${senderWho(input.senderEmail, input.brand)}`, ``);
-  }
-  if (!input.tmpKeyShownInResponse && input.tmpKey) {
-    lines.push(``, `Your temporary API key (shown once): ${input.tmpKey}`);
   }
   const text = lines.join("\n");
   return {
