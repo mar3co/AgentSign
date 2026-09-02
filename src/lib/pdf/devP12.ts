@@ -46,18 +46,42 @@ function allowDevP12(): boolean {
   return false;
 }
 
-/** Production sets P12_PATH; tests may generate a throwaway cert. */
+/**
+ * Production sets P12_BASE64 (Vercel has no file to point P12_PATH at) or
+ * P12_PATH (self-host); tests may generate a throwaway cert.
+ */
 export function loadSigningP12(): { p12: Buffer; passphrase: string } {
   const env = getEnv();
-  if (env.P12_PATH) {
-    return {
-      p12: readFileSync(env.P12_PATH),
-      passphrase: env.P12_PASSPHRASE,
-    };
+  const base64 = env.P12_BASE64.trim();
+  const path = env.P12_PATH.trim();
+  if (base64) {
+    return checked(Buffer.from(base64, "base64"), env.P12_PASSPHRASE, "P12_BASE64");
+  }
+  if (path) {
+    return checked(readFileSync(path), env.P12_PASSPHRASE, "P12_PATH");
   }
   if (!allowDevP12()) {
-    throw new Error("P12_PATH is required");
+    throw new Error("P12_BASE64 or P12_PATH is required");
   }
   const passphrase = env.P12_PASSPHRASE || "dev";
   return { p12: makeDevP12(passphrase), passphrase };
+}
+
+/**
+ * Buffer.from(_, "base64") never throws, so a value cut short in a dashboard
+ * would otherwise surface only as a generic failure on every Finish. Parse it
+ * once here and name the variable.
+ */
+function checked(
+  p12: Buffer,
+  passphrase: string,
+  source: string,
+): { p12: Buffer; passphrase: string } {
+  try {
+    forge.pkcs12.pkcs12FromAsn1(forge.asn1.fromDer(p12.toString("binary")), false, passphrase);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(`${source} is not a PKCS#12 file for P12_PASSPHRASE: ${reason}`);
+  }
+  return { p12, passphrase };
 }

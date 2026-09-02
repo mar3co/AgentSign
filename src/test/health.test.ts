@@ -25,6 +25,6 @@ describe("GET /health", () => {
     expect(body.missing).toContain("SUPABASE_ANON_KEY");
     expect(body.missing).toContain("RESEND_API_KEY");
     expect(body.missing).toContain("FROM_EMAIL");
-    expect(body.missing).toContain("P12_PATH");
+    expect(body.missing).toContain("P12_BASE64 or P12_PATH");
   });
 });
