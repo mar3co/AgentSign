@@ -216,6 +216,8 @@ export async function verifyDocumentOtp(
   return Response.json({
     id: document.id,
     status: "pending",
+    expires_at: document.expiresAt.toISOString(),
+    shred_at: document.shredAt.toISOString(),
     key: tmp.raw,
     signers: invited.signers,
   });

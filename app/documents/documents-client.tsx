@@ -12,6 +12,12 @@ export function DocumentsClient() {
   const [documents, setDocuments] = useState<DocumentListItem[] | null>(null);
   const [timeZone, setTimeZone] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // `/documents?id=…` deep link, e.g. from the screen shown after a send.
+  const [focusId, setFocusId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setFocusId(new URLSearchParams(window.location.search).get("id"));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -117,6 +123,7 @@ export function DocumentsClient() {
       onVoid={onVoid}
       onSaveTemplate={onSaveTemplate}
       timeZone={timeZone}
+      focusId={focusId}
     />
   );
 }
