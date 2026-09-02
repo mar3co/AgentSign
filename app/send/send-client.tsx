@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/sidebar";
 import { formatSentDate } from "@/app/lib/format-date";
 import { loadPdfjs } from "@/app/lib/load-pdfjs";
+import { useWorkspaceTimezone } from "@/app/lib/use-workspace-timezone";
 import {
   dropOutOfRangeFields,
   placedFromDetected,
@@ -52,9 +53,19 @@ type Done = {
   signers: DoneSigner[];
 };
 
-function CopyLinkButton({ url, who }: { url: string; who: string }) {
+function CopyLinkButton({
+  url,
+  who,
+  origin,
+}: {
+  url: string;
+  who: string;
+  origin: string | null;
+}) {
   const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
-  const href = new URL(url, window.location.origin).href;
+  // Same origin the invite emails use, so a copied link matches the emailed
+  // one. Falls back to this tab when the app has no configured URL.
+  const href = new URL(url, origin ?? window.location.origin).href;
   // No clipboard (plain-http self-host, older browser): show the link itself.
   if (state === "failed") {
     return (
@@ -83,7 +94,13 @@ function CopyLinkButton({ url, who }: { url: string; who: string }) {
   );
 }
 
-export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
+export function SendClient({
+  aiDetect = false,
+  origin = null,
+}: {
+  aiDetect?: boolean;
+  origin?: string | null;
+}) {
   const [senderEmail, setSenderEmail] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -106,8 +123,10 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
   const [previewSettled, setPreviewSettled] = useState(true);
   const [replaceNotice, setReplaceNotice] = useState<string | null>(null);
   const [documentId, setDocumentId] = useState<string | null>(null);
-  const [timeZone, setTimeZone] = useState<string | null>(null);
+  const timeZone = useWorkspaceTimezone();
   const [done, setDone] = useState<Done | null>(null);
+  // Signing links are hidden until asked for: each one signs as that person.
+  const [showLinks, setShowLinks] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -133,15 +152,6 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
         if (!cancelled) setSenderEmail(json?.email ?? "");
       } catch {
         if (!cancelled) setSenderEmail("");
-      }
-      try {
-        const ws = await fetch("/v1/workspace", { credentials: "include" });
-        if (ws.ok) {
-          const body = (await ws.json()) as { timezone?: string | null };
-          if (!cancelled && body.timezone) setTimeZone(body.timezone);
-        }
-      } catch {
-        /* timezone is optional */
       }
     })();
     return () => {
@@ -402,6 +412,7 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
   // session already resolved is kept.
   function sendAnother() {
     setDone(null);
+    setShowLinks(false);
     setDocumentId(null);
     setTitle("");
     setFile(null);
@@ -472,6 +483,12 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
 
   if (done) {
     const deadline = done.expiresAt ? formatSentDate(done.expiresAt, timeZone) : "";
+    // Every link exists up front, but in a sequential send a later signer's
+    // link answers "waiting on the previous signer" until their turn, so
+    // only offer the one that works now.
+    const linkReady = done.signers.map(
+      (s, i) => Boolean(s.sign_url) && (order === "parallel" || i === 0),
+    );
     // The API answers with emails only; names come from the rows just filled in.
     const nameFor = (email: string) =>
       signers.find((s) => s.email.trim().toLowerCase() === email.toLowerCase())
@@ -517,6 +534,25 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
+              {linkReady.some(Boolean) ? (
+                <div className="flex flex-col gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="self-start"
+                    aria-expanded={showLinks}
+                    onClick={() => setShowLinks((v) => !v)}
+                  >
+                    {showLinks ? "Hide signing links" : "Show signing links"}
+                  </Button>
+                  {showLinks ? (
+                    <p className="text-sm text-muted-foreground">
+                      Each link signs as that person, so do not forward it.
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
               <ul className="flex flex-col gap-2">
                 {done.signers.map((signer, i) => {
                   const name = nameFor(signer.email);
@@ -533,19 +569,19 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
                           {signer.email}
                         </span>
                       </span>
-                      {/* Every link exists up front, but in a sequential
-                          send a later signer's link answers "waiting on the
-                          previous signer" until their turn, so only offer
-                          the one that works now. */}
-                      {signer.sign_url && (order === "parallel" || i === 0) ? (
-                        <CopyLinkButton url={signer.sign_url} who={name} />
-                      ) : (
+                      {!linkReady[i] ? (
                         <span className="text-sm text-muted-foreground">
                           {i > 0
                             ? `Signs after ${nameFor(done.signers[i - 1]!.email)}`
                             : "Gets their link shortly"}
                         </span>
-                      )}
+                      ) : showLinks ? (
+                        <CopyLinkButton
+                          url={signer.sign_url!}
+                          who={name}
+                          origin={origin}
+                        />
+                      ) : null}
                     </li>
                   );
                 })}

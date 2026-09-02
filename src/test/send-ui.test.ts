@@ -166,10 +166,33 @@ function stubDocumentsFetch() {
   return bodies;
 }
 
+// Signing links sit behind a disclosure on the done screen.
+function revealLinks() {
+  fireEvent.click(screen.getByRole("button", { name: /show signing links/i }));
+}
+
+let restoreClipboard: (() => void) | null = null;
+
+function stubClipboard(writeText: () => Promise<void>) {
+  const original = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  const spy = vi.fn(writeText);
+  Object.defineProperty(navigator, "clipboard", {
+    value: { writeText: spy },
+    configurable: true,
+  });
+  restoreClipboard = () => {
+    if (original) Object.defineProperty(navigator, "clipboard", original);
+    else delete (navigator as { clipboard?: unknown }).clipboard;
+  };
+  return spy;
+}
+
 describe("SendClient", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    restoreClipboard?.();
+    restoreClipboard = null;
     previewControls.auto = true;
   });
 
@@ -505,6 +528,11 @@ describe("SendClient", () => {
     expect(screen.queryByText(/sign_tmp_abc/)).toBeNull();
     expect(screen.queryByText(/keep this key/i)).toBeNull();
     expect(screen.getByText("jane@example.com")).toBeTruthy();
+    // A signing link signs as that person, so it stays behind a disclosure.
+    expect(screen.queryByRole("button", { name: /copy link/i })).toBeNull();
+    expect(screen.queryByText(/do not forward/i)).toBeNull();
+    revealLinks();
+    expect(screen.getByText(/do not forward/i)).toBeTruthy();
     expect(screen.getByRole("button", { name: /copy link/i })).toBeTruthy();
     expect(screen.getByText(/signers have until sep 30, 2026 to sign/i))
       .toBeTruthy();
@@ -534,23 +562,35 @@ describe("SendClient", () => {
     expect(rows[1]!.textContent).toContain("bob@example.com");
     expect(rows[1]!.textContent).toContain("Signs after Jane");
     // Only the signer whose turn it is gets a copy button, named for them.
+    revealLinks();
     expect(screen.getAllByRole("button", { name: /copy link/i })).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Copy link for Jane" })).toBeTruthy();
   });
 
   it("shows the link in place when the clipboard write fails", async () => {
     stubDirectSend([{ email: "jane@example.com", sign_url: "/s/tok" }]);
-    Object.defineProperty(navigator, "clipboard", {
-      value: { writeText: vi.fn(async () => Promise.reject(new Error("denied"))) },
-      configurable: true,
-    });
+    stubClipboard(async () => Promise.reject(new Error("denied")));
     render(createElement(SendClient));
     await selectPdf();
     await fillAndSubmit();
     await screen.findByText(/^sent$/i);
+    revealLinks();
     fireEvent.click(screen.getByRole("button", { name: /copy link/i }));
     const link = await screen.findByRole("link", { name: /\/s\/tok/i });
     expect(link.getAttribute("href")).toContain("/s/tok");
+  });
+
+  it("copies the link on the origin the invite emails use", async () => {
+    stubDirectSend([{ email: "jane@example.com", sign_url: "/s/tok" }]);
+    const writeText = stubClipboard(async () => {});
+    render(createElement(SendClient, { origin: "https://sign.example.com" }));
+    await selectPdf();
+    await fillAndSubmit();
+    await screen.findByText(/^sent$/i);
+    revealLinks();
+    fireEvent.click(screen.getByRole("button", { name: /copy link/i }));
+    await screen.findByRole("button", { name: /copied/i });
+    expect(writeText).toHaveBeenCalledWith("https://sign.example.com/s/tok");
   });
 
   it("Send another clears the editor without a page load", async () => {

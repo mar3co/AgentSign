@@ -120,12 +120,13 @@ describe("send confirmation", () => {
     expect(Number.isNaN(Date.parse(done.expires_at))).toBe(false);
     expect(done.shred_at).toBe(done.expires_at);
     expect(sent.some((m) => m.to === "jane@example.com")).toBe(true);
-    // The done screen no longer displays the key, so the sender's "is live"
-    // email is the only place it reaches them.
+    // The key comes back in this response and nowhere else. It grants
+    // delete and reveals every signer's link, so it never goes out by email.
     const live = sent.find(
       (m) => m.to === "shop@example.com" && /is live/i.test(m.subject),
     );
-    expect(live?.text).toContain(done.key);
+    expect(live).toBeTruthy();
+    expect(live!.text).not.toContain(done.key);
   });
 
   it("sends directly when the agent confirmation is turned off", async () => {
