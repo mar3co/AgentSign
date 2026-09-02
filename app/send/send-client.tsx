@@ -395,10 +395,12 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
     // only when the document is sent.
     if (f.type !== "application/pdf" && !/\.pdf$/i.test(f.name)) {
       setError("AI field detection works on PDFs. DOCX files are converted when you send.");
+      setFieldError(null);
       return;
     }
     setAiBusy(true);
     setError(null);
+    setFieldError(null);
     try {
       const data = new FormData();
       data.set("file", f, f.name);

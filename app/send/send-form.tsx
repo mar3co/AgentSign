@@ -627,6 +627,7 @@ export function SendForm(props: {
       <form
         id={SEND_FORM_ID}
         onSubmit={onSubmit}
+        noValidate
         className="flex w-full flex-1 flex-col"
       >
         <div
@@ -646,14 +647,21 @@ export function SendForm(props: {
                 dropAnywhere
                 prompt="Drag & Drop or Choose a file to upload"
                 hint="PDF, Word, markdown, or plain text. Your signer gets an email link in seconds."
+                ariaInvalid={fieldError?.field === "document"}
+                ariaDescribedBy={
+                  fieldError?.field === "document" ? "document-error" : undefined
+                }
                 onFileChange={(f) => {
                   setFileNotice(null);
                   onFileChange(f);
                 }}
-                onTextFile={({ text }) => {
+                onTextFile={({ name, text }) => {
                   setFileNotice(null);
                   setMarkdown(text);
                   setMode("write");
+                  if (!firstHeadingTitle(text) && title.trim().length === 0) {
+                    setTitle(titleFromFilename(name));
+                  }
                 }}
                 onUnsupported={(name) =>
                   setFileNotice(
@@ -668,7 +676,7 @@ export function SendForm(props: {
                 </Alert>
               ) : null}
               {fieldError?.field === "document" ? (
-                <p className="mx-auto text-xs text-destructive">
+                <p id="document-error" className="mx-auto text-xs text-destructive">
                   {fieldError.message}
                 </p>
               ) : null}

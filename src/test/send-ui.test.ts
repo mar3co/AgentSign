@@ -197,6 +197,15 @@ describe("SendClient", () => {
     expect(screen.queryByRole("button", { name: /remove signer/i })).toBeNull();
   });
 
+  it("skips native constraint validation so validateSend controls errors", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => whoamiOk()));
+    render(createElement(SendClient));
+    await railReady();
+    const form = document.getElementById("send-form");
+    expect(form).toBeTruthy();
+    expect((form as HTMLFormElement).noValidate).toBe(true);
+  });
+
   it("adds and removes signer rows", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => whoamiOk()));
     render(createElement(SendClient));
