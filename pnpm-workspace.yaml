@@ -1,7 +1,11 @@
+# pnpm 11 (which Vercel now picks for this project) refuses to install while
+# these are undecided; pnpm 10 only warned. Production has run with their
+# install scripts skipped: bcrypt and sharp load prebuilt binaries at runtime
+# and esbuild's script only swaps in a platform binary that already resolves.
 allowBuilds:
-  bcrypt: set this to true or false
-  esbuild: set this to true or false
-  sharp: set this to true or false
+  bcrypt: false
+  esbuild: false
+  sharp: false
 # Vercel's packager rejects traced files that cross pnpm's node_modules
 # symlinks, and the tracer misses runtime payloads inside the .pnpm store
 # (Chromium bin, pdfjs worker, @napi-rs/canvas). A hoisted layout gives
