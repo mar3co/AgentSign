@@ -11,7 +11,7 @@ const envSchema = z.object({
   APP_URL: z.string().default(""),
   APP_ORIGIN: z.string().default(""),
   RESEND_API_KEY: z.string().default(""),
-  FROM_EMAIL: z.string().default("sign@localhost"),
+  FROM_EMAIL: z.string().default(""),
   STRIPE_SECRET_KEY: z.string().default(""),
   STRIPE_WEBHOOK_SECRET: z.string().default(""),
   STRIPE_PRICE_PRO: z.string().default(""),
