@@ -18,7 +18,7 @@ const errorResponse = {
 
 const bearer = [{ bearerAuth: [] }];
 const optionalBearer = [{ bearerAuth: [] }, {}];
-const liveOrSession = [{ bearerAuth: [] }];
+const liveOrSession = [{ bearerAuth: [] }, { sessionCookie: [] }];
 
 const idParam = {
   name: "id",
@@ -1409,7 +1409,7 @@ export const openapi = {
         security: [{ sessionCookie: [] }],
         tags: ["Internal"],
         requestBody: {
-          required: false,
+          required: true,
           content: {
             "application/json": {
               schema: {
@@ -1499,6 +1499,7 @@ export const openapi = {
         summary: "Ceremony logo bytes",
         description:
           "Signing token only. 200 image bytes if that document's team has a logo; 404 otherwise. Not a public account URL.",
+        security: [],
         parameters: [tokenParam],
         responses: {
           "200": {
@@ -1518,6 +1519,7 @@ export const openapi = {
         summary: "Original PDF preview for the ceremony",
         description:
           "Signing token only. Returns the original unsigned PDF while the signer may open the ceremony. 409 sequential_wait / 410 expired as the ceremony state GET.",
+        security: [],
         parameters: [tokenParam],
         responses: {
           "200": {

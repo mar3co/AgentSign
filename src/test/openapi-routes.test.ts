@@ -48,8 +48,9 @@ function methodsFor(file: string): HttpMethod[] {
   const src = readFileSync(file, "utf8");
   return HTTP_METHODS.filter((method) => {
     const fnExport = new RegExp(`export\\s+(?:async\\s+)?function\\s+${method}\\b`);
-    const constExport = new RegExp(`export\\s+const\\s+${method}\\s*=`);
-    return fnExport.test(src) || constExport.test(src);
+    const constExport = new RegExp(`export\\s+const\\s+${method}\\s*(?::\\s*[^=]+)?=`);
+    const reExport = new RegExp(`export\\s*\\{[^}]*\\bas\\s+${method}\\b[^}]*\\}`);
+    return fnExport.test(src) || constExport.test(src) || reExport.test(src);
   });
 }
 
