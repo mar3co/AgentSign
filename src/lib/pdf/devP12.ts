@@ -46,9 +46,18 @@ function allowDevP12(): boolean {
   return false;
 }
 
-/** Production sets P12_PATH; tests may generate a throwaway cert. */
+/**
+ * Production sets P12_BASE64 (Vercel has no file to point P12_PATH at) or
+ * P12_PATH (self-host); tests may generate a throwaway cert.
+ */
 export function loadSigningP12(): { p12: Buffer; passphrase: string } {
   const env = getEnv();
+  if (env.P12_BASE64.trim()) {
+    return {
+      p12: Buffer.from(env.P12_BASE64.trim(), "base64"),
+      passphrase: env.P12_PASSPHRASE,
+    };
+  }
   if (env.P12_PATH) {
     return {
       p12: readFileSync(env.P12_PATH),
@@ -56,7 +65,7 @@ export function loadSigningP12(): { p12: Buffer; passphrase: string } {
     };
   }
   if (!allowDevP12()) {
-    throw new Error("P12_PATH is required");
+    throw new Error("P12_BASE64 or P12_PATH is required");
   }
   const passphrase = env.P12_PASSPHRASE || "dev";
   return { p12: makeDevP12(passphrase), passphrase };

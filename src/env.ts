@@ -23,6 +23,7 @@ const envSchema = z.object({
   FREE_SEND_LIMIT: z.string().default("20"),
   FREE_SEND_WINDOW_DAYS: z.string().default("30"),
   P12_PATH: z.string().default(""),
+  P12_BASE64: z.string().default(""),
   P12_PASSPHRASE: z.string().default(""),
   DEV_OFFLINE: z.string().default(""),
   SELF_HOST: z.string().default(""),

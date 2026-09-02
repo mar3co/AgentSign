@@ -22,6 +22,6 @@ describe("GET /health", () => {
     const body = await res.json();
     expect(body.ok).toBe(false);
     expect(body.missing).toContain("RESEND_API_KEY");
-    expect(body.missing).toContain("P12_PATH");
+    expect(body.missing).toContain("P12_BASE64 or P12_PATH");
   });
 });

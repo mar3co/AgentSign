@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { resetEnvCache } from "../env.js";
 import { sessionCookieAttrs } from "../lib/auth/supabase.js";
-import { loadSigningP12 } from "../lib/pdf/devP12.js";
+import { loadSigningP12, makeDevP12 } from "../lib/pdf/devP12.js";
 
 describe("production P12 and session cookie flags", () => {
   it("loadSigningP12 throws when P12_PATH is empty outside tests", () => {
@@ -48,6 +48,27 @@ describe("production P12 and session cookie flags", () => {
       else process.env.P12_PATH = prevPath;
       if (prevVercel === undefined) delete process.env.VERCEL;
       else process.env.VERCEL = prevVercel;
+      resetEnvCache();
+    }
+  });
+
+  it("loadSigningP12 decodes P12_BASE64 on Vercel production", () => {
+    const saved = { ...process.env };
+    const expected = makeDevP12("pw");
+    delete process.env.VITEST;
+    process.env.VERCEL = "1";
+    process.env.NODE_ENV = "production";
+    process.env.P12_PATH = "";
+    process.env.P12_BASE64 = expected.toString("base64");
+    process.env.P12_PASSPHRASE = "pw";
+    resetEnvCache();
+    try {
+      const loaded = loadSigningP12();
+      expect(Buffer.from(loaded.p12).equals(expected)).toBe(true);
+      expect(loaded.passphrase).toBe("pw");
+    } finally {
+      for (const key of Object.keys(process.env)) delete process.env[key];
+      Object.assign(process.env, saved);
       resetEnvCache();
     }
   });
