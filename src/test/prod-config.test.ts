@@ -4,9 +4,11 @@ import { missingProductionConfig } from "../lib/prodConfig.js";
 const full = {
   DATABASE_URL: "postgres://x",
   SUPABASE_URL: "https://x.supabase.co",
+  SUPABASE_ANON_KEY: "anon",
   SUPABASE_SERVICE_ROLE_KEY: "svc",
   APP_URL: "https://agentsign.co",
   RESEND_API_KEY: "re_x",
+  FROM_EMAIL: "AgentSign <sign@agentsign.co>",
   CRON_SECRET: "c",
   WEBHOOK_KEK: "k",
   P12_PATH: "/var/cert.p12",
@@ -19,8 +21,12 @@ describe("missingProductionConfig", () => {
   });
 
   it("names each missing secret in production", () => {
-    const env = { ...full, RESEND_API_KEY: "", CRON_SECRET: " " };
-    expect(missingProductionConfig(env, "production")).toEqual(["RESEND_API_KEY", "CRON_SECRET"]);
+    const env = { ...full, SUPABASE_ANON_KEY: "", FROM_EMAIL: "", CRON_SECRET: " " };
+    expect(missingProductionConfig(env, "production")).toEqual([
+      "SUPABASE_ANON_KEY",
+      "FROM_EMAIL",
+      "CRON_SECRET",
+    ]);
   });
 
   it("accepts P12_BASE64 in place of P12_PATH", () => {
