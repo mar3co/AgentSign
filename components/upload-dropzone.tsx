@@ -41,6 +41,8 @@ export function UploadDropzone({
   onFileChange,
   onTextFile,
   onUnsupported,
+  ariaInvalid,
+  ariaDescribedBy,
 }: {
   id: string;
   name: string;
@@ -61,6 +63,10 @@ export function UploadDropzone({
   /** When set alongside onTextFile, anything that is not a PDF, text, or
       Word file is cleared from the input and reported here by name. */
   onUnsupported?: (name: string) => void;
+  /** Wired onto the underlying file input so a validation message elsewhere
+      on the page can be associated with it. */
+  ariaInvalid?: boolean;
+  ariaDescribedBy?: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<{ name: string; size: number } | null>(null);
@@ -183,6 +189,8 @@ export function UploadDropzone({
           required={required}
           className="sr-only"
           aria-label={prompt}
+          aria-invalid={ariaInvalid || undefined}
+          aria-describedby={ariaDescribedBy}
           onChange={readInput}
         />
         <Upload aria-hidden className="size-8 stroke-1" />
