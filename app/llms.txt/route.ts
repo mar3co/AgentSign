@@ -32,15 +32,15 @@ There is no sign, complete, or create_template tool. Branding, agents, and team 
 
 ## Agents
 
-An agent party is a party with kind=agent and a slug registered on the team (max 10). It has no /s/ token and no ceremony; it attests or rejects over the API. Complete needs every party done and at least one human signed_at, unless the agent_only_attest flag is on. Agent parties need Pro (self-host is entitled) and the agent_parties flag.
+An agent party is a party with kind=agent and a slug registered on the team (max 10). It has no /s/ token and no ceremony; it attests or rejects over the API. An agent party carries the account owner's email address; a different email is rejected with invalid_request. Complete needs every party done and at least one human signed_at, unless the agent_only_attest flag is on. Agent parties need Pro (self-host is entitled) and the agent_parties flag.
 
-sign_agent_ keys attest and reject as their own agent only. A sign_live_ key, a session, or an OAuth grant attests by naming an agent slug the team owns (body { agent }); a grant only for the agents it was allowed. Sending needs sign_live_ or an OAuth grant.
+sign_agent_ keys attest and reject as their own agent only. A sign_live_ key, a session, or an OAuth grant attests by naming an agent slug the team owns (body { agent }); a grant only for the agents it was allowed. Sending needs a live key, a session, or an OAuth grant.
 
 Confirm sends: a send from an OAuth grant is held at status pending_sender until the account owner enters an emailed 6-digit code. Default on; the owner turns it off at /settings/security. sign_live_ keys always send at once.
 
 Agent webhooks: PUT /v1/agents/{id}/webhook sets an https URL and returns the HMAC secret once. Events: party.ready, document.completed, document.declined, document.expired. Body { event, id, agent, status }. Headers X-Sign-Timestamp and X-Sign-Signature: sha256=HMAC-SHA256(secret, "{timestamp}.{rawBody}"). Document-level webhooks (webhook_url on send) also emit document.opened and signer.completed.
 
-Agent error codes ({ error, code }): human_required (400, every party attested and none signed; the document needs a human signer, so add one when sending), invalid_state (409, not awaiting attestation), cannot_attest (403, caller may not attest as that agent or it is not that agent's turn), unknown_agent (400, no such slug), agent_limit (400, 10 per team), pro_required (403), flag_off (403, agent parties disabled).
+Agent error codes ({ error, code }): human_required (400, every party attested and none signed; the document needs a human signer, so add one when sending), invalid_state (409, not awaiting attestation), cannot_attest (403, caller may not attest as that agent or it is not that agent's turn), unknown_agent (400, no such slug), agent_limit (400, 10 per team), pro_required (403), flag_off (403, agent parties disabled), invalid_request (400, an agent party's email didn't match the agent owner's account), slug_taken (409, that agent slug is already registered on this team).
 
 ## On-page fields and embed
 

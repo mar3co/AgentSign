@@ -43,6 +43,10 @@ describe("docs page", () => {
     expect(text).toContain('"mcpServers"');
     expect(text).toContain("/.well-known/oauth-authorization-server");
     expect(text).toContain("/oauth/register");
+    const mcpSection = mcp?.nextElementSibling;
+    const codeTexts = Array.from(
+      mcpSection?.querySelectorAll("code") ?? [],
+    ).map((el) => el.textContent?.trim());
     for (const tool of [
       "send",
       "status",
@@ -53,7 +57,7 @@ describe("docs page", () => {
       "list_templates",
       "send_template",
     ]) {
-      expect(text).toContain(tool);
+      expect(codeTexts).toContain(tool);
     }
     expect(text).toMatch(/no\s+sign\s+tool/i);
   });
@@ -75,6 +79,8 @@ describe("docs page", () => {
       "agent_limit",
       "pro_required",
       "flag_off",
+      "invalid_request",
+      "slug_taken",
     ]) {
       expect(text).toContain(code);
     }

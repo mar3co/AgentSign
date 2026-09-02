@@ -99,6 +99,8 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
       "agent_limit",
       "pro_required",
       "flag_off",
+      "invalid_request",
+      "slug_taken",
     ]) {
       expect(body).toContain(code);
     }

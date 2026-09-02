@@ -103,6 +103,15 @@ const ERROR_CODES: readonly { code: string; meaning: string }[] = [
     code: "flag_off",
     meaning: "Agent parties are switched off on this deployment.",
   },
+  {
+    code: "invalid_request",
+    meaning:
+      "An agent party's email didn't match the agent owner's account, or the request was otherwise malformed.",
+  },
+  {
+    code: "slug_taken",
+    meaning: "That agent slug is already registered on this team.",
+  },
 ];
 
 export default function DocsPage() {
@@ -300,15 +309,16 @@ export default function DocsPage() {
                 </a>
                 . It gets no signing link and no ceremony. When its turn comes it attests or
                 rejects over the API, and the receipt names the agent and the
-                person it acted for.
+                person it acted for. An agent party carries the account
+                owner&rsquo;s email address; give it any other email and the
+                send is rejected.
               </p>
               <p>
                 A <code className={CODE}>sign_agent_</code> key attests and
                 rejects, for its own agent and nothing else. A{" "}
                 <code className={CODE}>sign_live_</code> key, a session, or an
                 OAuth grant attests by naming an agent the team owns. Sending
-                needs a <code className={CODE}>sign_live_</code> key or an
-                OAuth grant.
+                needs a live key, a session, or an OAuth grant.
               </p>
               <p>
                 Each agent can carry a webhook URL. We POST{" "}
