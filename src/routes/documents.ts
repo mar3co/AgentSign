@@ -1,4 +1,4 @@
-import { and, count, eq, gte, inArray, ne, or } from "drizzle-orm";
+import { and, count, countDistinct, eq, gte, inArray, ne, or } from "drizzle-orm";
 import { z } from "zod";
 import { PDFDocument } from "pdf-lib";
 import { getDb } from "../db/client.js";
@@ -1287,22 +1287,34 @@ export async function createDocument(req: Request): Promise<Response> {
   const windowStart = new Date(at.getTime() - windowDays * 86_400_000);
 
   // Free senders at their cap get turned away before the expensive render.
-  // Unverified documents count against the same limit on their own: each one
-  // stores a file and emails a code to an address nobody has proven they own.
+  // Unverified documents are capped on their own, per client IP: each one
+  // stores a file and emails a code to an address nobody has proven they own,
+  // and keying them on that address would let anyone lock it out.
   if (!liveUserId) {
-    const inWindow = and(
-      eq(documents.senderEmail, senderEmail),
-      gte(documents.createdAt, windowStart),
-    );
+    const ip = clientIp(req);
     const [[sent], [pending]] = await Promise.all([
       db
         .select({ n: count() })
         .from(documents)
-        .where(and(inWindow, ne(documents.status, "pending_sender"))),
+        .where(
+          and(
+            eq(documents.senderEmail, senderEmail),
+            gte(documents.createdAt, windowStart),
+            ne(documents.status, "pending_sender"),
+          ),
+        ),
       db
-        .select({ n: count() })
+        .select({ n: countDistinct(documents.id) })
         .from(documents)
-        .where(and(inWindow, eq(documents.status, "pending_sender"))),
+        .innerJoin(auditEvents, eq(auditEvents.documentId, documents.id))
+        .where(
+          and(
+            eq(documents.status, "pending_sender"),
+            gte(documents.createdAt, windowStart),
+            eq(auditEvents.event, "otp_sent"),
+            eq(auditEvents.ip, ip),
+          ),
+        ),
     ]);
     if (Number(sent?.n ?? 0) >= limit || Number(pending?.n ?? 0) >= limit) {
       return jsonError(429, "Send limit reached. Try again later.", "send_limit");
@@ -1464,7 +1476,7 @@ export async function createDocument(req: Request): Promise<Response> {
   });
   try {
     await mailer.sendMail({ to: senderEmail, ...otpEmail(otp.digits) });
-    await logEvent(db, { documentId: document.id, event: "otp_sent" });
+    await logEvent(db, { documentId: document.id, event: "otp_sent", ip: clientIp(req) });
   } catch (err) {
     await logEvent(db, {
       documentId: document.id,

@@ -506,4 +506,39 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
     expect(schema.required ?? []).not.toContain("pdf");
     expect(schema.required ?? []).not.toContain("markdown");
   });
+
+  it("MCP verify rate limits per client IP, not one bucket for every caller", { timeout: 60_000 }, async () => {
+    const db = await createTestDb();
+    const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+    setDeps({ db, store, mailer: { sendMail: async () => {} } });
+    async function verifyFrom(ip: string, id: number) {
+      const res = await postMcp(
+        new Request("http://sign.test/mcp", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+            "mcp-protocol-version": "2025-11-25",
+            authorization: "Bearer sign_live_mcp_discovery",
+            "x-real-ip": ip,
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id,
+            method: "tools/call",
+            params: {
+              name: "verify",
+              arguments: { pdf: Buffer.from("not a pdf").toString("base64") },
+            },
+          }),
+        }),
+      );
+      return JSON.stringify(await res.json());
+    }
+    for (let i = 0; i < 30; i++) {
+      expect(await verifyFrom("203.0.113.60", i + 1)).not.toContain("rate_limited");
+    }
+    expect(await verifyFrom("203.0.113.60", 31)).toContain("rate_limited");
+    expect(await verifyFrom("203.0.113.61", 32)).not.toContain("rate_limited");
+  });
 });

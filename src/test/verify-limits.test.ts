@@ -18,6 +18,23 @@ describe("POST /v1/verify limits", () => {
     expect(json.code).toBe("file_too_large");
   });
 
+  it("rejects a declared body size over the cap before reading it", async () => {
+    const res = await postVerify(
+      new Request("http://sign.test/v1/verify", {
+        method: "POST",
+        headers: {
+          "content-type": "application/pdf",
+          "content-length": String(20 * 1024 * 1024 + 1),
+          "x-real-ip": "203.0.113.33",
+        },
+        body: Buffer.from("tiny"),
+      }),
+    );
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as { code: string };
+    expect(json.code).toBe("file_too_large");
+  });
+
   it("rate limits verify per client IP", async () => {
     const junk = new TextEncoder().encode("not a pdf");
     for (let i = 0; i < 30; i++) {

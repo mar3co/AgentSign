@@ -551,31 +551,41 @@ describe("POST /v1/documents", () => {
     expect(row!.status).toBe("pending_sender");
   });
 
-  it("caps unverified documents per sender email", { timeout: 60_000 }, async () => {
+  it("caps unverified documents per client IP, not per sender email", { timeout: 60_000 }, async () => {
     const db = await createTestDb();
     const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
     setDeps({ db, store, mailer: { sendMail: async () => {} } });
     const pdf = await minimalPdf();
-    async function postOnce() {
+    async function postFrom(ip: string) {
       const body = new FormData();
       body.set("title", "Repair authorization");
       body.set("sender_email", "pending-cap@example.com");
       body.set("signers", JSON.stringify([{ name: "Jane", email: "jane@example.com" }]));
       body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
-      return postDocument(new Request("http://sign.test/v1/documents", { method: "POST", body }));
+      return postDocument(
+        new Request("http://sign.test/v1/documents", {
+          method: "POST",
+          headers: { "x-real-ip": ip },
+          body,
+        }),
+      );
     }
     for (let i = 0; i < 20; i++) {
-      expect((await postOnce()).status).toBe(201);
+      expect((await postFrom("203.0.113.40")).status).toBe(201);
     }
-    const limited = await postOnce();
+    const limited = await postFrom("203.0.113.40");
     expect(limited.status).toBe(429);
     const json = (await limited.json()) as { code: string };
     expect(json.code).toBe("send_limit");
+
+    // Twenty unverified posts naming an address must not lock that address
+    // out for everyone else: the same sender still creates from another IP.
+    expect((await postFrom("203.0.113.41")).status).toBe(201);
     const [{ n }] = await db
       .select({ n: count() })
       .from(documents)
       .where(eq(documents.senderEmail, "pending-cap@example.com"));
-    expect(Number(n)).toBe(20);
+    expect(Number(n)).toBe(21);
   });
 
   it("stores a trimmed sender message on the OTP path", async () => {
