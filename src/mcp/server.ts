@@ -21,6 +21,7 @@ import {
 } from "../routes/documents.js";
 import { listTemplates, sendTemplate } from "../routes/templates.js";
 import { verifyDocument } from "../routes/verify.js";
+import pkg from "../../package.json" with { type: "json" };
 
 const signerSchema = z.object({
   name: z.string().min(1),
@@ -86,6 +87,13 @@ function bearerFromRequest(req: Request): string | null {
   return token || null;
 }
 
+/**
+ * Vercel buffers a function response at 4.5 MB and base64 inflates bytes by a
+ * third, so a sealed PDF past this cap cannot come back through MCP at all.
+ * Uploads allow 20 MB, so oversized documents are real: they go over REST.
+ */
+export const MCP_DOWNLOAD_MAX_BYTES = 3 * 1024 * 1024;
+
 async function jsonOrText(res: Response): Promise<string> {
   const type = res.headers.get("content-type") ?? "";
   if (type.includes("application/json")) {
@@ -94,10 +102,14 @@ async function jsonOrText(res: Response): Promise<string> {
   return res.text();
 }
 
-export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer {
+export function createSignMcpServer(opts?: {
+  allowEnvKey?: boolean;
+  maxDownloadBytes?: number;
+}): McpServer {
   const allowEnvKey = opts?.allowEnvKey === true;
+  const maxDownloadBytes = opts?.maxDownloadBytes ?? MCP_DOWNLOAD_MAX_BYTES;
   const server = new McpServer(
-    { name: "agentsign", version: "2.1.0" },
+    { name: "agentsign", version: pkg.version },
     {
       instructions:
         "AgentSign is a signing primitive. Human always signs. Keys authenticate the caller and never sign. No sign tool. Humans Finish. Agents Attest. Tools: send, status, download, attest, reject, verify, list_templates, send_template. Optional send fields (JSON); message, send/send_template values, order, send_email, completed_redirect_url, embed_origin. PDF {{sig}} tags work on Free one-offs.",
@@ -232,7 +244,7 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
     {
       title: "Download sealed PDF",
       description:
-        "GET /v1/documents/{id}.pdf. Requires a tmp or live Bearer key. Returns the sealed PDF after the human ceremony. 409 if not completed.",
+        "GET /v1/documents/{id}.pdf. Requires a tmp or live Bearer key. Returns the sealed PDF after the human ceremony as a base64-encoded embedded resource (application/pdf). 409 if not completed. PDFs over 3 MB are not returned here; fetch those over HTTP from GET /v1/documents/{id}.pdf.",
       inputSchema: {
         id: z.string().min(1),
         api_key: z.string().optional(),
@@ -256,7 +268,30 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
         return toolText(await jsonOrText(res), true);
       }
       const bytes = new Uint8Array(await res.arrayBuffer());
-      return toolText(new TextDecoder("latin1").decode(bytes));
+      if (bytes.byteLength > maxDownloadBytes) {
+        return toolText(
+          JSON.stringify({
+            error: `Sealed PDF is ${bytes.byteLength} bytes, too large for MCP (limit ${maxDownloadBytes} bytes). Download it from GET /v1/documents/${args.id}.pdf instead.`,
+            code: "too_large",
+          }),
+          true,
+        );
+      }
+      const fileName = `${args.id}.pdf`;
+      return {
+        content: [
+          { type: "text" as const, text: `${fileName} (${bytes.byteLength} bytes)` },
+          {
+            type: "resource" as const,
+            resource: {
+              uri: `agentsign://documents/${fileName}`,
+              mimeType: "application/pdf",
+              blob: Buffer.from(bytes).toString("base64"),
+            },
+          },
+        ],
+        isError: false,
+      };
     },
   );
 
@@ -456,7 +491,10 @@ export async function handleMcpHttp(req: Request): Promise<Response> {
 }
 
 export async function runStdio(): Promise<void> {
-  const server = createSignMcpServer({ allowEnvKey: true });
+  const server = createSignMcpServer({
+    allowEnvKey: true,
+    maxDownloadBytes: Number.POSITIVE_INFINITY,
+  });
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
