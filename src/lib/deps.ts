@@ -20,6 +20,8 @@ export type Deps = {
   p12Passphrase?: string;
   fetch?: typeof fetch;
   lookup?: (hostname: string) => Promise<{ address: string; family: number }[]>;
+  /** Overrides the delay used between webhook retry attempts (tests skip real backoff). */
+  sleep?: (ms: number) => Promise<void>;
 };
 
 let deps: Deps = {};

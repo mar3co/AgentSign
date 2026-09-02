@@ -2,13 +2,14 @@ import { createHmac } from "node:crypto";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { POST as postDocument } from "../../app/v1/documents/route.js";
 import { POST as postOtp } from "../../app/v1/documents/[id]/otp/route.js";
 import { POST as postConsent } from "../../app/s/[token]/consent/route.js";
 import { POST as postSign } from "../../app/s/[token]/sign/route.js";
 import { auditEvents, documents } from "../db/schema.js";
+import type { AuditDb } from "../lib/audit.js";
 import { setDeps } from "../lib/deps.js";
 import { makeDevP12 } from "../lib/pdf/devP12.js";
 import { createFsStore } from "../lib/storage.js";
@@ -56,6 +57,7 @@ async function startVerified(opts: {
   const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
   const sent: { to: string; subject: string; text: string }[] = [];
   const posts: FetchCall[] = [];
+  const sleeps: number[] = [];
   const now = opts.now ?? (() => new Date());
   const fakeFetch: typeof fetch = async (input, init) => {
     posts.push({ url: String(input), init: init ?? {} });
@@ -75,6 +77,10 @@ async function startVerified(opts: {
     p12: makeDevP12("test"),
     p12Passphrase: "test",
     lookup: async () => [{ address: "93.184.216.34", family: 4 }],
+    // Skip real webhook retry backoff so retry tests stay fast.
+    sleep: async (ms) => {
+      sleeps.push(ms);
+    },
   });
   const pdf = await minimalPdf();
   const body = new FormData();
@@ -88,7 +94,7 @@ async function startVerified(opts: {
   const res = await postDocument(
     new Request("http://sign.test/v1/documents", { method: "POST", body }),
   );
-  return { db, store, sent, posts, res, now };
+  return { db, store, sent, posts, sleeps, res, now };
 }
 
 async function verifyAndSign(
@@ -248,7 +254,7 @@ describe("document.completed webhook", () => {
     "webhook fetch failure keeps document completed and audits webhook_failed once",
     { timeout: 60_000 },
     async () => {
-      const { db, sent, posts, res } = await startVerified({
+      const { db, sent, posts, sleeps, res } = await startVerified({
         webhookUrl: "https://example.com/hook",
         failFetch: true,
       });
@@ -260,15 +266,25 @@ describe("document.completed webhook", () => {
       expect(signed.status).toBe("completed");
       const [env] = await db.select().from(documents).where(eq(documents.id, created.id));
       expect(env!.status).toBe("completed");
-      expect(posts.length).toBeGreaterThanOrEqual(1);
-      expect(
-        posts.some((p) => String(p.init.body).includes('"document.completed"')),
-      ).toBe(true);
+      const completed = posts.filter((p) =>
+        String(p.init.body).includes('"document.completed"'),
+      );
+      // A network error is retried with backoff, three attempts in all.
+      expect(completed).toHaveLength(3);
+      // Each event delivery backs off 250ms then 750ms before its retries;
+      // two events went out during this flow.
+      expect(sleeps).toEqual([250, 750, 250, 750]);
+      // Retries carry the same signature so a receiver can dedupe on it.
+      const signatures = new Set(
+        completed.map((p) => new Headers(p.init.headers).get("x-sign-signature")),
+      );
+      expect(signatures.size).toBe(1);
       const events = await db
         .select()
         .from(auditEvents)
         .where(eq(auditEvents.documentId, created.id));
-      expect(events.some((e) => e.event === "webhook_failed")).toBe(true);
+      const failed = events.find((e) => e.event === "webhook_failed");
+      expect((failed!.payload as Record<string, unknown>).attempts).toBe(3);
       expect(events.some((e) => e.event === "webhook_sent")).toBe(false);
     },
   );
@@ -487,6 +503,203 @@ describe("document.completed webhook", () => {
     const again = await getSigningState(token);
     expect(again.status).toBe(200);
     expect(posts).toHaveLength(0);
+  });
+});
+
+describe("webhook delivery retries", () => {
+  function completedCounterFetch(
+    statuses: number[],
+  ): { fetchMock: typeof fetch; calls: () => number } {
+    let completedCalls = 0;
+    const fetchMock: typeof fetch = async (_input, init) => {
+      const isCompleted = String(init?.body ?? "").includes('"document.completed"');
+      if (!isCompleted) return new Response("ok", { status: 200 });
+      const status = statuses[completedCalls] ?? statuses[statuses.length - 1]!;
+      completedCalls++;
+      return new Response(status >= 200 && status < 300 ? "ok" : "err", { status });
+    };
+    return { fetchMock, calls: () => completedCalls };
+  }
+
+  it(
+    "retries a 500 then succeeds, auditing webhook_sent with attempts=2",
+    { timeout: 60_000 },
+    async () => {
+      const { fetchMock, calls } = completedCounterFetch([500, 200]);
+      const { db, sent, res } = await startVerified({
+        webhookUrl: "https://example.com/hook",
+        fetch: fetchMock,
+      });
+      const created = (await res.json()) as { id: string };
+      const { sign } = await verifyAndSign(created.id, sent);
+      expect(sign.status).toBe(200);
+      expect(calls()).toBe(2);
+      const events = await db
+        .select()
+        .from(auditEvents)
+        .where(eq(auditEvents.documentId, created.id));
+      // document.completed and signer.completed both audit webhook_sent for
+      // this document; match on attempts=2 to pick out the retried one.
+      const sentEvent = events.find(
+        (e) =>
+          e.event === "webhook_sent" &&
+          (e.payload as Record<string, unknown> | null)?.attempts === 2,
+      );
+      expect(sentEvent).toBeTruthy();
+      expect(events.some((e) => e.event === "webhook_failed")).toBe(false);
+    },
+  );
+
+  it("does not retry a 400 response", { timeout: 60_000 }, async () => {
+    const { fetchMock, calls } = completedCounterFetch([400]);
+    const { db, sent, res } = await startVerified({
+      webhookUrl: "https://example.com/hook",
+      fetch: fetchMock,
+    });
+    const created = (await res.json()) as { id: string };
+    const { sign } = await verifyAndSign(created.id, sent);
+    expect(sign.status).toBe(200);
+    expect(calls()).toBe(1);
+    const events = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.documentId, created.id));
+    const failedEvent = events.find(
+      (e) =>
+        e.event === "webhook_failed" &&
+        (e.payload as Record<string, unknown> | null)?.status === 400,
+    );
+    expect(failedEvent).toBeTruthy();
+    expect((failedEvent!.payload as Record<string, unknown>).attempts).toBe(1);
+  });
+
+  it(
+    "retries three times on repeated 503s and records attempts=3",
+    { timeout: 60_000 },
+    async () => {
+      const { fetchMock, calls } = completedCounterFetch([503, 503, 503]);
+      const { db, sent, res } = await startVerified({
+        webhookUrl: "https://example.com/hook",
+        fetch: fetchMock,
+      });
+      const created = (await res.json()) as { id: string };
+      const { sign } = await verifyAndSign(created.id, sent);
+      expect(sign.status).toBe(200);
+      expect(calls()).toBe(3);
+      const events = await db
+        .select()
+        .from(auditEvents)
+        .where(eq(auditEvents.documentId, created.id));
+      const failedEvent = events.find(
+        (e) =>
+          e.event === "webhook_failed" &&
+          (e.payload as Record<string, unknown> | null)?.status === 503,
+      );
+      expect(failedEvent).toBeTruthy();
+      expect((failedEvent!.payload as Record<string, unknown>).attempts).toBe(3);
+    },
+  );
+
+  it("retries a 429 response", { timeout: 60_000 }, async () => {
+    const { fetchMock, calls } = completedCounterFetch([429, 200]);
+    const { db, sent, res } = await startVerified({
+      webhookUrl: "https://example.com/hook",
+      fetch: fetchMock,
+    });
+    const created = (await res.json()) as { id: string };
+    const { sign } = await verifyAndSign(created.id, sent);
+    expect(sign.status).toBe(200);
+    expect(calls()).toBe(2);
+    const events = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.documentId, created.id));
+    const sentEvent = events.find(
+      (e) =>
+        e.event === "webhook_sent" &&
+        (e.payload as Record<string, unknown> | null)?.attempts === 2,
+    );
+    expect(sentEvent).toBeTruthy();
+  });
+});
+
+const AGENT_DOC_ID = "11111111-1111-1111-1111-111111111111";
+
+/** logEvent only ever calls insert().values(), so a two-method stub is enough. */
+function stubAuditDb(onInsert: (row: Record<string, unknown>) => void): AuditDb {
+  return {
+    insert: () => ({
+      values: async (row: Record<string, unknown>) => {
+        onInsert(row);
+      },
+    }),
+  } as unknown as AuditDb;
+}
+
+function agentHook() {
+  return {
+    webhookUrl: "https://example.com/agent-hook",
+    webhookSecretHash: sealWebhookSecret(newWebhookSecret()),
+  };
+}
+
+const agentPayload = {
+  event: "party.ready",
+  id: AGENT_DOC_ID,
+  agent: "grok-legal",
+  status: "pending",
+};
+
+describe("webhook delivery deadline and audit", () => {
+  it("does not resend when the audit insert rejects after a 200", async () => {
+    let posts = 0;
+    setDeps({
+      db: stubAuditDb(() => {
+        throw new Error("audit down");
+      }),
+      fetch: async () => {
+        posts++;
+        return new Response("ok", { status: 200 });
+      },
+      lookup: async () => [{ address: "93.184.216.34", family: 4 }],
+    });
+    await expect(fireAgentWebhook(agentHook(), agentPayload)).rejects.toThrow(
+      "audit down",
+    );
+    expect(posts).toBe(1);
+  });
+
+  it("stops retrying once the injected sleep burns the deadline", async () => {
+    const rows: Record<string, unknown>[] = [];
+    let clock = Date.now();
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => clock);
+    try {
+      let posts = 0;
+      setDeps({
+        db: stubAuditDb((row) => {
+          rows.push(row);
+        }),
+        now: () => new Date(clock),
+        fetch: async () => {
+          posts++;
+          return new Response("err", { status: 503 });
+        },
+        lookup: async () => [{ address: "93.184.216.34", family: 4 }],
+        // Overshoot the backoff so the 5s budget runs out after one retry.
+        sleep: async (ms) => {
+          clock += ms + 4_000;
+        },
+      });
+      await fireAgentWebhook(agentHook(), agentPayload);
+      // Three attempts fit the backoff schedule; the deadline allows only two.
+      expect(posts).toBe(2);
+      const failed = rows.find((r) => r.event === "webhook_failed");
+      expect(failed).toBeTruthy();
+      expect((failed!.payload as Record<string, unknown>).attempts).toBe(2);
+      expect((failed!.payload as Record<string, unknown>).status).toBe(503);
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 });
 
