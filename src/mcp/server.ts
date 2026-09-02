@@ -102,8 +102,12 @@ async function jsonOrText(res: Response): Promise<string> {
   return res.text();
 }
 
-export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer {
+export function createSignMcpServer(opts?: {
+  allowEnvKey?: boolean;
+  maxDownloadBytes?: number;
+}): McpServer {
   const allowEnvKey = opts?.allowEnvKey === true;
+  const maxDownloadBytes = opts?.maxDownloadBytes ?? MCP_DOWNLOAD_MAX_BYTES;
   const server = new McpServer(
     { name: "agentsign", version: pkg.version },
     {
@@ -264,10 +268,10 @@ export function createSignMcpServer(opts?: { allowEnvKey?: boolean }): McpServer
         return toolText(await jsonOrText(res), true);
       }
       const bytes = new Uint8Array(await res.arrayBuffer());
-      if (bytes.byteLength > MCP_DOWNLOAD_MAX_BYTES) {
+      if (bytes.byteLength > maxDownloadBytes) {
         return toolText(
           JSON.stringify({
-            error: `Sealed PDF is ${bytes.byteLength} bytes, too large for MCP (limit ${MCP_DOWNLOAD_MAX_BYTES} bytes). Download it from GET /v1/documents/${args.id}.pdf instead.`,
+            error: `Sealed PDF is ${bytes.byteLength} bytes, too large for MCP (limit ${maxDownloadBytes} bytes). Download it from GET /v1/documents/${args.id}.pdf instead.`,
             code: "too_large",
           }),
           true,
@@ -487,7 +491,10 @@ export async function handleMcpHttp(req: Request): Promise<Response> {
 }
 
 export async function runStdio(): Promise<void> {
-  const server = createSignMcpServer({ allowEnvKey: true });
+  const server = createSignMcpServer({
+    allowEnvKey: true,
+    maxDownloadBytes: Number.POSITIVE_INFINITY,
+  });
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }

@@ -121,7 +121,7 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
   });
 
   it("documents v1.2 rest and MCP tools without a sign tool", async () => {
-    expect(openapi.info.version).toBe("2.1.0");
+    expect(openapi.info.version).toBe(pkg.version);
     expect(openapi.openapi).toBe("3.1.0");
     expect(openapi.paths["/v1/branding"]).toBeTruthy();
     expect(openapi.paths["/v1/templates"]).toBeTruthy();
