@@ -11,11 +11,11 @@ const REQUIRED_IN_PRODUCTION = [
   ["SUPABASE_URL"],
   ["SUPABASE_ANON_KEY"],
   ["SUPABASE_SERVICE_ROLE_KEY"],
-  ["APP_URL"],
+  ["APP_URL", "APP_ORIGIN"],
   ["RESEND_API_KEY"],
   ["FROM_EMAIL"],
+  // Also covers the webhook key: WEBHOOK_KEK falls back to CRON_SECRET.
   ["CRON_SECRET"],
-  ["WEBHOOK_KEK"],
   ["P12_BASE64", "P12_PATH"],
 ] as const;
 
