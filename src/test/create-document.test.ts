@@ -588,6 +588,61 @@ describe("POST /v1/documents", () => {
     expect(Number(n)).toBe(21);
   });
 
+  it("counts unverified documents against the IP even when the OTP mail fails", { timeout: 60_000 }, async () => {
+    const db = await createTestDb();
+    const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+    setDeps({ db, store, mailer: { sendMail: async () => { throw new Error("resend 429"); } } });
+    const pdf = await minimalPdf();
+    async function postFrom(ip: string) {
+      const body = new FormData();
+      body.set("title", "Repair authorization");
+      body.set("sender_email", "mail-down@example.com");
+      body.set("signers", JSON.stringify([{ name: "Jane", email: "jane@example.com" }]));
+      body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
+      return postDocument(
+        new Request("http://sign.test/v1/documents", {
+          method: "POST",
+          headers: { "x-real-ip": ip },
+          body,
+        }),
+      );
+    }
+    for (let i = 0; i < 20; i++) {
+      expect((await postFrom("203.0.113.50")).status).toBe(201);
+    }
+    const limited = await postFrom("203.0.113.50");
+    expect(limited.status).toBe(429);
+    expect(((await limited.json()) as { code: string }).code).toBe("send_limit");
+  });
+
+  it("frees the per-IP unverified cap after a day, not the billing month", { timeout: 60_000 }, async () => {
+    const db = await createTestDb();
+    const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+    let now = new Date("2026-08-20T12:00:00Z");
+    setDeps({ db, store, mailer: { sendMail: async () => {} }, now: () => now });
+    const pdf = await minimalPdf();
+    async function postOnce() {
+      const body = new FormData();
+      body.set("title", "Repair authorization");
+      body.set("sender_email", "pending-window@example.com");
+      body.set("signers", JSON.stringify([{ name: "Jane", email: "jane@example.com" }]));
+      body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
+      return postDocument(
+        new Request("http://sign.test/v1/documents", {
+          method: "POST",
+          headers: { "x-real-ip": "203.0.113.60" },
+          body,
+        }),
+      );
+    }
+    for (let i = 0; i < 20; i++) {
+      expect((await postOnce()).status).toBe(201);
+    }
+    expect((await postOnce()).status).toBe(429);
+    now = new Date("2026-08-21T12:00:01Z");
+    expect((await postOnce()).status).toBe(201);
+  });
+
   it("stores a trimmed sender message on the OTP path", async () => {
     const db = await createTestDb();
     const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));

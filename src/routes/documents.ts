@@ -86,6 +86,7 @@ import { purgeDocument } from "../jobs/shred.js";
 const PDF_MAX_BYTES = 20 * 1024 * 1024;
 const MARKDOWN_MAX_BYTES = 1024 * 1024;
 const OTP_TTL_MS = 10 * 60 * 1000;
+const PENDING_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 const signerSchema = z.object({
   name: z.string().min(1),
@@ -1287,11 +1288,13 @@ export async function createDocument(req: Request): Promise<Response> {
   const windowStart = new Date(at.getTime() - windowDays * 86_400_000);
 
   // Free senders at their cap get turned away before the expensive render.
-  // Unverified documents are capped on their own, per client IP: each one
-  // stores a file and emails a code to an address nobody has proven they own,
-  // and keying them on that address would let anyone lock it out.
+  // Unverified documents are capped on their own, per client IP over a day:
+  // each one stores a file and emails a code to an address nobody has proven
+  // they own, and keying them on that address would let anyone lock it out.
+  // The IP is on the OTP audit event whether or not the mail went out.
   if (!liveUserId) {
     const ip = clientIp(req);
+    const pendingWindowStart = new Date(at.getTime() - PENDING_WINDOW_MS);
     const [[sent], [pending]] = await Promise.all([
       db
         .select({ n: count() })
@@ -1310,8 +1313,8 @@ export async function createDocument(req: Request): Promise<Response> {
         .where(
           and(
             eq(documents.status, "pending_sender"),
-            gte(documents.createdAt, windowStart),
-            eq(auditEvents.event, "otp_sent"),
+            gte(documents.createdAt, pendingWindowStart),
+            inArray(auditEvents.event, ["otp_sent", "emailed_failed"]),
             eq(auditEvents.ip, ip),
           ),
         ),
@@ -1481,6 +1484,7 @@ export async function createDocument(req: Request): Promise<Response> {
     await logEvent(db, {
       documentId: document.id,
       event: "emailed_failed",
+      ip: clientIp(req),
       payload: { error: err instanceof Error ? err.message : "mail_failed" },
     });
   }
