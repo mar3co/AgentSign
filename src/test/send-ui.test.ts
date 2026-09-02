@@ -630,6 +630,43 @@ describe("SendClient", () => {
     expect(emailInput.getAttribute("aria-invalid")).not.toBe("true");
   });
 
+  it("clears a signer error when that signer is removed", async () => {
+    stubDocumentsFetch();
+    render(createElement(SendClient));
+    await selectPdf();
+    ensureStep(/^document$/i);
+    fireEvent.change(screen.getByLabelText(/^title$/i), {
+      target: { value: "Repair authorization" },
+    });
+    ensureStep(/^signers$/i);
+    fireEvent.click(screen.getByRole("button", { name: /add signer/i }));
+    fireEvent.change(screen.getByLabelText(/signer 1 name/i), {
+      target: { value: "Jane" },
+    });
+    fireEvent.change(screen.getByLabelText(/signer 1 email/i), {
+      target: { value: "jane@example.com" },
+    });
+    submitForm();
+    expect(await findAlertText(/signer 2 needs a name/i)).toBeTruthy();
+    fireEvent.click(screen.getAllByRole("button", { name: /remove signer/i })[1]!);
+    expect(screen.queryByText(/signer 2 needs a name/i)).toBeNull();
+  });
+
+  it("tells a malformed sender email apart from a missing one", async () => {
+    stubDocumentsFetch();
+    render(createElement(SendClient));
+    await selectPdf();
+    ensureStep(/^document$/i);
+    fireEvent.change(screen.getByLabelText(/^title$/i), {
+      target: { value: "Repair authorization" },
+    });
+    fireEvent.change(screen.getByLabelText(/sender email/i), {
+      target: { value: "shop" },
+    });
+    submitForm();
+    expect(await findAlertText(/sender email is not valid/i)).toBeTruthy();
+  });
+
   it("auto-fills the title from the chosen filename", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => whoamiOk()));
     render(createElement(SendClient));

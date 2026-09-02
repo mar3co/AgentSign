@@ -33,13 +33,9 @@ export type StepId = "document" | "signers" | "fields" | "review";
 const MESSAGE_MAX = 1000;
 export const SEND_FORM_ID = "send-form";
 
-/** Just enough to mark a step complete; the server validates for real. */
-export function emailish(v: string): boolean {
-  return v.trim().includes("@");
-}
-
-/** Good enough to catch obvious typos client-side; the server validates for real. */
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/** Catches obvious typos client-side. The server only checks that an email is
+    present, so stay lenient: self-hosts may use addresses like jane@localhost. */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+$/;
 export function validEmail(v: string): boolean {
   return EMAIL_RE.test(v.trim());
 }
@@ -66,7 +62,6 @@ export type FieldErrorField =
   | "document"
   | "title"
   | "senderEmail"
-  | "signers"
   | "signerName"
   | "signerEmail";
 
@@ -279,10 +274,10 @@ export function SendForm(props: {
   const hasDocument =
     mode === "write" ? markdown.trim().length > 0 : file !== null;
   const documentDone =
-    hasDocument && title.trim().length > 0 && emailish(senderEmail);
-  const signersDone =
-    signers.length > 0 &&
-    signers.every((s) => s.name.trim().length > 0 && emailish(s.email));
+    hasDocument && title.trim().length > 0 && validEmail(senderEmail);
+  const signersDone = signers.every(
+    (s) => s.name.trim().length > 0 && validEmail(s.email),
+  );
   const fieldsDone = placed.length > 0 || patches.length > 0;
 
   function toggleStep(id: StepId) {
@@ -418,10 +413,6 @@ export function SendForm(props: {
               They sign in the order listed.
             </p>
           )}
-
-          {fieldError?.field === "signers" ? (
-            <p className="text-xs text-destructive">{fieldError.message}</p>
-          ) : null}
 
           {signers.map((row, i) => {
             const nameInvalid =

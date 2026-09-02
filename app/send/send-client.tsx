@@ -29,7 +29,6 @@ import {
   type PatchBox,
 } from "@/app/send/patch-model";
 import {
-  emailish,
   firstHeadingTitle,
   SendForm,
   summaryLine,
@@ -224,59 +223,43 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
   }, []);
 
   // Inputs in collapsed steps are unmounted, so native validation can't
-  // reach them; these check state directly and name exactly what's missing
-  // so onSubmit can reopen the right step and the field-fixed effect below
-  // can tell when to clear the message.
-  function isDocumentMissing(): boolean {
-    return mode === "write" ? markdown.trim().length === 0 : file === null;
-  }
-  function isTitleMissing(): boolean {
-    return title.trim().length === 0;
-  }
-  function isSenderEmailInvalid(): boolean {
-    return !senderEmail || !emailish(senderEmail);
-  }
-  function isSignersEmpty(): boolean {
-    return signers.length === 0;
-  }
-  function isSignerNameMissing(i: number): boolean {
-    return !signers[i] || signers[i]!.name.trim().length === 0;
-  }
-  function isSignerEmailInvalid(i: number): boolean {
-    const s = signers[i];
-    if (!s) return false;
-    return !s.email.trim() || !validEmail(s.email);
-  }
-
+  // reach them; this checks state directly and names exactly what's missing
+  // so onSubmit can reopen the right step.
   function validateSend(): FieldError | null {
-    if (isDocumentMissing()) {
+    const hasDocument =
+      mode === "write" ? markdown.trim().length > 0 : file !== null;
+    if (!hasDocument) {
       return { field: "document", message: "Add a document to send." };
     }
-    if (isTitleMissing()) {
+    if (title.trim().length === 0) {
       return { field: "title", message: "Give the document a title." };
     }
-    if (isSenderEmailInvalid()) {
+    if (!senderEmail?.trim()) {
       return { field: "senderEmail", message: "Enter your sender email." };
     }
-    if (isSignersEmpty()) {
-      return { field: "signers", message: "Add at least one signer." };
+    if (!validEmail(senderEmail)) {
+      return {
+        field: "senderEmail",
+        message: "That sender email is not valid.",
+      };
     }
     for (let i = 0; i < signers.length; i++) {
-      if (isSignerNameMissing(i)) {
+      const s = signers[i]!;
+      if (s.name.trim().length === 0) {
         return {
           field: "signerName",
           index: i,
           message: `Signer ${i + 1} needs a name.`,
         };
       }
-      if (!signers[i]!.email.trim()) {
+      if (!s.email.trim()) {
         return {
           field: "signerEmail",
           index: i,
           message: `Signer ${i + 1} needs an email.`,
         };
       }
-      if (!validEmail(signers[i]!.email)) {
+      if (!validEmail(s.email)) {
         return {
           field: "signerEmail",
           index: i,
@@ -287,27 +270,12 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
     return null;
   }
 
-  function isFieldStillInvalid(fe: FieldError): boolean {
-    switch (fe.field) {
-      case "document":
-        return isDocumentMissing();
-      case "title":
-        return isTitleMissing();
-      case "senderEmail":
-        return isSenderEmailInvalid();
-      case "signers":
-        return isSignersEmpty();
-      case "signerName":
-        return isSignerNameMissing(fe.index ?? -1);
-      case "signerEmail":
-        return isSignerEmailInvalid(fe.index ?? -1);
-    }
-  }
-
-  // Live-clears the error once the flagged field is fixed, instead of
-  // waiting for the next submit attempt.
+  // Live-clears the error once the flagged field is fixed (or removed),
+  // instead of waiting for the next submit attempt.
   useEffect(() => {
-    if (fieldError && !isFieldStillInvalid(fieldError)) {
+    if (!fieldError) return;
+    const now = validateSend();
+    if (!now || now.field !== fieldError.field || now.index !== fieldError.index) {
       setError(null);
       setFieldError(null);
     }
@@ -321,9 +289,7 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
     const invalid = validateSend();
     if (invalid) {
       setOpenStep(
-        invalid.field === "signers" ||
-          invalid.field === "signerName" ||
-          invalid.field === "signerEmail"
+        invalid.field === "signerName" || invalid.field === "signerEmail"
           ? "signers"
           : "document",
       );
