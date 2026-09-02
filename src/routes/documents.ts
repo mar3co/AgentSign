@@ -87,6 +87,7 @@ const PDF_MAX_BYTES = 20 * 1024 * 1024;
 const MARKDOWN_MAX_BYTES = 1024 * 1024;
 const OTP_TTL_MS = 10 * 60 * 1000;
 const PENDING_WINDOW_MS = 24 * 60 * 60 * 1000;
+const anonymousCreateLimited = slidingWindowLimiter(30, 10 * 60 * 1000);
 
 const signerSchema = z.object({
   name: z.string().min(1),
@@ -1243,7 +1244,7 @@ export async function createDocument(req: Request): Promise<Response> {
   if (file instanceof Blob) {
     const normalized = await normalizeUploadToPdf(
       file,
-      liveUserId ?? sessionUser?.id ?? clientIp(req),
+      liveUserId ?? sessionUser?.id ?? clientIp(req) ?? "unknown",
     );
     if (!normalized.ok) return normalized.response;
     fileBytes = normalized.bytes;
@@ -1291,11 +1292,17 @@ export async function createDocument(req: Request): Promise<Response> {
   // Unverified documents are capped on their own, per client IP over a day:
   // each one stores a file and emails a code to an address nobody has proven
   // they own, and keying them on that address would let anyone lock it out.
-  // The IP is on the OTP audit event whether or not the mail went out.
+  // The IP is on the OTP audit event whether or not the mail went out. A
+  // deployment that reports no IP gets no per-IP cap rather than one shared
+  // bucket for everyone. The counts are not transactional, so an in-memory
+  // window in front of them bounds what one burst can slip past.
   if (!liveUserId) {
     const ip = clientIp(req);
+    if (ip && anonymousCreateLimited(ip)) {
+      return jsonError(429, "Too many requests. Try again later.", "rate_limited");
+    }
     const pendingWindowStart = new Date(at.getTime() - PENDING_WINDOW_MS);
-    const [[sent], [pending]] = await Promise.all([
+    const [[sent], pendingRows] = await Promise.all([
       db
         .select({ n: count() })
         .from(documents)
@@ -1306,20 +1313,23 @@ export async function createDocument(req: Request): Promise<Response> {
             ne(documents.status, "pending_sender"),
           ),
         ),
-      db
-        .select({ n: countDistinct(documents.id) })
-        .from(documents)
-        .innerJoin(auditEvents, eq(auditEvents.documentId, documents.id))
-        .where(
-          and(
-            eq(documents.status, "pending_sender"),
-            gte(documents.createdAt, pendingWindowStart),
-            inArray(auditEvents.event, ["otp_sent", "emailed_failed"]),
-            eq(auditEvents.ip, ip),
-          ),
-        ),
+      ip
+        ? db
+            .select({ n: countDistinct(documents.id) })
+            .from(documents)
+            .innerJoin(auditEvents, eq(auditEvents.documentId, documents.id))
+            .where(
+              and(
+                eq(documents.status, "pending_sender"),
+                gte(documents.createdAt, pendingWindowStart),
+                inArray(auditEvents.event, ["otp_sent", "emailed_failed"]),
+                eq(auditEvents.ip, ip),
+              ),
+            )
+        : [],
     ]);
-    if (Number(sent?.n ?? 0) >= limit || Number(pending?.n ?? 0) >= limit) {
+    const pending = Number(pendingRows[0]?.n ?? 0);
+    if (Number(sent?.n ?? 0) >= limit || pending >= limit) {
       return jsonError(429, "Send limit reached. Try again later.", "send_limit");
     }
   }

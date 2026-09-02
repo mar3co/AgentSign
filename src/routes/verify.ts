@@ -46,7 +46,8 @@ async function readPdfBytes(req: Request): Promise<Uint8Array | null> {
 }
 
 export async function verifyDocument(req: Request): Promise<Response> {
-  if (rateLimited(clientIp(req))) {
+  // With no IP reported, one shared bucket still bounds this instance's work.
+  if (rateLimited(clientIp(req) ?? "unknown")) {
     return jsonError(429, "Too many requests. Try again later.", "rate_limited");
   }
   let bytes: Uint8Array | null;

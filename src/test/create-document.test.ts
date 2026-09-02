@@ -643,6 +643,57 @@ describe("POST /v1/documents", () => {
     expect((await postOnce()).status).toBe(201);
   });
 
+  it("skips the per-IP unverified cap when the deployment reports no client IP", { timeout: 60_000 }, async () => {
+    const db = await createTestDb();
+    const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+    setDeps({ db, store, mailer: { sendMail: async () => {} } });
+    const pdf = await minimalPdf();
+    async function postOnce() {
+      const body = new FormData();
+      body.set("title", "Repair authorization");
+      body.set("sender_email", "no-ip@example.com");
+      body.set("signers", JSON.stringify([{ name: "Jane", email: "jane@example.com" }]));
+      body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
+      return postDocument(new Request("http://sign.test/v1/documents", { method: "POST", body }));
+    }
+    // One shared bucket would cap the whole deployment at twenty a day.
+    for (let i = 0; i < 21; i++) {
+      expect((await postOnce()).status).toBe(201);
+    }
+  });
+
+  it("rate limits anonymous creates per IP before the count queries", { timeout: 60_000 }, async () => {
+    const db = await createTestDb();
+    const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+    setDeps({ db, store, mailer: { sendMail: async () => {} } });
+    const pdf = await minimalPdf();
+    async function postOnce() {
+      const body = new FormData();
+      body.set("title", "Repair authorization");
+      body.set("sender_email", "burst@example.com");
+      body.set("signers", JSON.stringify([{ name: "Jane", email: "jane@example.com" }]));
+      body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
+      return postDocument(
+        new Request("http://sign.test/v1/documents", {
+          method: "POST",
+          headers: { "x-real-ip": "203.0.113.70" },
+          body,
+        }),
+      );
+    }
+    for (let i = 0; i < 20; i++) {
+      expect((await postOnce()).status).toBe(201);
+    }
+    for (let i = 0; i < 10; i++) {
+      const res = await postOnce();
+      expect(res.status).toBe(429);
+      expect(((await res.json()) as { code: string }).code).toBe("send_limit");
+    }
+    const burst = await postOnce();
+    expect(burst.status).toBe(429);
+    expect(((await burst.json()) as { code: string }).code).toBe("rate_limited");
+  });
+
   it("stores a trimmed sender message on the OTP path", async () => {
     const db = await createTestDb();
     const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));

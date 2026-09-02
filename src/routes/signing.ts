@@ -26,6 +26,7 @@ import {
 import { sha256Hex } from "../lib/hash.js";
 import type { CertificateField } from "../lib/pdf/certificate.js";
 import { completeDocumentPdf } from "../lib/pdf/complete.js";
+import { clientIp } from "../lib/clientIp.js";
 import { loadSigningP12 } from "../lib/pdf/devP12.js";
 import type { BurnParty } from "../lib/pdf/burnFields.js";
 import { defaultRoleName, type DocumentField } from "../lib/pdf/fields.js";
@@ -239,11 +240,6 @@ function now(): Date {
   return getDeps().now?.() ?? new Date();
 }
 
-function clientIp(req: Request): string | undefined {
-  const xff = req.headers.get("x-forwarded-for");
-  if (xff) return xff.split(",")[0]!.trim();
-  return req.headers.get("cf-connecting-ip") ?? undefined;
-}
 
 function signingP12(): { p12: Buffer; passphrase: string } {
   const deps = getDeps();
