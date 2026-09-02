@@ -487,6 +487,54 @@ export const openapi = {
         },
       },
     },
+    "/v1/documents/{id}/otp": {
+      post: {
+        summary: "Verify the sender's emailed OTP and send",
+        description:
+          "Unauthenticated: completes the sender OTP one-off started by POST /v1/documents without a Bearer. JSON { code }. Wrong code 400 invalid_otp; 5 wrong attempts or an expired/already-used code is 403 otp_locked / 410 otp_expired. On success the document moves to pending, the first signer is invited, and a one-off sign_tmp_ key is returned. 429 send_limit when the sender is over the free-tier cap.",
+        security: [],
+        parameters: [idParam],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["code"],
+                properties: {
+                  code: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Verified and sent",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    id: { type: "string" },
+                    status: { type: "string" },
+                    key: { type: "string" },
+                    signers: { type: "array", items: { type: "object" } },
+                  },
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "410": errorResponse,
+          "429": errorResponse,
+          "503": errorResponse,
+        },
+      },
+    },
     "/v1/verify": {
       post: {
         summary: "Verify a sealed PDF",
@@ -519,6 +567,46 @@ export const openapi = {
             },
           },
           "400": errorResponse,
+        },
+      },
+    },
+    "/v1/keys": {
+      post: {
+        summary: "Mint a live key",
+        description:
+          "Session cookie only — never a Bearer key, and ?apiKey= is rejected. Optional JSON { expires_in_days } (positive number; a server default applies otherwise). Returns the sign_live_ key once; it is never shown again.",
+        security: [],
+        requestBody: {
+          required: false,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  expires_in_days: { type: "number", exclusiveMinimum: 0 },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "201": {
+            description: "Minted",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    key: { type: "string" },
+                    prefix: { type: "string" },
+                    expires_at: { type: "string", format: "date-time" },
+                  },
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
         },
       },
     },
@@ -1171,6 +1259,179 @@ export const openapi = {
           "400": errorResponse,
           "401": errorResponse,
           "403": errorResponse,
+        },
+      },
+    },
+    "/v1/activity": {
+      get: {
+        summary: "Recent notable events on the team's documents",
+        description:
+          "Session cookie only. Feeds the portal activity feed, not the public API. Up to 30 most recent sent/opened/consented/signed/attested/declined/rejected/reminded/expired events, newest first.",
+        security: [],
+        tags: ["Internal"],
+        responses: {
+          "200": {
+            description: "Activity",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    events: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          id: { type: "string" },
+                          event: { type: "string" },
+                          document_id: { type: "string", format: "uuid" },
+                          title: { type: "string" },
+                          actor: { type: ["string", "null"] },
+                          actor_kind: { type: ["string", "null"] },
+                          at: { type: "string", format: "date-time" },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "401": errorResponse,
+        },
+      },
+    },
+    "/v1/stats": {
+      get: {
+        summary: "Dashboard aggregates for the team's documents",
+        description:
+          "Session cookie only. Feeds the portal dashboard, not the public API. Sends/completions this vs last month, a 14-day daily trend, median signing hours, documents shredding within 7 days, and 30-day webhook counts.",
+        security: [],
+        tags: ["Internal"],
+        responses: {
+          "200": {
+            description: "Stats",
+            content: { "application/json": { schema: { type: "object" } } },
+          },
+          "401": errorResponse,
+        },
+      },
+    },
+    "/v1/sending": {
+      get: {
+        summary: "Get send-confirmation settings",
+        description:
+          "Session only — an agent or API key must never read or change its own approval gate.",
+        security: [],
+        tags: ["Internal"],
+        responses: {
+          "200": {
+            description: "Sending settings",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    confirm_agent_sends: { type: "boolean" },
+                    confirm_human_sends: { type: "boolean" },
+                  },
+                },
+              },
+            },
+          },
+          "401": errorResponse,
+          "403": errorResponse,
+        },
+      },
+      patch: {
+        summary: "Update send-confirmation settings",
+        description:
+          "Session only. JSON confirm_agent_sends and/or confirm_human_sends booleans.",
+        security: [],
+        tags: ["Internal"],
+        requestBody: {
+          required: false,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  confirm_agent_sends: { type: "boolean" },
+                  confirm_human_sends: { type: "boolean" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Sending settings",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    confirm_agent_sends: { type: "boolean" },
+                    confirm_human_sends: { type: "boolean" },
+                  },
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+        },
+      },
+    },
+    "/v1/detect-fields": {
+      post: {
+        summary: "AI field suggestions for an uploaded PDF",
+        description:
+          "Session cookie only. Behind the ai_field_detect flag (404 not_found when off). Requires an AI Gateway credential (503 not_configured otherwise). Multipart PDF up to 20 MiB. Rate limited to 10 requests per 10 minutes per user.",
+        security: [],
+        tags: ["Internal"],
+        requestBody: {
+          required: true,
+          content: {
+            "multipart/form-data": {
+              schema: {
+                type: "object",
+                required: ["file"],
+                properties: {
+                  file: {
+                    type: "string",
+                    format: "binary",
+                    description: "PDF bytes, max 20 MiB",
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Suggested fields",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    fields: {
+                      type: "array",
+                      items: { $ref: "#/components/schemas/DocumentField" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "404": errorResponse,
+          "429": errorResponse,
+          "502": errorResponse,
+          "503": errorResponse,
         },
       },
     },
