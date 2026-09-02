@@ -1295,9 +1295,10 @@ export async function createDocument(req: Request): Promise<Response> {
   // The IP is on the OTP audit event whether or not the mail went out. A
   // deployment that reports no IP gets no per-IP cap rather than one shared
   // bucket for everyone. The counts are not transactional, so an in-memory
-  // window in front of them bounds what one burst can slip past.
+  // window in front of them bounds what one burst can slip past. A logged-in
+  // sender proved who they are at login, so neither per-IP check applies.
   if (!liveUserId) {
-    const ip = clientIp(req);
+    const ip = sessionUser ? undefined : clientIp(req);
     if (ip && anonymousCreateLimited(ip)) {
       return jsonError(429, "Too many requests. Try again later.", "rate_limited");
     }

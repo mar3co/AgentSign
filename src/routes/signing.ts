@@ -240,7 +240,6 @@ function now(): Date {
   return getDeps().now?.() ?? new Date();
 }
 
-
 function signingP12(): { p12: Buffer; passphrase: string } {
   const deps = getDeps();
   if (deps.p12 && deps.p12Passphrase != null) {

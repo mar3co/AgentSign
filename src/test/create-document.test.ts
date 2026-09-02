@@ -694,6 +694,32 @@ describe("POST /v1/documents", () => {
     expect(((await burst.json()) as { code: string }).code).toBe("rate_limited");
   });
 
+  it("does not count a logged-in sender against the per-IP unverified cap", { timeout: 60_000 }, async () => {
+    const db = await createTestDb();
+    const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+    const { adapter } = createFakeAuth();
+    setDeps({ db, store, auth: adapter, mailer: { sendMail: async () => {} } });
+    const cookie = await magicCookie("someone@example.com");
+    const pdf = await minimalPdf();
+    async function postFrom(headers: Record<string, string>, senderEmail: string) {
+      const body = new FormData();
+      body.set("title", "Repair authorization");
+      body.set("sender_email", senderEmail);
+      body.set("signers", JSON.stringify([{ name: "Jane", email: "jane@example.com" }]));
+      body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
+      return postDocument(new Request("http://sign.test/v1/documents", { method: "POST", headers, body }));
+    }
+    const office = { "x-real-ip": "203.0.113.80" };
+    for (let i = 0; i < 20; i++) {
+      expect((await postFrom(office, "walk-in@example.com")).status).toBe(201);
+    }
+    expect((await postFrom(office, "walk-in@example.com")).status).toBe(429);
+    // Someone logged in behind the same address proved who they are at login.
+    const res = await postFrom({ ...office, cookie }, "shop@example.com");
+    expect(res.status).toBe(201);
+    expect(((await res.json()) as { status: string }).status).toBe("pending_sender");
+  });
+
   it("stores a trimmed sender message on the OTP path", async () => {
     const db = await createTestDb();
     const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
