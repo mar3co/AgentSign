@@ -98,7 +98,7 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
     expect(openapi.info.version).toBe(pkg.version);
   });
 
-  it("GET /openapi.json lists the five HTTP paths", async () => {
+  it("GET /openapi.json lists the core document/agent/verify paths", async () => {
     const res = await getOpenApi(new Request("http://sign.test/openapi.json"));
     expect(res.status).toBe(200);
     const spec = (await res.json()) as {
