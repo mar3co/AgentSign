@@ -1,7 +1,14 @@
 // @vitest-environment happy-dom
 import { createElement, useEffect, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 
 const { applyPatchesMock, previewControls } = vi.hoisted(() => ({
   applyPatchesMock: vi.fn(async () => new Uint8Array([9, 9, 9])),
@@ -98,6 +105,13 @@ function ensureStep(name: RegExp) {
 
 async function railReady() {
   await screen.findByRole("button", { name: /^document$/i });
+}
+
+// The same message is shown both next to Send and as an inline hint under
+// the offending field, so scope the query to the alert to get one match.
+async function findAlertText(re: RegExp) {
+  const alert = await screen.findByRole("alert");
+  return within(alert).getByText(re);
 }
 
 async function fillAndSubmit() {
@@ -497,7 +511,7 @@ describe("SendClient", () => {
     await railReady();
     ensureStep(/^fields$/i); // move away from the document step
     submitForm();
-    expect(await screen.findByText(/add a document/i)).toBeTruthy();
+    expect(await findAlertText(/add a document/i)).toBeTruthy();
     expect(
       screen
         .getByRole("button", { name: /^document$/i })
@@ -514,14 +528,178 @@ describe("SendClient", () => {
       target: { value: "Repair authorization" },
     });
     submitForm();
+    expect(await findAlertText(/signer 1 needs a name/i)).toBeTruthy();
     expect(
-      await screen.findByText(/complete each signer/i),
+      screen
+        .getByRole("button", { name: /^signers$/i })
+        .getAttribute("aria-expanded"),
+    ).toBe("true");
+  });
+
+  it("names the missing sender email", async () => {
+    stubDocumentsFetch();
+    render(createElement(SendClient));
+    await selectPdf();
+    ensureStep(/^document$/i);
+    fireEvent.change(screen.getByLabelText(/^title$/i), {
+      target: { value: "Repair authorization" },
+    });
+    fireEvent.change(screen.getByLabelText(/sender email/i), {
+      target: { value: "" },
+    });
+    submitForm();
+    expect(await findAlertText(/enter your sender email/i)).toBeTruthy();
+    expect(
+      screen
+        .getByRole("button", { name: /^document$/i })
+        .getAttribute("aria-expanded"),
+    ).toBe("true");
+  });
+
+  it("names the missing title", async () => {
+    stubDocumentsFetch();
+    render(createElement(SendClient));
+    await selectPdf();
+    ensureStep(/^document$/i);
+    fireEvent.change(screen.getByLabelText(/^title$/i), {
+      target: { value: "" },
+    });
+    submitForm();
+    expect(
+      await findAlertText(/give the document a title/i),
+    ).toBeTruthy();
+    const title = screen.getByLabelText(/^title$/i);
+    expect(title.getAttribute("aria-invalid")).toBe("true");
+  });
+
+  it("names the specific signer missing an email", async () => {
+    stubDocumentsFetch();
+    render(createElement(SendClient));
+    await selectPdf();
+    ensureStep(/^document$/i);
+    fireEvent.change(screen.getByLabelText(/^title$/i), {
+      target: { value: "Repair authorization" },
+    });
+    ensureStep(/^signers$/i);
+    fireEvent.click(screen.getByRole("button", { name: /add signer/i }));
+    fireEvent.change(screen.getByLabelText(/signer 1 name/i), {
+      target: { value: "Jane" },
+    });
+    fireEvent.change(screen.getByLabelText(/signer 1 email/i), {
+      target: { value: "jane@example.com" },
+    });
+    fireEvent.change(screen.getByLabelText(/signer 2 name/i), {
+      target: { value: "Bob" },
+    });
+    submitForm();
+    expect(
+      await findAlertText(/signer 2 needs an email/i),
     ).toBeTruthy();
     expect(
       screen
         .getByRole("button", { name: /^signers$/i })
         .getAttribute("aria-expanded"),
     ).toBe("true");
+  });
+
+  it("flags an invalid signer email and clears it once fixed", async () => {
+    stubDocumentsFetch();
+    render(createElement(SendClient));
+    await selectPdf();
+    ensureStep(/^document$/i);
+    fireEvent.change(screen.getByLabelText(/^title$/i), {
+      target: { value: "Repair authorization" },
+    });
+    ensureStep(/^signers$/i);
+    fireEvent.change(screen.getByLabelText(/^signer name$/i), {
+      target: { value: "Jane" },
+    });
+    fireEvent.change(screen.getByLabelText(/^signer email$/i), {
+      target: { value: "not-an-email" },
+    });
+    submitForm();
+    expect(
+      await findAlertText(/signer 1's email is not valid/i),
+    ).toBeTruthy();
+    const emailInput = screen.getByLabelText(/^signer email$/i);
+    expect(emailInput.getAttribute("aria-invalid")).toBe("true");
+    fireEvent.change(emailInput, { target: { value: "jane@example.com" } });
+    expect(
+      screen.queryByText(/signer 1's email is not valid/i),
+    ).toBeNull();
+    expect(emailInput.getAttribute("aria-invalid")).not.toBe("true");
+  });
+
+  it("auto-fills the title from the chosen filename", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => whoamiOk()));
+    render(createElement(SendClient));
+    await railReady();
+    const input = document.querySelector(
+      "input[type=file]",
+    ) as HTMLInputElement;
+    const file = new File(
+      [new Uint8Array([0x25, 0x50, 0x44, 0x46])],
+      "repair_authorization-v2.pdf",
+      { type: "application/pdf" },
+    );
+    Object.defineProperty(input, "files", { value: [file], configurable: true });
+    fireEvent.change(input);
+    await screen.findByText("repair_authorization-v2.pdf");
+    ensureStep(/^document$/i);
+    expect(
+      (screen.getByLabelText(/^title$/i) as HTMLInputElement).value,
+    ).toBe("Repair authorization v2");
+  });
+
+  it("does not overwrite a title the user already typed", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => whoamiOk()));
+    render(createElement(SendClient));
+    await railReady();
+    ensureStep(/^document$/i);
+    fireEvent.change(screen.getByLabelText(/^title$/i), {
+      target: { value: "My custom title" },
+    });
+    const input = document.querySelector(
+      "input[type=file]",
+    ) as HTMLInputElement;
+    Object.defineProperty(input, "files", { value: [pdfFile()], configurable: true });
+    fireEvent.change(input);
+    await screen.findByText("a.pdf");
+    expect(
+      (screen.getByLabelText(/^title$/i) as HTMLInputElement).value,
+    ).toBe("My custom title");
+  });
+
+  it("auto-fills the title from a markdown heading in write mode", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => whoamiOk()));
+    render(createElement(SendClient));
+    await railReady();
+    fireEvent.click(
+      screen.getByRole("button", { name: /write the document instead/i }),
+    );
+    fireEvent.change(screen.getByLabelText(/document text/i), {
+      target: { value: "# Service Agreement\n\nSign here." },
+    });
+    ensureStep(/^document$/i);
+    expect(
+      (screen.getByLabelText(/^title$/i) as HTMLInputElement).value,
+    ).toBe("Service Agreement");
+  });
+
+  it("leaves the title empty when written text has no heading", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => whoamiOk()));
+    render(createElement(SendClient));
+    await railReady();
+    fireEvent.click(
+      screen.getByRole("button", { name: /write the document instead/i }),
+    );
+    fireEvent.change(screen.getByLabelText(/document text/i), {
+      target: { value: "Just plain text, no heading." },
+    });
+    ensureStep(/^document$/i);
+    expect(
+      (screen.getByLabelText(/^title$/i) as HTMLInputElement).value,
+    ).toBe("");
   });
 
   it("toggles between the dropzone and the write view", async () => {

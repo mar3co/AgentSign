@@ -30,8 +30,12 @@ import {
 } from "@/app/send/patch-model";
 import {
   emailish,
+  firstHeadingTitle,
   SendForm,
   summaryLine,
+  titleFromFilename,
+  validEmail,
+  type FieldError,
   type Order,
   type SignerRow,
   type StepId,
@@ -68,6 +72,7 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
   const [documentId, setDocumentId] = useState<string | null>(null);
   const [done, setDone] = useState<Done | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [fieldError, setFieldError] = useState<FieldError | null>(null);
   const [busy, setBusy] = useState(false);
 
   const placedRef = useRef(placed);
@@ -76,6 +81,9 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
   patchesRef.current = patches;
   const fileRef = useRef(file);
   fileRef.current = file;
+  // Tracks the last title we auto-filled, so a later auto-fill only
+  // overwrites it if the user hasn't typed a title of their own since.
+  const autoTitleRef = useRef("");
 
   useEffect(() => {
     let cancelled = false;
@@ -158,7 +166,27 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
       setPageCount(null);
     } else {
       setPlaced((prev) => prev.filter((p) => !p.suggested));
+      // Only take over the title if it's empty or still the value we
+      // auto-filled last time — never overwrite something the user typed.
+      setTitle((prev) => {
+        if (prev.trim() !== "" && prev !== autoTitleRef.current) return prev;
+        const auto = titleFromFilename(f.name);
+        autoTitleRef.current = auto;
+        return auto;
+      });
     }
+  }, []);
+
+  // Same auto-title behavior for the "write instead" markdown mode: use the
+  // first "# heading" line if there is one, otherwise leave the title blank.
+  const handleMarkdownChange = useCallback((v: string) => {
+    setMarkdown(v);
+    setTitle((prev) => {
+      if (prev.trim() !== "" && prev !== autoTitleRef.current) return prev;
+      const auto = firstHeadingTitle(v) ?? "";
+      autoTitleRef.current = auto;
+      return auto;
+    });
   }, []);
 
   // Stable identity (via refs) so PdfPreview's effect only re-runs when the
@@ -195,20 +223,112 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
     }
   }, []);
 
+  // Inputs in collapsed steps are unmounted, so native validation can't
+  // reach them; these check state directly and name exactly what's missing
+  // so onSubmit can reopen the right step and the field-fixed effect below
+  // can tell when to clear the message.
+  function isDocumentMissing(): boolean {
+    return mode === "write" ? markdown.trim().length === 0 : file === null;
+  }
+  function isTitleMissing(): boolean {
+    return title.trim().length === 0;
+  }
+  function isSenderEmailInvalid(): boolean {
+    return !senderEmail || !emailish(senderEmail);
+  }
+  function isSignersEmpty(): boolean {
+    return signers.length === 0;
+  }
+  function isSignerNameMissing(i: number): boolean {
+    return !signers[i] || signers[i]!.name.trim().length === 0;
+  }
+  function isSignerEmailInvalid(i: number): boolean {
+    const s = signers[i];
+    if (!s) return false;
+    return !s.email.trim() || !validEmail(s.email);
+  }
+
+  function validateSend(): FieldError | null {
+    if (isDocumentMissing()) {
+      return { field: "document", message: "Add a document to send." };
+    }
+    if (isTitleMissing()) {
+      return { field: "title", message: "Give the document a title." };
+    }
+    if (isSenderEmailInvalid()) {
+      return { field: "senderEmail", message: "Enter your sender email." };
+    }
+    if (isSignersEmpty()) {
+      return { field: "signers", message: "Add at least one signer." };
+    }
+    for (let i = 0; i < signers.length; i++) {
+      if (isSignerNameMissing(i)) {
+        return {
+          field: "signerName",
+          index: i,
+          message: `Signer ${i + 1} needs a name.`,
+        };
+      }
+      if (!signers[i]!.email.trim()) {
+        return {
+          field: "signerEmail",
+          index: i,
+          message: `Signer ${i + 1} needs an email.`,
+        };
+      }
+      if (!validEmail(signers[i]!.email)) {
+        return {
+          field: "signerEmail",
+          index: i,
+          message: `Signer ${i + 1}'s email is not valid.`,
+        };
+      }
+    }
+    return null;
+  }
+
+  function isFieldStillInvalid(fe: FieldError): boolean {
+    switch (fe.field) {
+      case "document":
+        return isDocumentMissing();
+      case "title":
+        return isTitleMissing();
+      case "senderEmail":
+        return isSenderEmailInvalid();
+      case "signers":
+        return isSignersEmpty();
+      case "signerName":
+        return isSignerNameMissing(fe.index ?? -1);
+      case "signerEmail":
+        return isSignerEmailInvalid(fe.index ?? -1);
+    }
+  }
+
+  // Live-clears the error once the flagged field is fixed, instead of
+  // waiting for the next submit attempt.
+  useEffect(() => {
+    if (fieldError && !isFieldStillInvalid(fieldError)) {
+      setError(null);
+      setFieldError(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [title, senderEmail, file, markdown, mode, signers, fieldError]);
+
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
-    // Inputs in collapsed steps are unmounted, so native validation can't
-    // reach them; check here and reopen the step that needs attention.
-    const hasDocument = mode === "write" ? markdown.trim().length > 0 : file !== null;
-    if (!hasDocument || !title.trim() || !senderEmail || !emailish(senderEmail)) {
-      setOpenStep("document");
-      setError("Add a document, a title, and your sender email before sending.");
-      return;
-    }
-    if (signers.some((s) => !s.name.trim() || !emailish(s.email))) {
-      setOpenStep("signers");
-      setError("Complete each signer's name and email before sending.");
+    setFieldError(null);
+    const invalid = validateSend();
+    if (invalid) {
+      setOpenStep(
+        invalid.field === "signers" ||
+          invalid.field === "signerName" ||
+          invalid.field === "signerEmail"
+          ? "signers"
+          : "document",
+      );
+      setError(invalid.message);
+      setFieldError(invalid);
       return;
     }
     setBusy(true);
@@ -216,7 +336,7 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
     // than the DOM; collapsed steps then can't drop values.
     const data = new FormData();
     data.set("title", title);
-    data.set("sender_email", senderEmail);
+    data.set("sender_email", senderEmail ?? "");
     data.set("message", message);
     data.set(
       "signers",
@@ -491,7 +611,7 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
       mode={mode}
       setMode={setMode}
       markdown={markdown}
-      setMarkdown={setMarkdown}
+      setMarkdown={handleMarkdownChange}
       signers={signers}
       setSigners={setSigners}
       placed={placed}
@@ -512,6 +632,7 @@ export function SendClient({ aiDetect = false }: { aiDetect?: boolean }) {
       onPagesRendered={handlePagesRendered}
       onPreviewFailed={handlePreviewFailed}
       error={error}
+      fieldError={fieldError}
       busy={busy}
       previewPending={file !== null && !previewSettled}
       onSubmit={onSubmit}

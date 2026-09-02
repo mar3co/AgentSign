@@ -38,6 +38,44 @@ export function emailish(v: string): boolean {
   return v.trim().includes("@");
 }
 
+/** Good enough to catch obvious typos client-side; the server validates for real. */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export function validEmail(v: string): boolean {
+  return EMAIL_RE.test(v.trim());
+}
+
+/** Derive a title from a chosen filename: strip the extension, turn
+    separators into spaces, collapse whitespace, capitalize the first
+    letter. Empty when the filename has nothing usable in it. */
+export function titleFromFilename(name: string): string {
+  const base = name.replace(/\.[^./]+$/, "");
+  const words = base.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!words) return "";
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/** Pull a title from a markdown document's first line when it's a heading;
+    null when there isn't one, so callers leave the title blank instead. */
+export function firstHeadingTitle(markdown: string): string | null {
+  const firstLine = (markdown.split("\n", 1)[0] ?? "").trim();
+  const text = /^#\s+(.+)$/.exec(firstLine)?.[1]?.trim();
+  return text || null;
+}
+
+export type FieldErrorField =
+  | "document"
+  | "title"
+  | "senderEmail"
+  | "signers"
+  | "signerName"
+  | "signerEmail";
+
+export type FieldError = {
+  field: FieldErrorField;
+  index?: number;
+  message: string;
+};
+
 export function summaryLine(s: {
   title: string;
   signerCount: number;
@@ -171,6 +209,7 @@ export function SendForm(props: {
   onPagesRendered: (n: number) => void;
   onPreviewFailed: () => void;
   error: string | null;
+  fieldError: FieldError | null;
   busy: boolean;
   previewPending: boolean;
   onSubmit: (e: FormEvent<HTMLFormElement>) => void;
@@ -209,6 +248,7 @@ export function SendForm(props: {
     onPagesRendered,
     onPreviewFailed,
     error,
+    fieldError,
     busy,
     previewPending,
     onSubmit,
@@ -300,7 +340,16 @@ export function SendForm(props: {
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Repair authorization"
+              aria-invalid={fieldError?.field === "title" || undefined}
+              aria-describedby={
+                fieldError?.field === "title" ? "title-error" : undefined
+              }
             />
+            {fieldError?.field === "title" ? (
+              <p id="title-error" className="text-xs text-destructive">
+                {fieldError.message}
+              </p>
+            ) : null}
           </div>
           <div className="flex flex-col gap-2">
             <Label htmlFor="sender_email">Sender email</Label>
@@ -313,7 +362,18 @@ export function SendForm(props: {
               autoComplete="email"
               value={senderEmail}
               onChange={(e) => setSenderEmail(e.target.value)}
+              aria-invalid={fieldError?.field === "senderEmail" || undefined}
+              aria-describedby={
+                fieldError?.field === "senderEmail"
+                  ? "sender-email-error"
+                  : undefined
+              }
             />
+            {fieldError?.field === "senderEmail" ? (
+              <p id="sender-email-error" className="text-xs text-destructive">
+                {fieldError.message}
+              </p>
+            ) : null}
           </div>
           <NextButton
             label="Next: Signers"
@@ -359,63 +419,87 @@ export function SendForm(props: {
             </p>
           )}
 
-          {signers.map((row, i) => (
-            <div
-              key={i}
-              className="flex flex-col gap-3 rounded-lg border border-border p-3"
-            >
-              <div className="flex items-center justify-between">
-                <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                  <span
-                    className="size-2.5 rounded-full"
-                    style={{ background: signerColor(i) }}
+          {fieldError?.field === "signers" ? (
+            <p className="text-xs text-destructive">{fieldError.message}</p>
+          ) : null}
+
+          {signers.map((row, i) => {
+            const nameInvalid =
+              fieldError?.field === "signerName" && fieldError.index === i;
+            const emailInvalid =
+              fieldError?.field === "signerEmail" && fieldError.index === i;
+            return (
+              <div
+                key={i}
+                className="flex flex-col gap-3 rounded-lg border border-border p-3"
+              >
+                <div className="flex items-center justify-between">
+                  <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                    <span
+                      className="size-2.5 rounded-full"
+                      style={{ background: signerColor(i) }}
+                    />
+                    Signer {i + 1}
+                  </p>
+                  {signers.length > 1 ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={`Remove signer ${i + 1}`}
+                      onClick={() => removeSigner(i)}
+                    >
+                      <X />
+                    </Button>
+                  ) : null}
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor={`signer-name-${i}`}>
+                    {signers.length > 1 ? `Signer ${i + 1} name` : "Signer name"}
+                  </Label>
+                  <Input
+                    id={`signer-name-${i}`}
+                    form={SEND_FORM_ID}
+                    required
+                    value={row.name}
+                    onChange={(e) => setSigner(i, { name: e.target.value })}
+                    placeholder="Jane"
+                    aria-invalid={nameInvalid || undefined}
+                    aria-describedby={nameInvalid ? `signer-name-${i}-error` : undefined}
                   />
-                  Signer {i + 1}
-                </p>
-                {signers.length > 1 ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={`Remove signer ${i + 1}`}
-                    onClick={() => removeSigner(i)}
-                  >
-                    <X />
-                  </Button>
-                ) : null}
+                  {nameInvalid ? (
+                    <p id={`signer-name-${i}-error`} className="text-xs text-destructive">
+                      {fieldError!.message}
+                    </p>
+                  ) : null}
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor={`signer-email-${i}`}>
+                    {signers.length > 1
+                      ? `Signer ${i + 1} email`
+                      : "Signer email"}
+                  </Label>
+                  <Input
+                    id={`signer-email-${i}`}
+                    type="email"
+                    form={SEND_FORM_ID}
+                    required
+                    autoComplete="off"
+                    value={row.email}
+                    onChange={(e) => setSigner(i, { email: e.target.value })}
+                    placeholder="jane@example.com"
+                    aria-invalid={emailInvalid || undefined}
+                    aria-describedby={emailInvalid ? `signer-email-${i}-error` : undefined}
+                  />
+                  {emailInvalid ? (
+                    <p id={`signer-email-${i}-error`} className="text-xs text-destructive">
+                      {fieldError!.message}
+                    </p>
+                  ) : null}
+                </div>
               </div>
-              <div className="flex flex-col gap-2">
-                <Label htmlFor={`signer-name-${i}`}>
-                  {signers.length > 1 ? `Signer ${i + 1} name` : "Signer name"}
-                </Label>
-                <Input
-                  id={`signer-name-${i}`}
-                  form={SEND_FORM_ID}
-                  required
-                  value={row.name}
-                  onChange={(e) => setSigner(i, { name: e.target.value })}
-                  placeholder="Jane"
-                />
-              </div>
-              <div className="flex flex-col gap-2">
-                <Label htmlFor={`signer-email-${i}`}>
-                  {signers.length > 1
-                    ? `Signer ${i + 1} email`
-                    : "Signer email"}
-                </Label>
-                <Input
-                  id={`signer-email-${i}`}
-                  type="email"
-                  form={SEND_FORM_ID}
-                  required
-                  autoComplete="off"
-                  value={row.email}
-                  onChange={(e) => setSigner(i, { email: e.target.value })}
-                  placeholder="jane@example.com"
-                />
-              </div>
-            </div>
-          ))}
+            );
+          })}
 
           <div className="flex items-center gap-2">
             <Button
@@ -592,6 +676,11 @@ export function SendForm(props: {
                   <AlertDescription>{fileNotice}</AlertDescription>
                 </Alert>
               ) : null}
+              {fieldError?.field === "document" ? (
+                <p className="mx-auto text-xs text-destructive">
+                  {fieldError.message}
+                </p>
+              ) : null}
               {file ? null : (
                 <button
                   type="button"
@@ -615,7 +704,16 @@ export function SendForm(props: {
                 onChange={(e) => setMarkdown(e.target.value)}
                 placeholder={"# Service Agreement\n\nSign below to accept.\n\n{{sig}}"}
                 className="min-h-80 bg-card font-mono text-sm"
+                aria-invalid={fieldError?.field === "document" || undefined}
+                aria-describedby={
+                  fieldError?.field === "document" ? "markdown-error" : undefined
+                }
               />
+              {fieldError?.field === "document" ? (
+                <p id="markdown-error" className="text-xs text-destructive">
+                  {fieldError.message}
+                </p>
+              ) : null}
               <p className="text-xs text-muted-foreground">
                 Markdown or plain text. Put {"{{sig}}"} where the signature
                 goes.
