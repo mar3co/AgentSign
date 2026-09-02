@@ -498,7 +498,7 @@ describe("SendClient", () => {
     await screen.findByText(/^sent$/i);
     expect(screen.queryByText(/confirm to send/i)).toBeNull();
     // The API still mints a tmp key for curl users; a signed-in sender has a
-    // cabinet, so the key is noise here.
+    // document list, so the key is noise here.
     expect(screen.queryByText(/sign_tmp_abc/)).toBeNull();
     expect(screen.queryByText(/keep this key/i)).toBeNull();
     expect(screen.getByText("jane@example.com")).toBeTruthy();
