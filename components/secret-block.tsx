@@ -44,7 +44,7 @@ export function SecretBlock({
         {value}
       </code>
       {state === "failed" ? (
-        <p className="text-sm text-muted-foreground">
+        <p role="status" className="text-sm text-muted-foreground">
           Copy is not available here. Select the text and copy it yourself.
         </p>
       ) : note ? (

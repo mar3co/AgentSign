@@ -123,8 +123,9 @@ describe("Home", () => {
     expect(JSON.parse(String(otpInit?.body))).toEqual({ code: "123456" });
 
     expect(await screen.findByText("sign_tmp_abc")).toBeTruthy();
-    const signer = screen.getByRole("link", { name: "/s/tok_1" });
-    expect(signer.getAttribute("href")).toBe("/s/tok_1");
+    expect(screen.getByText(`${window.location.origin}/s/tok_1`)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /copy signing link/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /send another/i })).toBeTruthy();
     expect(screen.getByRole("link", { name: /log in/i }).getAttribute("href")).toBe(
       "/login",
     );
