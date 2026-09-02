@@ -5,12 +5,14 @@ import { agents, oauthClients } from "../db/schema.js";
 import { appOrigin } from "../env.js";
 import { getAuth } from "../lib/auth/supabase.js";
 import type { AuditDb } from "../lib/audit.js";
+import { requireSessionCaller } from "../lib/caller.js";
 import { teamForUser } from "../lib/team.js";
 import { getDeps } from "../lib/deps.js";
 import { ensureAccount } from "../lib/keys.js";
 import {
   consumeAuthorizationCode,
   insertAuthorizationCode,
+  listGrants,
   lookupAuthorizationCode,
   redirectUriAllowed,
   issueGrantTokens,
@@ -18,8 +20,13 @@ import {
   mcpResource,
   pkceMatches,
   resolveOauthClient,
+  revokeGrant,
+  revokeGrantByToken,
   revokeGrantOnRefreshReuse,
   rotateGrantTokens,
+  OAUTH_SCOPE,
+  OAUTH_SCOPES,
+  type GrantSummary,
   type OauthClientRow,
 } from "../lib/oauth.js";
 import { safeNext } from "../lib/safeNext.js";
@@ -45,7 +52,7 @@ export function protectedResourceMetadata() {
     resource: `${origin}/mcp`,
     authorization_servers: [origin],
     bearer_methods_supported: ["header"],
-    scopes_supported: ["send", "status", "download"],
+    scopes_supported: [...OAUTH_SCOPES],
   };
 }
 
@@ -56,11 +63,13 @@ export function authorizationServerMetadata() {
     authorization_endpoint: `${origin}/oauth/authorize`,
     token_endpoint: `${origin}/oauth/token`,
     registration_endpoint: `${origin}/oauth/register`,
+    revocation_endpoint: `${origin}/oauth/revoke`,
     response_types_supported: ["code"],
     grant_types_supported: ["authorization_code", "refresh_token"],
     code_challenge_methods_supported: ["S256"],
     token_endpoint_auth_methods_supported: ["none"],
-    scopes_supported: ["send", "status", "download"],
+    revocation_endpoint_auth_methods_supported: ["none"],
+    scopes_supported: [...OAUTH_SCOPES],
   };
 }
 
@@ -285,7 +294,7 @@ function tokenResponse(tokens: {
       token_type: "Bearer",
       expires_in: tokens.expires_in,
       refresh_token: tokens.refresh_token,
-      scope: "send status download",
+      scope: OAUTH_SCOPE,
     },
     { headers: { "cache-control": "no-store" } },
   );
@@ -350,4 +359,58 @@ export async function postToken(req: Request): Promise<Response> {
   }
 
   return jsonError(400, "unsupported_grant_type");
+}
+
+/**
+ * RFC 7009. Public clients, so no client authentication: the token is the
+ * credential. 200 even for an unknown or already dead token, so a caller
+ * cannot probe which tokens exist; a missing token parameter is a malformed
+ * request, and section 2.1 asks for invalid_request there. A client_id in the
+ * body must match the grant that issued the token, otherwise nothing is
+ * revoked, still with a 200.
+ */
+export async function postRevoke(req: Request): Promise<Response> {
+  const params = await readTokenParams(req);
+  const token = (params.token ?? "").trim();
+  if (!token) return jsonError(400, "invalid_request", "token is required");
+  const clientId = (params.client_id ?? "").trim();
+  await revokeGrantByToken(requireDb(), token, clientId || undefined);
+  return new Response(null, {
+    status: 200,
+    headers: { "cache-control": "no-store" },
+  });
+}
+
+function grantJson(grant: GrantSummary) {
+  return {
+    id: grant.id,
+    client_id: grant.clientId,
+    client_name: grant.clientName,
+    scopes: grant.scopes,
+    agents: grant.agents,
+    created_at: grant.createdAt.toISOString(),
+  };
+}
+
+/** Only a signed-in person manages connected apps: a token must not be able
+ *  to hide or disconnect itself. */
+function requireSession(req: Request) {
+  return requireSessionCaller(req, "Sign in to manage connected apps");
+}
+
+export async function getOauthGrants(req: Request): Promise<Response> {
+  const gate = await requireSession(req);
+  if (!gate.ok) return gate.response;
+  const grants = await listGrants(gate.db, gate.user.id);
+  return Response.json({ grants: grants.map(grantJson) });
+}
+
+export async function deleteOauthGrant(req: Request, id: string): Promise<Response> {
+  const gate = await requireSession(req);
+  if (!gate.ok) return gate.response;
+  const revoked = await revokeGrant(gate.db, gate.user.id, id);
+  if (!revoked) {
+    return Response.json({ error: "Not found", code: "not_found" }, { status: 404 });
+  }
+  return new Response(null, { status: 204 });
 }

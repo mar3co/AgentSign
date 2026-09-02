@@ -1,8 +1,9 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { getDb } from "../db/client.js";
 import {
   accounts,
+  agents,
   oauthClients,
   oauthCodes,
   oauthGrants,
@@ -13,6 +14,13 @@ import { getDeps } from "./deps.js";
 import { equalHex, sha256Hex } from "./hash.js";
 import { newOauthToken } from "./tokens.js";
 import { pinnedHttpsFetch } from "./webhooks.js";
+
+/** Every grant carries the same three scopes; there is no per-grant subset. */
+export const OAUTH_SCOPES = ["send", "status", "download"] as const;
+export const OAUTH_SCOPE = OAUTH_SCOPES.join(" ");
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const CODE_TTL_MS = 10 * 60 * 1000;
 const ACCESS_TTL_MS = 60 * 60 * 1000;
@@ -37,7 +45,7 @@ export function mcpResource(): string {
 }
 
 export function oauthWwwAuthenticate(): string {
-  return `Bearer resource_metadata="${appOrigin()}/.well-known/oauth-protected-resource", scope="send status download"`;
+  return `Bearer resource_metadata="${appOrigin()}/.well-known/oauth-protected-resource", scope="${OAUTH_SCOPE}"`;
 }
 
 export function mcpUnauthorized(): Response {
@@ -193,6 +201,116 @@ export async function revokeGrantOnRefreshReuse(
   return true;
 }
 
+/** One connected MCP client, as shown in Settings > Security. */
+export type GrantSummary = {
+  id: string;
+  clientId: string;
+  clientName: string;
+  scopes: string[];
+  agents: { id: string; slug: string; name: string }[];
+  createdAt: Date;
+};
+
+/** Live grants for one person, newest first, with client and agent names. */
+export async function listGrants(
+  db: AuditDb | undefined,
+  userId: string,
+): Promise<GrantSummary[]> {
+  const conn = requireDb(db);
+  const rows = await conn
+    .select()
+    .from(oauthGrants)
+    .where(and(eq(oauthGrants.userId, userId), isNull(oauthGrants.revokedAt)))
+    .orderBy(desc(oauthGrants.createdAt));
+  if (rows.length === 0) return [];
+
+  const clientIds = [...new Set(rows.map((row) => row.clientId))];
+  const clients = await conn
+    .select()
+    .from(oauthClients)
+    .where(inArray(oauthClients.clientId, clientIds));
+  const clientNames = new Map(clients.map((c) => [c.clientId, c.clientName]));
+
+  const agentIds = [...new Set(rows.flatMap((row) => row.allowedAgentIds ?? []))];
+  const agentRows = agentIds.length
+    ? await conn.select().from(agents).where(inArray(agents.id, agentIds))
+    : [];
+  const agentById = new Map(agentRows.map((a) => [a.id, a]));
+
+  return rows.map((row) => ({
+    id: row.id,
+    clientId: row.clientId,
+    clientName: clientNames.get(row.clientId) ?? "MCP client",
+    scopes: [...OAUTH_SCOPES],
+    agents: (row.allowedAgentIds ?? []).flatMap((id) => {
+      const agent = agentById.get(id);
+      if (!agent || agent.revokedAt) return [];
+      return [{ id: agent.id, slug: agent.slug, name: agent.name }];
+    }),
+    createdAt: row.createdAt,
+  }));
+}
+
+/** Disconnect one app. Kills the access token and the refresh family, the
+ *  same way reuse detection does: every lookup rejects a revoked grant. */
+export async function revokeGrant(
+  db: AuditDb | undefined,
+  userId: string,
+  grantId: string,
+): Promise<boolean> {
+  if (!UUID_RE.test(grantId)) return false;
+  const conn = requireDb(db);
+  const [updated] = await conn
+    .update(oauthGrants)
+    .set({ revokedAt: now() })
+    .where(
+      and(
+        eq(oauthGrants.id, grantId),
+        eq(oauthGrants.userId, userId),
+        isNull(oauthGrants.revokedAt),
+      ),
+    )
+    .returning();
+  return Boolean(updated);
+}
+
+/** RFC 7009: revoke the grant that owns this access or refresh token. A
+ *  client_id from the request, if any, must match the grant that issued the
+ *  token, so one client cannot revoke another's token. */
+export async function revokeGrantByToken(
+  db: AuditDb | undefined,
+  raw: string,
+  clientId?: string,
+): Promise<boolean> {
+  if (!raw.startsWith("sign_oauth_")) return false;
+  const conn = requireDb(db);
+  const hash = sha256Hex(raw);
+  const [grant] = await conn
+    .select()
+    .from(oauthGrants)
+    .where(
+      or(
+        eq(oauthGrants.accessHash, hash),
+        eq(oauthGrants.refreshHash, hash),
+        eq(oauthGrants.previousRefreshHash, hash),
+      ),
+    );
+  if (!grant) return false;
+  const matched = [
+    grant.accessHash,
+    grant.refreshHash,
+    grant.previousRefreshHash,
+  ].some((stored) => stored && equalHex(stored, hash));
+  if (!matched) return false;
+  if (clientId && grant.clientId !== clientId) return false;
+  if (grant.revokedAt) return true;
+  await conn
+    .update(oauthGrants)
+    .set({ revokedAt: now() })
+    .where(eq(oauthGrants.id, grant.id));
+  return true;
+}
+
 export async function accountForOauthGrant(
   db: AuditDb,
   grant: OauthGrantRow,
@@ -342,14 +460,30 @@ export async function issueGrantTokens(
   const access = newOauthToken();
   const refresh = newOauthToken();
   const expiresAt = new Date(at.getTime() + ACCESS_TTL_MS);
-  await db.insert(oauthGrants).values({
-    userId: input.userId,
-    clientId: input.clientId,
-    allowedAgentIds: input.allowedAgentIds,
-    accessHash: access.hash,
-    refreshHash: refresh.hash,
-    resource: input.resource,
-    expiresAt,
+  await db.transaction(async (tx) => {
+    // Re-authorizing replaces the connection instead of stacking a second one.
+    // Settings > Security shows one row per app, so an older live grant would
+    // keep working after someone disconnects the one they can see.
+    await tx
+      .update(oauthGrants)
+      .set({ revokedAt: at })
+      .where(
+        and(
+          eq(oauthGrants.userId, input.userId),
+          eq(oauthGrants.clientId, input.clientId),
+          eq(oauthGrants.resource, input.resource),
+          isNull(oauthGrants.revokedAt),
+        ),
+      );
+    await tx.insert(oauthGrants).values({
+      userId: input.userId,
+      clientId: input.clientId,
+      allowedAgentIds: input.allowedAgentIds,
+      accessHash: access.hash,
+      refreshHash: refresh.hash,
+      resource: input.resource,
+      expiresAt,
+    });
   });
   return {
     access_token: access.raw,
@@ -380,7 +514,11 @@ export async function rotateGrantTokens(
       expiresAt,
     })
     .where(
-      and(eq(oauthGrants.id, grant.id), eq(oauthGrants.refreshHash, grant.refreshHash)),
+      and(
+        eq(oauthGrants.id, grant.id),
+        eq(oauthGrants.refreshHash, grant.refreshHash),
+        isNull(oauthGrants.revokedAt),
+      ),
     )
     .returning();
   if (!updated) return null;

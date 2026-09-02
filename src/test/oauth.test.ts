@@ -24,7 +24,15 @@ import {
 import { makeDevP12 } from "../lib/pdf/devP12.js";
 import { createFsStore } from "../lib/storage.js";
 import { handleMcpHttp } from "../mcp/server.js";
-import { postAuthorize, postRegister, postToken } from "../routes/oauth.js";
+import {
+  authorizationServerMetadata,
+  deleteOauthGrant,
+  getOauthGrants,
+  postAuthorize,
+  postRegister,
+  postRevoke,
+  postToken,
+} from "../routes/oauth.js";
 import { createTestDb } from "./db.js";
 import { minimalPdf } from "./pdf.js";
 
@@ -249,6 +257,69 @@ async function issueTokens(opts: {
   expect(tokens.refresh_token).toMatch(/^sign_oauth_/);
   expect(tokens.token_type.toLowerCase()).toBe("bearer");
   return tokens;
+}
+
+async function revokeReq(token: string, hint?: string, clientId?: string) {
+  return postRevoke(
+    new Request("http://sign.test/oauth/revoke", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        token,
+        ...(hint ? { token_type_hint: hint } : {}),
+        ...(clientId ? { client_id: clientId } : {}),
+      }).toString(),
+    }),
+  );
+}
+
+async function mcpInitialize(accessToken: string) {
+  return handleMcpHttp(
+    new Request("http://sign.test/mcp", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        "mcp-protocol-version": "2025-11-25",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-11-25",
+          capabilities: {},
+          clientInfo: { name: "sign-test", version: "0.1.0" },
+        },
+      }),
+    }),
+  );
+}
+
+type GrantJson = {
+  id: string;
+  client_name: string;
+  scopes: string[];
+  agents: { id: string; slug: string; name: string }[];
+  created_at: string;
+};
+
+async function listGrantsReq(cookie?: string, bearer?: string) {
+  const headers: Record<string, string> = {};
+  if (cookie) headers.cookie = cookie;
+  if (bearer) headers.authorization = `Bearer ${bearer}`;
+  return getOauthGrants(new Request("http://sign.test/v1/oauth/grants", { headers }));
+}
+
+async function deleteGrantReq(id: string, cookie?: string) {
+  return deleteOauthGrant(
+    new Request(`http://sign.test/v1/oauth/grants/${id}`, {
+      method: "DELETE",
+      ...(cookie ? { headers: { cookie } } : {}),
+    }),
+    id,
+  );
 }
 
 async function issueAccessToken(opts: {
@@ -588,6 +659,28 @@ describe("MCP OAuth 2.1", () => {
     expect(stale).toBeNull();
   });
 
+  it("a revoked grant cannot be refreshed", { timeout: 60_000 }, async () => {
+    const { db } = await boot();
+    const cookie = await magicCookie("shop@example.com");
+    const redirectUri = "https://client.example/cb";
+    const clientId = await registerPublicClient(redirectUri);
+    const tokens = await issueTokens({ cookie, clientId, redirectUri });
+    const grant = await lookupOauthGrantByRefresh(db, tokens.refresh_token);
+    expect(grant).toBeTruthy();
+
+    const listed = await listGrantsReq(cookie);
+    const { grants } = (await listed.json()) as { grants: GrantJson[] };
+    expect((await deleteGrantReq(grants[0]!.id, cookie)).status).toBe(204);
+
+    // The grant row is gone from every lookup, so the endpoint says invalid_grant.
+    const refreshed = await refreshReq(tokens.refresh_token);
+    expect(refreshed.status).toBe(400);
+    expect(((await refreshed.json()) as { error?: string }).error).toBe("invalid_grant");
+
+    // And a snapshot taken before the revoke still cannot rotate the dead grant.
+    expect(await rotateGrantTokens(db, grant!)).toBeNull();
+  });
+
   it("CIMD client_id to a blocked host is rejected", async () => {
     const { userFor } = await boot();
     const cookie = await magicCookie("shop@example.com");
@@ -697,5 +790,164 @@ describe("MCP OAuth 2.1", () => {
       }),
     );
     expect(mcp.status).toBe(401);
+  });
+
+  it("authorization server metadata advertises the revocation endpoint", () => {
+    const meta = authorizationServerMetadata();
+    expect(meta.revocation_endpoint).toBe(`${appOrigin()}/oauth/revoke`);
+    expect(meta.revocation_endpoint_auth_methods_supported).toEqual(["none"]);
+  });
+
+  it("POST /oauth/revoke kills the access token and the refresh family", {
+    timeout: 60_000,
+  }, async () => {
+    await boot();
+    const cookie = await magicCookie("shop@example.com");
+    const redirectUri = "https://client.example/cb";
+    const clientId = await registerPublicClient(redirectUri);
+    const tokens = await issueTokens({ cookie, clientId, redirectUri });
+
+    expect((await mcpInitialize(tokens.access_token)).status).toBe(200);
+
+    const revoked = await revokeReq(tokens.refresh_token, "refresh_token");
+    expect(revoked.status).toBe(200);
+
+    expect((await mcpInitialize(tokens.access_token)).status).toBe(401);
+    const refreshed = await refreshReq(tokens.refresh_token);
+    expect(refreshed.status).toBe(400);
+    expect(((await refreshed.json()) as { error?: string }).error).toBe("invalid_grant");
+
+    // Revoking by access token works the same, and an unknown token is still 200.
+    expect((await revokeReq(tokens.access_token)).status).toBe(200);
+    expect((await revokeReq("sign_oauth_nope")).status).toBe(200);
+    expect((await revokeReq("not-a-token")).status).toBe(200);
+
+    // RFC 7009 section 2.1: a missing token parameter is a malformed request.
+    const missing = await postRevoke(
+      new Request("http://sign.test/oauth/revoke", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: "",
+      }),
+    );
+    expect(missing.status).toBe(400);
+    expect(((await missing.json()) as { error?: string }).error).toBe("invalid_request");
+    expect((await revokeReq("   ")).status).toBe(400);
+  });
+
+  it("revoke with a mismatched client_id leaves the grant live", {
+    timeout: 60_000,
+  }, async () => {
+    await boot();
+    const cookie = await magicCookie("shop@example.com");
+    const redirectUri = "https://client.example/cb";
+    const clientId = await registerPublicClient(redirectUri);
+    const tokens = await issueTokens({ cookie, clientId, redirectUri });
+
+    // RFC 7009 section 2.1: another client's id revokes nothing, still a 200.
+    const other = await revokeReq(tokens.refresh_token, "refresh_token", "someone-else");
+    expect(other.status).toBe(200);
+    expect((await mcpInitialize(tokens.access_token)).status).toBe(200);
+
+    // The grant's own client_id revokes it.
+    expect((await revokeReq(tokens.refresh_token, "refresh_token", clientId)).status)
+      .toBe(200);
+    expect((await mcpInitialize(tokens.access_token)).status).toBe(401);
+  });
+
+  it("re-authorizing a client replaces its grant instead of stacking one", {
+    timeout: 60_000,
+  }, async () => {
+    await boot();
+    const cookie = await magicCookie("shop@example.com");
+    const redirectUri = "https://client.example/cb";
+    const clientId = await registerPublicClient(redirectUri, "Claude Desktop");
+
+    const first = await issueTokens({ cookie, clientId, redirectUri });
+    expect((await mcpInitialize(first.access_token)).status).toBe(200);
+
+    const second = await issueTokens({ cookie, clientId, redirectUri });
+    expect((await mcpInitialize(second.access_token)).status).toBe(200);
+
+    // The older connection is dead, not just hidden from the list.
+    expect((await mcpInitialize(first.access_token)).status).toBe(401);
+    expect((await refreshReq(first.refresh_token)).status).toBe(400);
+
+    const listed = await listGrantsReq(cookie);
+    expect(listed.status).toBe(200);
+    const { grants } = (await listed.json()) as { grants: GrantJson[] };
+    expect(grants).toHaveLength(1);
+
+    // So disconnecting the one row on screen ends the app's access right away.
+    expect((await deleteGrantReq(grants[0]!.id, cookie)).status).toBe(204);
+    expect((await mcpInitialize(second.access_token)).status).toBe(401);
+  });
+
+  it("grants list and delete need a session and only show the caller's", {
+    timeout: 60_000,
+  }, async () => {
+    const { db, userFor } = await boot();
+    const { cookie } = await asPro(db, userFor);
+    const created = await postAgents(
+      new Request("http://sign.test/v1/agents", {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ slug: "grok-legal", name: "Grok Legal" }),
+      }),
+    );
+    expect(created.status).toBe(201);
+
+    const otherCookie = await magicCookie("other@example.com");
+    const redirectUri = "https://client.example/cb";
+    const clientId = await registerPublicClient(redirectUri, "Claude Desktop");
+    const mine = await issueTokens({ cookie, clientId, redirectUri });
+    const theirs = await issueTokens({
+      cookie: otherCookie,
+      clientId,
+      redirectUri,
+    });
+
+    const listed = await listGrantsReq(cookie);
+    expect(listed.status).toBe(200);
+    const { grants } = (await listed.json()) as { grants: GrantJson[] };
+    expect(grants).toHaveLength(1);
+    expect(grants[0]!.client_name).toBe("Claude Desktop");
+    expect(grants[0]!.scopes).toEqual(["send", "status", "download"]);
+    expect(grants[0]!.agents.map((a) => a.slug)).toEqual(["grok-legal"]);
+    expect(Number.isNaN(Date.parse(grants[0]!.created_at))).toBe(false);
+
+    expect((await listGrantsReq()).status).toBe(401);
+    // An OAuth token is not a session: a connector cannot list or disconnect.
+    expect((await listGrantsReq(undefined, mine.access_token)).status).toBe(403);
+    // Nor can an API key: a machine must not disconnect the grants that gate it.
+    const minted = await postKeys(
+      new Request("http://sign.test/v1/keys", {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    const { key: liveKey } = (await minted.json()) as { key: string };
+    expect(liveKey).toMatch(/^sign_live_/);
+    expect((await listGrantsReq(undefined, liveKey)).status).toBe(403);
+    expect((await deleteGrantReq(grants[0]!.id)).status).toBe(401);
+    // Another person's session does not reach this grant.
+    expect((await deleteGrantReq(grants[0]!.id, otherCookie)).status).toBe(404);
+
+    const removed = await deleteGrantReq(grants[0]!.id, cookie);
+    expect(removed.status).toBe(204);
+    expect((await mcpInitialize(mine.access_token)).status).toBe(401);
+    expect((await refreshReq(mine.refresh_token)).status).toBe(400);
+    // Deleting twice is a 404, not a second revocation.
+    expect((await deleteGrantReq(grants[0]!.id, cookie)).status).toBe(404);
+
+    const empty = (await (await listGrantsReq(cookie)).json()) as { grants: GrantJson[] };
+    expect(empty.grants).toEqual([]);
+    // The other person's grant is untouched.
+    const others = (await (await listGrantsReq(otherCookie)).json()) as {
+      grants: GrantJson[];
+    };
+    expect(others.grants).toHaveLength(1);
+    expect((await mcpInitialize(theirs.access_token)).status).toBe(200);
   });
 });

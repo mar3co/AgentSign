@@ -287,6 +287,7 @@ export const oauthGrants = pgTable("oauth_grants", {
   /** Audience: MCP canonical URI this access token was issued for. */
   resource: text("resource"),
   expiresAt: timestamptz("expires_at"),
+  createdAt: timestamptz("created_at").notNull().defaultNow(),
   revokedAt: timestamptz("revoked_at"),
 }).enableRLS();
 

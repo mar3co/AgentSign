@@ -133,6 +133,29 @@ const agentSchema = {
   },
 } as const;
 
+const oauthGrantSchema = {
+  type: "object",
+  properties: {
+    id: { type: "string", format: "uuid" },
+    client_id: { type: "string" },
+    client_name: { type: "string" },
+    scopes: { type: "array", items: { type: "string" } },
+    agents: {
+      type: "array",
+      description: "Named agents this client may attest as. Empty means none.",
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "string", format: "uuid" },
+          slug: { type: "string" },
+          name: { type: "string" },
+        },
+      },
+    },
+    created_at: { type: "string", format: "date-time" },
+  },
+} as const;
+
 const verifySchema = {
   type: "object",
   required: ["valid"],
@@ -218,6 +241,7 @@ export const openapi = {
       Template: templateSchema,
       DocumentField: documentFieldSchema,
       Agent: agentSchema,
+      OauthGrant: oauthGrantSchema,
       Verify: verifySchema,
     },
   },
@@ -1544,6 +1568,80 @@ export const openapi = {
           "409": errorResponse,
           "410": errorResponse,
           "503": errorResponse,
+        },
+      },
+    },
+    "/oauth/revoke": {
+      post: {
+        summary: "Revoke an OAuth token (RFC 7009)",
+        description:
+          "Public client, so no client authentication: the token is the credential. Revokes the whole grant, so the access token and the refresh family both die. 200 even for an unknown token, or for a client_id that does not match the grant, which revokes nothing; a missing token parameter is 400 invalid_request.",
+        security: [],
+        requestBody: {
+          required: true,
+          content: {
+            "application/x-www-form-urlencoded": {
+              schema: {
+                type: "object",
+                required: ["token"],
+                properties: {
+                  token: { type: "string" },
+                  token_type_hint: {
+                    type: "string",
+                    enum: ["access_token", "refresh_token"],
+                  },
+                  client_id: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": { description: "Revoked, or the token was already unknown" },
+          "400": errorResponse,
+        },
+      },
+    },
+    "/v1/oauth/grants": {
+      get: {
+        summary: "List connected MCP clients",
+        description:
+          "Logged-in session only (not a live key or an OAuth token). Live grants for the signed-in person, newest first.",
+        security: [{ sessionCookie: [] }],
+        responses: {
+          "200": {
+            description: "List",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    grants: {
+                      type: "array",
+                      items: { $ref: "#/components/schemas/OauthGrant" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "401": errorResponse,
+          "403": errorResponse,
+        },
+      },
+    },
+    "/v1/oauth/grants/{id}": {
+      delete: {
+        summary: "Disconnect an MCP client",
+        description:
+          "Logged-in session only. Revokes the grant: its access token and refresh family stop working right away.",
+        security: [{ sessionCookie: [] }],
+        parameters: [idParam],
+        responses: {
+          "204": { description: "Disconnected" },
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
         },
       },
     },
