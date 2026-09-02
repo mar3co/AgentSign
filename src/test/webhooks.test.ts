@@ -56,6 +56,7 @@ async function startVerified(opts: {
   const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
   const sent: { to: string; subject: string; text: string }[] = [];
   const posts: FetchCall[] = [];
+  const sleeps: number[] = [];
   const now = opts.now ?? (() => new Date());
   const fakeFetch: typeof fetch = async (input, init) => {
     posts.push({ url: String(input), init: init ?? {} });
@@ -76,7 +77,9 @@ async function startVerified(opts: {
     p12Passphrase: "test",
     lookup: async () => [{ address: "93.184.216.34", family: 4 }],
     // Skip real webhook retry backoff so retry tests stay fast.
-    sleep: async () => {},
+    sleep: async (ms) => {
+      sleeps.push(ms);
+    },
   });
   const pdf = await minimalPdf();
   const body = new FormData();
@@ -90,7 +93,7 @@ async function startVerified(opts: {
   const res = await postDocument(
     new Request("http://sign.test/v1/documents", { method: "POST", body }),
   );
-  return { db, store, sent, posts, res, now };
+  return { db, store, sent, posts, sleeps, res, now };
 }
 
 async function verifyAndSign(
@@ -250,7 +253,7 @@ describe("document.completed webhook", () => {
     "webhook fetch failure keeps document completed and audits webhook_failed once",
     { timeout: 60_000 },
     async () => {
-      const { db, sent, posts, res } = await startVerified({
+      const { db, sent, posts, sleeps, res } = await startVerified({
         webhookUrl: "https://example.com/hook",
         failFetch: true,
       });
@@ -262,15 +265,25 @@ describe("document.completed webhook", () => {
       expect(signed.status).toBe("completed");
       const [env] = await db.select().from(documents).where(eq(documents.id, created.id));
       expect(env!.status).toBe("completed");
-      expect(posts.length).toBeGreaterThanOrEqual(1);
-      expect(
-        posts.some((p) => String(p.init.body).includes('"document.completed"')),
-      ).toBe(true);
+      const completed = posts.filter((p) =>
+        String(p.init.body).includes('"document.completed"'),
+      );
+      // A network error is retried with backoff, three attempts in all.
+      expect(completed).toHaveLength(3);
+      // Each event delivery backs off 250ms then 750ms before its retries;
+      // two events went out during this flow.
+      expect(sleeps).toEqual([250, 750, 250, 750]);
+      // Retries carry the same signature so a receiver can dedupe on it.
+      const signatures = new Set(
+        completed.map((p) => new Headers(p.init.headers).get("x-sign-signature")),
+      );
+      expect(signatures.size).toBe(1);
       const events = await db
         .select()
         .from(auditEvents)
         .where(eq(auditEvents.documentId, created.id));
-      expect(events.some((e) => e.event === "webhook_failed")).toBe(true);
+      const failed = events.find((e) => e.event === "webhook_failed");
+      expect((failed!.payload as Record<string, unknown>).attempts).toBe(3);
       expect(events.some((e) => e.event === "webhook_sent")).toBe(false);
     },
   );

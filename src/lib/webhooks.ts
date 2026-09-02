@@ -14,11 +14,16 @@ v6Blocks.addSubnet("fe80::", 10, "ipv6");
 v6Blocks.addSubnet("fc00::", 7, "ipv6");
 v6Blocks.addSubnet("::ffff:0:0", 96, "ipv6");
 
+/**
+ * Deadline for one whole delivery, retries included. Deliveries run on the
+ * signer's Finish path and inside the shred sweep, so a retry may only use
+ * time the first attempt left over: a black-holed host still costs 5s, a
+ * host that fails fast gets up to two more tries.
+ */
 const WEBHOOK_TIMEOUT_MS = 5_000;
-/** Total attempts (first try + retries) for a single webhook delivery. */
-const WEBHOOK_MAX_ATTEMPTS = 3;
 /** Delay before each retry, in order (index 0 = delay before attempt 2). */
-const WEBHOOK_BACKOFF_MS = [1_000, 3_000];
+const WEBHOOK_BACKOFF_MS = [250, 750];
+const WEBHOOK_MAX_ATTEMPTS = WEBHOOK_BACKOFF_MS.length + 1;
 
 const BLOCKED_HOSTS = new Set([
   "localhost",
@@ -289,7 +294,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Network errors, timeouts, 408, and 429 are retried; other 4xx are not. */
+/** 408, 429, and 5xx are retried; other 4xx are not. */
 function isRetryableStatus(status: number): boolean {
   if (status === 408 || status === 429) return true;
   return status >= 500 && status <= 599;
@@ -306,11 +311,13 @@ async function auditWebhook(
 }
 
 /**
- * Delivers with retries (network errors, timeouts, 408, 429, 5xx); other 4xx
- * fail immediately. The DNS resolution is pinned once and reused across
- * attempts so a retry cannot land on a different (re-resolved) address.
- * Failures audit webhook_failed with the attempt count (when db is
- * available) and do not throw.
+ * Delivers with retries (network errors, 408, 429, 5xx) inside one 5s
+ * deadline; other 4xx fail immediately. The DNS resolution is pinned once
+ * and reused across attempts so a retry cannot land on a different
+ * (re-resolved) address, and the body is signed once so a receiver sees the
+ * same signature on a retry and can dedupe on it. Failures audit
+ * webhook_failed with the attempt count (when db is available) and do not
+ * throw.
  */
 async function postSignedWebhook(
   url: string,
@@ -340,10 +347,15 @@ async function postSignedWebhook(
     return;
   }
 
+  const timestamp = String(Math.floor(now().getTime() / 1000));
+  const signature = webhookSignature(secret, timestamp, rawBody);
+  const deadline = Date.now() + WEBHOOK_TIMEOUT_MS;
+
   for (let attempt = 1; attempt <= WEBHOOK_MAX_ATTEMPTS; attempt++) {
-    const timestamp = String(Math.floor(now().getTime() / 1000));
-    const signature = webhookSignature(secret, timestamp, rawBody);
-    const isLastAttempt = attempt === WEBHOOK_MAX_ATTEMPTS;
+    const backoff = WEBHOOK_BACKOFF_MS[attempt - 1];
+    // Retry only if, after this attempt, the backoff still leaves time.
+    const canRetry = () =>
+      backoff !== undefined && Date.now() + backoff < deadline;
     try {
       const res = await pinnedFetch(
         url,
@@ -356,7 +368,7 @@ async function postSignedWebhook(
           },
           body: rawBody,
           redirect: "error",
-          signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
+          signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
         },
         resolved,
       );
@@ -364,7 +376,7 @@ async function postSignedWebhook(
         await auditWebhook(db, documentId, "webhook_sent", { attempts: attempt });
         return;
       }
-      if (isLastAttempt || !isRetryableStatus(res.status)) {
+      if (!isRetryableStatus(res.status) || !canRetry()) {
         await auditWebhook(db, documentId, "webhook_failed", {
           status: res.status,
           attempts: attempt,
@@ -373,12 +385,12 @@ async function postSignedWebhook(
       }
     } catch (err) {
       const error = err instanceof Error ? err.message : "webhook_failed";
-      if (isLastAttempt) {
+      if (!canRetry()) {
         await auditWebhook(db, documentId, "webhook_failed", { error, attempts: attempt });
         return;
       }
     }
-    await sleep(WEBHOOK_BACKOFF_MS[attempt - 1]!);
+    await sleep(backoff!);
   }
 }
 
