@@ -77,6 +77,21 @@ describe("production P12 and session cookie flags", () => {
     }
   });
 
+  it("loadSigningP12 rejects a truncated P12_BASE64 instead of decoding garbage", () => {
+    const saved = { ...process.env };
+    const whole = makeDevP12("pw").toString("base64");
+    process.env.P12_PATH = "";
+    process.env.P12_BASE64 = whole.slice(0, whole.length - 100);
+    resetEnvCache();
+    try {
+      expect(() => loadSigningP12()).toThrow(/P12_BASE64/);
+    } finally {
+      for (const key of Object.keys(process.env)) delete process.env[key];
+      Object.assign(process.env, saved);
+      resetEnvCache();
+    }
+  });
+
   it("session cookies are Secure when APP_URL is https", () => {
     const prev = process.env.APP_URL;
     process.env.APP_URL = "https://sign.example";
