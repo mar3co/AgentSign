@@ -4,8 +4,10 @@
 -- production database: production already records this version as applied,
 -- so supabase db push never runs it there, and production may carry a
 -- foreign key to auth.users that schema.ts does not declare. This file exists
--- so a fresh database (self-host, supabase start, tests) can be built from
--- supabase/migrations alone.
+-- so a fresh database (the PGlite test suite, or supabase db push --db-url
+-- against an empty project) can be built from supabase/migrations alone. Its
+-- twin, 20260824024225_remote_baseline.sql, is an empty placeholder kept only
+-- because production records that version as applied too.
 
 CREATE TABLE "accounts" (
 	"user_id" uuid PRIMARY KEY NOT NULL,
