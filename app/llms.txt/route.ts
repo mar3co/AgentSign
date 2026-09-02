@@ -11,7 +11,8 @@ AgentSign is a signing primitive. Human always signs. Bearer keys authenticate t
 
 Endpoint: ${origin}/mcp (streamable HTTP, POST).
 Claude Code: claude mcp add --transport http agentsign ${origin}/mcp
-Claude Desktop / Cursor / Windsurf: {"mcpServers":{"agentsign":{"url":"${origin}/mcp"}}}
+Cursor / Windsurf (mcp.json): {"mcpServers":{"agentsign":{"url":"${origin}/mcp"}}}
+Claude Desktop / claude.ai: Settings > Connectors > Add custom connector, URL ${origin}/mcp.
 Auth: OAuth 2.1 + PKCE (S256), or Authorization: Bearer sign_live_ / sign_agent_. An unauthenticated POST /mcp returns 401 with WWW-Authenticate resource_metadata.
 Discovery: GET /.well-known/oauth-protected-resource, GET /.well-known/oauth-authorization-server. Client registration: CIMD https client_id, else dynamic registration at POST /oauth/register. Consent at GET /oauth/authorize, tokens at POST /oauth/token. A grant carries the agents it may attest as.
 stdio MCP does not do OAuth: env or pasted sign_agent_ / SIGN_API_KEY only.
@@ -33,13 +34,13 @@ There is no sign, complete, or create_template tool. Branding, agents, and team 
 
 An agent party is a party with kind=agent and a slug registered on the team (max 10). It has no /s/ token and no ceremony; it attests or rejects over the API. Complete needs every party done and at least one human signed_at, unless the agent_only_attest flag is on. Agent parties need Pro (self-host is entitled) and the agent_parties flag.
 
-sign_agent_ keys attest and reject as their own agent only. Sending needs sign_live_ or an OAuth grant. sign_live_ never attests.
+sign_agent_ keys attest and reject as their own agent only. A sign_live_ key, a session, or an OAuth grant attests by naming an agent slug the team owns (body { agent }); a grant only for the agents it was allowed. Sending needs sign_live_ or an OAuth grant.
 
 Confirm sends: a send from an OAuth grant is held at status pending_sender until the account owner enters an emailed 6-digit code. Default on; the owner turns it off at /settings/security. sign_live_ keys always send at once.
 
 Agent webhooks: PUT /v1/agents/{id}/webhook sets an https URL and returns the HMAC secret once. Events: party.ready, document.completed, document.declined, document.expired. Body { event, id, agent, status }. Headers X-Sign-Timestamp and X-Sign-Signature: sha256=HMAC-SHA256(secret, "{timestamp}.{rawBody}"). Document-level webhooks (webhook_url on send) also emit document.opened and signer.completed.
 
-Agent error codes ({ error, code }): human_required (400, every party attested and none signed), cannot_attest (403, caller may not attest as that agent or it is not that agent's turn), unknown_agent (400, no such slug), agent_limit (400, 10 per team), pro_required (403), flag_off (403, agent parties disabled).
+Agent error codes ({ error, code }): human_required (400, every party attested and none signed; the document needs a human signer, so add one when sending), invalid_state (409, not awaiting attestation), cannot_attest (403, caller may not attest as that agent or it is not that agent's turn), unknown_agent (400, no such slug), agent_limit (400, 10 per team), pro_required (403), flag_off (403, agent parties disabled).
 
 ## On-page fields and embed
 
@@ -85,6 +86,11 @@ GET /v1/billing
 POST /v1/billing/portal
 GET /v1/sending
 PATCH /v1/sending
+POST /v1/keys
+GET /v1/activity
+GET /v1/stats
+POST /v1/detect-fields
+GET /openapi.json
 
 POST /mcp
 GET /.well-known/oauth-protected-resource

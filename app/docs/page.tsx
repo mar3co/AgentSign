@@ -5,6 +5,9 @@ import { TwoReader } from "@/components/marketing/two-reader";
 import { appOrigin } from "@/src/env";
 
 export const runtime = "nodejs";
+// Read APP_URL per request, not at build, so self-host images that supply
+// env at runtime print the real MCP URL.
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Docs",
@@ -40,9 +43,13 @@ function mcpBlock(origin: string): string {
 $ claude mcp add --transport http agentsign \\
        ${origin}/mcp
 
-# Claude Desktop, Cursor, Windsurf
+# Cursor, Windsurf (mcp.json)
 { "mcpServers": { "agentsign": {
     "url": "${origin}/mcp" } } }
+
+# Claude Desktop, claude.ai
+Settings > Connectors > Add custom connector
+URL: ${origin}/mcp
 
 # No MCP host? Speak it yourself.
 $ curl -X POST ${origin}/mcp \\
@@ -72,7 +79,11 @@ const ERROR_CODES: readonly { code: string; meaning: string }[] = [
   {
     code: "human_required",
     meaning:
-      "Every party attested and nobody signed. The document stays pending until a person finishes it.",
+      "Every party attested and nobody signed. A document needs a human signer, so add one when sending.",
+  },
+  {
+    code: "invalid_state",
+    meaning: "The document is not awaiting attestation: already complete, declined, or expired.",
   },
   {
     code: "cannot_attest",
@@ -293,8 +304,11 @@ export default function DocsPage() {
               </p>
               <p>
                 A <code className={CODE}>sign_agent_</code> key attests and
-                rejects, for its own agent and nothing else. Sending needs a{" "}
-                <code className={CODE}>sign_live_</code> key or an OAuth grant.
+                rejects, for its own agent and nothing else. A{" "}
+                <code className={CODE}>sign_live_</code> key, a session, or an
+                OAuth grant attests by naming an agent the team owns. Sending
+                needs a <code className={CODE}>sign_live_</code> key or an
+                OAuth grant.
               </p>
               <p>
                 Each agent can carry a webhook URL. We POST{" "}
