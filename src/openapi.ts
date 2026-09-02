@@ -1246,7 +1246,7 @@ export const openapi = {
       post: {
         summary: "Revoke an OAuth token (RFC 7009)",
         description:
-          "Public client, so no client authentication: the token is the credential. Revokes the whole grant, so the access token and the refresh family both die. 200 even for an unknown token; a missing token parameter is 400 invalid_request.",
+          "Public client, so no client authentication: the token is the credential. Revokes the whole grant, so the access token and the refresh family both die. 200 even for an unknown token, or for a client_id that does not match the grant, which revokes nothing; a missing token parameter is 400 invalid_request.",
         security: [],
         requestBody: {
           required: true,
@@ -1261,6 +1261,7 @@ export const openapi = {
                     type: "string",
                     enum: ["access_token", "refresh_token"],
                   },
+                  client_id: { type: "string" },
                 },
               },
             },

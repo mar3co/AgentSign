@@ -25,8 +25,6 @@ const UUID_RE =
 const CODE_TTL_MS = 10 * 60 * 1000;
 const ACCESS_TTL_MS = 60 * 60 * 1000;
 const CIMD_TIMEOUT_MS = 5_000;
-/** Settings > Security lists at most this many connected apps. */
-const GRANT_LIST_LIMIT = 100;
 
 export type OauthGrantRow = typeof oauthGrants.$inferSelect;
 export type OauthClientRow = typeof oauthClients.$inferSelect;
@@ -223,8 +221,7 @@ export async function listGrants(
     .select()
     .from(oauthGrants)
     .where(and(eq(oauthGrants.userId, userId), isNull(oauthGrants.revokedAt)))
-    .orderBy(desc(oauthGrants.createdAt))
-    .limit(GRANT_LIST_LIMIT);
+    .orderBy(desc(oauthGrants.createdAt));
   if (rows.length === 0) return [];
 
   const clientIds = [...new Set(rows.map((row) => row.clientId))];
@@ -277,10 +274,13 @@ export async function revokeGrant(
   return Boolean(updated);
 }
 
-/** RFC 7009: revoke the grant that owns this access or refresh token. */
+/** RFC 7009: revoke the grant that owns this access or refresh token. A
+ *  client_id from the request, if any, must match the grant that issued the
+ *  token, so one client cannot revoke another's token. */
 export async function revokeGrantByToken(
   db: AuditDb | undefined,
   raw: string,
+  clientId?: string,
 ): Promise<boolean> {
   if (!raw.startsWith("sign_oauth_")) return false;
   const conn = requireDb(db);
@@ -302,6 +302,7 @@ export async function revokeGrantByToken(
     grant.previousRefreshHash,
   ].some((stored) => stored && equalHex(stored, hash));
   if (!matched) return false;
+  if (clientId && grant.clientId !== clientId) return false;
   if (grant.revokedAt) return true;
   await conn
     .update(oauthGrants)
@@ -513,7 +514,11 @@ export async function rotateGrantTokens(
       expiresAt,
     })
     .where(
-      and(eq(oauthGrants.id, grant.id), eq(oauthGrants.refreshHash, grant.refreshHash)),
+      and(
+        eq(oauthGrants.id, grant.id),
+        eq(oauthGrants.refreshHash, grant.refreshHash),
+        isNull(oauthGrants.revokedAt),
+      ),
     )
     .returning();
   if (!updated) return null;

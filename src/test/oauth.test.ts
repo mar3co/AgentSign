@@ -259,7 +259,7 @@ async function issueTokens(opts: {
   return tokens;
 }
 
-async function revokeReq(token: string, hint?: string) {
+async function revokeReq(token: string, hint?: string, clientId?: string) {
   return postRevoke(
     new Request("http://sign.test/oauth/revoke", {
       method: "POST",
@@ -267,6 +267,7 @@ async function revokeReq(token: string, hint?: string) {
       body: new URLSearchParams({
         token,
         ...(hint ? { token_type_hint: hint } : {}),
+        ...(clientId ? { client_id: clientId } : {}),
       }).toString(),
     }),
   );
@@ -658,6 +659,28 @@ describe("MCP OAuth 2.1", () => {
     expect(stale).toBeNull();
   });
 
+  it("a revoked grant cannot be refreshed", { timeout: 60_000 }, async () => {
+    const { db } = await boot();
+    const cookie = await magicCookie("shop@example.com");
+    const redirectUri = "https://client.example/cb";
+    const clientId = await registerPublicClient(redirectUri);
+    const tokens = await issueTokens({ cookie, clientId, redirectUri });
+    const grant = await lookupOauthGrantByRefresh(db, tokens.refresh_token);
+    expect(grant).toBeTruthy();
+
+    const listed = await listGrantsReq(cookie);
+    const { grants } = (await listed.json()) as { grants: GrantJson[] };
+    expect((await deleteGrantReq(grants[0]!.id, cookie)).status).toBe(204);
+
+    // The grant row is gone from every lookup, so the endpoint says invalid_grant.
+    const refreshed = await refreshReq(tokens.refresh_token);
+    expect(refreshed.status).toBe(400);
+    expect(((await refreshed.json()) as { error?: string }).error).toBe("invalid_grant");
+
+    // And a snapshot taken before the revoke still cannot rotate the dead grant.
+    expect(await rotateGrantTokens(db, grant!)).toBeNull();
+  });
+
   it("CIMD client_id to a blocked host is rejected", async () => {
     const { userFor } = await boot();
     const cookie = await magicCookie("shop@example.com");
@@ -810,6 +833,26 @@ describe("MCP OAuth 2.1", () => {
     expect(missing.status).toBe(400);
     expect(((await missing.json()) as { error?: string }).error).toBe("invalid_request");
     expect((await revokeReq("   ")).status).toBe(400);
+  });
+
+  it("revoke with a mismatched client_id leaves the grant live", {
+    timeout: 60_000,
+  }, async () => {
+    await boot();
+    const cookie = await magicCookie("shop@example.com");
+    const redirectUri = "https://client.example/cb";
+    const clientId = await registerPublicClient(redirectUri);
+    const tokens = await issueTokens({ cookie, clientId, redirectUri });
+
+    // RFC 7009 section 2.1: another client's id revokes nothing, still a 200.
+    const other = await revokeReq(tokens.refresh_token, "refresh_token", "someone-else");
+    expect(other.status).toBe(200);
+    expect((await mcpInitialize(tokens.access_token)).status).toBe(200);
+
+    // The grant's own client_id revokes it.
+    expect((await revokeReq(tokens.refresh_token, "refresh_token", clientId)).status)
+      .toBe(200);
+    expect((await mcpInitialize(tokens.access_token)).status).toBe(401);
   });
 
   it("re-authorizing a client replaces its grant instead of stacking one", {
