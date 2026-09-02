@@ -37,6 +37,7 @@ import {
 } from "../lib/keys.js";
 import { accountForOauthGrant, lookupOauthGrant } from "../lib/oauth.js";
 import { newOtp } from "../lib/otp.js";
+import { clientIp } from "../lib/clientIp.js";
 import { parseEmbedOrigin } from "../lib/embed.js";
 import {
   defaultRoleName,
@@ -623,20 +624,6 @@ function isPdf(bytes: Uint8Array, type: string): boolean {
 // DOCX conversion launches a browser, so cap how fast one caller can invoke
 // it — POST /v1/documents is reachable without credentials by design.
 const convertLimited = slidingWindowLimiter(10, 10 * 60 * 1000);
-
-/**
- * Client IP for anonymous rate keys, as reported by the deployment's proxy.
- * Vercel strips the client's copies of these headers; a self-hosted reverse
- * proxy must overwrite them too, or callers can pick their own bucket.
- */
-function clientIp(req: Request): string {
-  return (
-    req.headers.get("x-vercel-forwarded-for")?.split(",")[0]?.trim() ||
-    req.headers.get("x-real-ip")?.trim() ||
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    "anonymous"
-  );
-}
 
 /**
  * Uploads may be a PDF or a DOCX (converted to PDF here); everything after
@@ -1300,18 +1287,24 @@ export async function createDocument(req: Request): Promise<Response> {
   const windowStart = new Date(at.getTime() - windowDays * 86_400_000);
 
   // Free senders at their cap get turned away before the expensive render.
+  // Unverified documents count against the same limit on their own: each one
+  // stores a file and emails a code to an address nobody has proven they own.
   if (!liveUserId) {
-    const [cap] = await db
-      .select({ n: count() })
-      .from(documents)
-      .where(
-        and(
-          eq(documents.senderEmail, senderEmail),
-          gte(documents.createdAt, windowStart),
-          ne(documents.status, "pending_sender"),
-        ),
-      );
-    if (Number(cap?.n ?? 0) >= limit) {
+    const inWindow = and(
+      eq(documents.senderEmail, senderEmail),
+      gte(documents.createdAt, windowStart),
+    );
+    const [[sent], [pending]] = await Promise.all([
+      db
+        .select({ n: count() })
+        .from(documents)
+        .where(and(inWindow, ne(documents.status, "pending_sender"))),
+      db
+        .select({ n: count() })
+        .from(documents)
+        .where(and(inWindow, eq(documents.status, "pending_sender"))),
+    ]);
+    if (Number(sent?.n ?? 0) >= limit || Number(pending?.n ?? 0) >= limit) {
       return jsonError(429, "Send limit reached. Try again later.", "send_limit");
     }
   }

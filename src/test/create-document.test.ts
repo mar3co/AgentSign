@@ -3,7 +3,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { eq } from "drizzle-orm";
+import { count, eq } from "drizzle-orm";
 import { GET as getAuthCallback } from "../../app/auth/callback/route.js";
 import { POST as postLogin } from "../../app/login/session/route.js";
 import { POST as postAgents } from "../../app/v1/agents/route.js";
@@ -244,29 +244,6 @@ describe("POST /v1/documents", () => {
     }
     const over = await postOnce();
     expect(over.status).toBe(429);
-  });
-
-  it("unverified pending_sender rows do not consume the free send cap", { timeout: 60_000 }, async () => {
-    const db = await createTestDb();
-    const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
-    setDeps({
-      db,
-      store,
-      mailer: { sendMail: async () => {} },
-      now: () => new Date("2026-08-20T12:00:00Z"),
-    });
-    const pdf = await minimalPdf();
-    async function postOnce() {
-      const body = new FormData();
-      body.set("title", "Repair authorization");
-      body.set("sender_email", "unverified-cap@example.com");
-      body.set("signers", JSON.stringify([{ name: "Jane", email: "jane@example.com" }]));
-      body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
-      return postDocument(new Request("http://sign.test/v1/documents", { method: "POST", body }));
-    }
-    for (let i = 0; i < 21; i++) {
-      expect((await postOnce()).status).toBe(201);
-    }
   });
 
   it("create OTP mail throw still returns 201 pending_sender", async () => {
@@ -537,19 +514,23 @@ describe("POST /v1/documents", () => {
       body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
       return postDocument(new Request("http://sign.test/v1/documents", { method: "POST", body }));
     }
+    // Unverified documents are capped at 20 per sender, so the 21st is posted
+    // after 19 verifications: the cap on *sent* documents is only reached at
+    // its OTP step.
     const ids: string[] = [];
-    for (let i = 0; i < 21; i++) {
+    async function postAndKeep() {
       const res = await postOnce();
       expect(res.status).toBe(201);
       const { id } = (await res.json()) as { id: string };
       ids.push(id);
     }
-    const codes = sent
-      .filter((m) => m.to === "otp-cap@example.com")
-      .map((m) => m.text.match(/\b(\d{6})\b/)![1]!);
-    expect(codes).toHaveLength(21);
-    for (let i = 0; i < 20; i++) {
-      const verify = await postOtp(
+    async function verifyAt(i: number): Promise<Response> {
+      // The sender also gets non-OTP mail once a document is sent.
+      const codes = sent
+        .filter((m) => m.to === "otp-cap@example.com")
+        .map((m) => m.text.match(/\b(\d{6})\b/)?.[1])
+        .filter((c): c is string => !!c);
+      return postOtp(
         new Request(`http://sign.test/v1/documents/${ids[i]}/otp`, {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -557,21 +538,44 @@ describe("POST /v1/documents", () => {
         }),
         { params: Promise.resolve({ id: ids[i]! }) },
       );
-      expect(verify.status).toBe(200);
     }
-    const last = await postOtp(
-      new Request(`http://sign.test/v1/documents/${ids[20]}/otp`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ code: codes[20] }),
-      }),
-      { params: Promise.resolve({ id: ids[20]! }) },
-    );
+    for (let i = 0; i < 20; i++) await postAndKeep();
+    for (let i = 0; i < 19; i++) expect((await verifyAt(i)).status).toBe(200);
+    await postAndKeep();
+    expect((await verifyAt(19)).status).toBe(200);
+    const last = await verifyAt(20);
     expect(last.status).toBe(429);
     const json = (await last.json()) as { code: string };
     expect(json.code).toBe("send_limit");
     const [row] = await db.select().from(documents).where(eq(documents.id, ids[20]!));
     expect(row!.status).toBe("pending_sender");
+  });
+
+  it("caps unverified documents per sender email", { timeout: 60_000 }, async () => {
+    const db = await createTestDb();
+    const store = createFsStore(await mkdtemp(join(tmpdir(), "sign-")));
+    setDeps({ db, store, mailer: { sendMail: async () => {} } });
+    const pdf = await minimalPdf();
+    async function postOnce() {
+      const body = new FormData();
+      body.set("title", "Repair authorization");
+      body.set("sender_email", "pending-cap@example.com");
+      body.set("signers", JSON.stringify([{ name: "Jane", email: "jane@example.com" }]));
+      body.set("file", new Blob([pdf], { type: "application/pdf" }), "poa.pdf");
+      return postDocument(new Request("http://sign.test/v1/documents", { method: "POST", body }));
+    }
+    for (let i = 0; i < 20; i++) {
+      expect((await postOnce()).status).toBe(201);
+    }
+    const limited = await postOnce();
+    expect(limited.status).toBe(429);
+    const json = (await limited.json()) as { code: string };
+    expect(json.code).toBe("send_limit");
+    const [{ n }] = await db
+      .select({ n: count() })
+      .from(documents)
+      .where(eq(documents.senderEmail, "pending-cap@example.com"));
+    expect(Number(n)).toBe(20);
   });
 
   it("stores a trimmed sender message on the OTP path", async () => {
