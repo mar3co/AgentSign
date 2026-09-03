@@ -4,8 +4,17 @@
 
 Repo: [mar3co/openseal](https://github.com/mar3co/openseal).
 Canonical host: **https://openseal.me**.
-Redirects: **agentsign.co** and **agentsign.net** → 301 to `openseal.me`, permanently. API base
-URLs live in other people's code and never fully migrate; these do not get retired.
+Alias: **agentsign.co** stays attached to the same Vercel project and serves the same app,
+permanently. It is **not** a 301. A permanent redirect on an API host is unsafe: many HTTP
+clients turn POST into GET or drop the body when they follow a 301, so redirecting
+`agentsign.co/v1/...` would break the very integrations the redirect is meant to protect. API
+base URLs live in other people's code and never fully migrate, so the old host keeps answering
+on its own. `openseal.me` is canonical for humans and search engines through `metadataBase`,
+which is where a canonical belongs.
+
+**agentsign.net** has no DNS records at all — the "→ 301" this file used to claim was never
+configured, and the domain has never resolved. Either point it at the app or let it lapse; do
+not keep documenting a redirect that does not exist.
 DNS: Cloudflare, MAR3 Technologies.
 
 The product is unchanged: a signing primitive (send / sign / fetch). Humans Finish. Agents
