@@ -115,17 +115,16 @@ fixed gap even under font fallback.
 | `apple-touch-icon-180.png` | 180 | wax tile |
 | `tile-wax-512.png`, `tile-ink-512.png` | 512 | tiles |
 | `mark-512.png`, `mark-dark-512.png` | 512 | marks |
-| `wordmark-4x.png`, `wordmark-dark-4x.png` | 1216w | wordmarks |
-| `lockup-4x.png`, `lockup-dark-4x.png` | 1168w | lockups |
+| `wordmark-4x.png`, `wordmark-dark-4x.png` | 1120w | wordmarks |
+| `lockup-4x.png`, `lockup-dark-4x.png` | 992w | lockups |
 
-**Pending re-export (rename follow-up):** `wordmark-4x.png`, `wordmark-dark-4x.png`,
-`lockup-4x.png` and `lockup-dark-4x.png` still render the word "AgentSign" — they were not
-regenerated during the rename because Public Sans SemiBold is not installed on the machine that
-ran it, and rendering under fallback would cut the wordmark wrong. The glyph-only exports
-(favicons, tiles, marks) carry no text and are unaffected, as are the SVG sources. Nothing the
-app serves uses the four stale files; they are deck and marketing assets. The two text-bearing
-SVGs may also want their `viewBox` tightened — "OpenSeal" is one character shorter than
-"AgentSign", and the wordmark is right-anchored, so the extra room now sits on the left.
+**Refitted for the shorter word (2026-09-03).** "OpenSeal" is one character shorter than
+"AgentSign", which left dead space in the text-bearing SVGs: on the **left** of the wordmark
+(the text is right-anchored) and on the **right** of the lockup (left-anchored). Both were
+retightened by moving the `viewBox`, not the elements, so the wax full-stop keeps the exact gap
+it was designed with. Measured ink margins are now 2.75/3.125 units on the wordmark and
+2.0/2.5 on the lockup. The four text-bearing PNGs were re-exported at the new widths; the
+glyph-only exports carry no text and were untouched.
 
 To regenerate: `rsvg-convert -w <px> <src>.svg -o <out>.png` (`brew install librsvg`). The
 text-bearing SVGs need **Public Sans SemiBold** visible to fontconfig — either install it
