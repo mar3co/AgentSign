@@ -2,7 +2,7 @@
 
 **OpenSeal** (one word, CamelCase). Renamed from AgentSign on 2026-09-03.
 
-Repo: [mar3co/OpenSeal](https://github.com/mar3co/OpenSeal).
+Repo: [mar3co/openseal](https://github.com/mar3co/openseal).
 Canonical host: **https://openseal.me**.
 Redirects: **agentsign.co** and **agentsign.net** → 301 to `openseal.me`, permanently. API base
 URLs live in other people's code and never fully migrate; these do not get retired.
@@ -23,10 +23,17 @@ extras without a plan. Keep it true.
 
 ## Form
 
+**Casing:** the product is **OpenSeal** in CamelCase wherever a human reads it — UI, wordmark,
+invoices, the certificate product line. Every machine identifier is lowercase `openseal`: the
+GitHub repo, the local folder, the host, the MCP server name. That matches the rest of the MAR3
+workspace, where repos are lowercase (`ss-core`, `ss-macos`, `opentag`, `all-good`) and
+AgentSign was the outlier.
+
 | Place | Form |
 |---|---|
 | Spoken / invoices / certificate product line | **OpenSeal** |
-| GitHub | `mar3co/OpenSeal` |
+| GitHub | `mar3co/openseal` |
+| Local folder | `~/GitHub/MAR3/openseal` |
 | Hosted product | `openseal.me` |
 | npm `package.json` `name` | stays `sign` — brand-neutral, no reason to churn |
 | MCP bin | stays `sign-mcp` |

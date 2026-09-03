@@ -2,7 +2,7 @@
 
 A signing **primitive**, not a signing suite. Drop a file or `POST` it. A human Finishes. An agent can Attest. You get a PDF and an audit trail. Open source + cloud.
 
-Product of MAR3. Repo [mar3co/OpenSeal](https://github.com/mar3co/OpenSeal). Canonical host **https://openseal.me**; `agentsign.co` and `agentsign.net` 301 here permanently. The npm name stays `sign` and the key prefixes stay `sign_tmp_` / `sign_live_` / `sign_agent_` / `sign_oauth_` — both are brand-neutral by design and survive a rename.
+Product of MAR3. Repo [mar3co/openseal](https://github.com/mar3co/openseal). Canonical host **https://openseal.me**; `agentsign.co` and `agentsign.net` 301 here permanently. The npm name stays `sign` and the key prefixes stay `sign_tmp_` / `sign_live_` / `sign_agent_` / `sign_oauth_` — both are brand-neutral by design and survive a rename.
 
 **Free path does not require a login.** Optional login (Supabase Auth: passkey, magic link, email+password, Google, GitHub) is for people who want to keep their documents and mint live API keys. Machines use `sign_tmp_…` (job, dies with the file), `sign_live_…` (minted after login), `sign_oauth_…` (granted to a connected agent), or a Pro named-agent `sign_agent_…` to Attest. **Humans never need an account to Finish.** After they sign, we ask them to create one so they can keep docs they signed — that is the growth loop. Never signup-to-sign. Keys authenticate the caller; they never Finish a human party. No `sign` MCP tool.
 
@@ -24,7 +24,7 @@ Document work, since it shapes the deploy: PDFs are read with `pdfjs-dist` (+ `@
 - [Name](docs/name.md): OpenSeal, domains, key prefixes
 - [OSS competitor research](docs/research/2026-08-20-competitor-research.md): DocuSeal, Documenso, OpenSign, SendSign, LibreSign, Signbee; steal/avoid
 - [Design specs and plans](docs/superpowers/): one dated design and plan per feature (v1 through markdown send), written before the code and reviewed in the PR that ships it
-- [Wiki](https://github.com/mar3co/OpenSeal/wiki): product orientation for humans who are not in the code yet
+- [Wiki](https://github.com/mar3co/openseal/wiki): product orientation for humans who are not in the code yet
 
 License: **Apache-2.0** (`LICENSE`).
 
