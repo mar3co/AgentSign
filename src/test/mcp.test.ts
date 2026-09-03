@@ -74,7 +74,7 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
     const res = await getLlms(new Request("http://sign.test/llms.txt"));
     expect(res.status).toBe(200);
     const body = await res.text();
-    expect(body).toContain("AgentSign");
+    expect(body).toContain("OpenSeal");
     expect(body).toMatch(/attest/);
     expect(body).not.toMatch(/AI signed/i);
     expect(body).toMatch(/send/);
@@ -89,12 +89,12 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
   });
 
   it("GET /llms.txt prints the MCP endpoint on the configured origin", async () => {
-    vi.stubEnv("APP_URL", "https://agentsign.example");
+    vi.stubEnv("APP_URL", "https://openseal.example");
     resetEnvCache();
     try {
       const body = await (await getLlms(new Request("http://sign.test/llms.txt"))).text();
-      expect(body).toContain("https://agentsign.example/mcp");
-      expect(body).toContain("agentsign https://agentsign.example/mcp");
+      expect(body).toContain("https://openseal.example/mcp");
+      expect(body).toContain("openseal https://openseal.example/mcp");
     } finally {
       vi.unstubAllEnvs();
       resetEnvCache();
@@ -109,7 +109,7 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
     expect(body).toContain("oauth-protected-resource");
     expect(body).toContain("/oauth/register");
     expect(body).toMatch(/PKCE/);
-    expect(body).toContain("claude mcp add --transport http agentsign");
+    expect(body).toContain("claude mcp add --transport http openseal");
     expect(body).toContain("party.ready");
     expect(body).toContain("document.expired");
     expect(body).toContain("X-Sign-Signature");
@@ -128,12 +128,12 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
     }
   });
 
-  it("documents AgentSign in OpenAPI and MCP server metadata", async () => {
-    expect(openapi.info.title).toBe("AgentSign");
+  it("documents OpenSeal in OpenAPI and MCP server metadata", async () => {
+    expect(openapi.info.title).toBe("OpenSeal");
     const { client, server } = await connectMcp();
     void server;
     const init = await client.getServerVersion();
-    expect(init?.name).toBe("agentsign");
+    expect(init?.name).toBe("openseal");
     // Both surfaces read package.json, so the handshake and the spec agree.
     expect(init?.version).toBe(pkg.version);
     expect(openapi.info.version).toBe(pkg.version);
@@ -483,7 +483,7 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
       expect(downloadBody.result?.isError).toBeFalsy();
       const resource = resourceOf({ content: downloadBody.result?.content ?? [] });
       expect(resource.mimeType).toBe("application/pdf");
-      expect(resource.uri).toBe(`agentsign://documents/${documentId}.pdf`);
+      expect(resource.uri).toBe(`openseal://documents/${documentId}.pdf`);
       const pdfBytes = Buffer.from(resource.blob!, "base64");
       expect(pdfBytes.subarray(0, 4).toString("latin1")).toBe("%PDF");
       const sealed = await store.get(objectKey(documentId, "sealed"));
@@ -620,7 +620,7 @@ describe("MCP send/status/download + OpenAPI + llms.txt", () => {
       expect((download as { isError?: boolean }).isError).toBeFalsy();
       const resource = resourceOf(download as { content: ResourceContent[] });
       expect(resource.mimeType).toBe("application/pdf");
-      expect(resource.uri).toBe(`agentsign://documents/${sendJson.id}.pdf`);
+      expect(resource.uri).toBe(`openseal://documents/${sendJson.id}.pdf`);
       const pdfBytes = Buffer.from(resource.blob!, "base64");
       expect(pdfBytes.subarray(0, 4).toString("latin1")).toBe("%PDF");
       const sealed = await store.get(objectKey(sendJson.id, "sealed"));

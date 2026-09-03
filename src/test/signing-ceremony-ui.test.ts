@@ -159,7 +159,7 @@ describe("SigningCeremony fields UI", () => {
     await waitFor(() => {
       expect(postMessage).toHaveBeenCalledWith(
         {
-          source: "agentsign",
+          source: "openseal",
           event: "completed",
           id: "doc-1",
           status: "completed",
@@ -167,6 +167,17 @@ describe("SigningCeremony fields UI", () => {
         "https://app.example.com",
       );
     });
+    // Rename compat: embedders that filter on the pre-rename source still get the
+    // event. Delete this assertion and the second emit together, deliberately.
+    expect(postMessage).toHaveBeenCalledWith(
+      {
+        source: "agentsign",
+        event: "completed",
+        id: "doc-1",
+        status: "completed",
+      },
+      "https://app.example.com",
+    );
     expect(topLocation.href).toBe("https://app.example.com/done");
   });
 
@@ -204,7 +215,7 @@ describe("SigningCeremony fields UI", () => {
     await waitFor(() => {
       expect(postMessage).toHaveBeenCalledWith(
         {
-          source: "agentsign",
+          source: "openseal",
           event: "declined",
           id: "doc-1",
           status: "declined",

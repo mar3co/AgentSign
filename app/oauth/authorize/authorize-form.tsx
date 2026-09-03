@@ -34,7 +34,7 @@ export function AuthorizeForm({
     <Card>
       <CardHeader>
         <CardTitle>
-          {clientName} wants to use your AgentSign account.
+          {clientName} wants to use your OpenSeal account.
         </CardTitle>
         <CardDescription>
           Send, status, and download. Attest only for agents you allow.

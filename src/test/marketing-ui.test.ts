@@ -35,7 +35,7 @@ describe("TerminalPanel", () => {
   it("colors comments apart from commands", () => {
     const { container } = render(
       createElement(TerminalCode, {
-        code: "# try this\n$ curl https://agentsign.co/v1/documents",
+        code: "# try this\n$ curl https://openseal.me/v1/documents",
       }),
     );
     const spans = container.querySelectorAll("pre span");

@@ -1,4 +1,4 @@
-import { AgentSignMark } from "@/components/brand-mark";
+import { OpenSealMark } from "@/components/brand-mark";
 import { cn } from "@/lib/utils";
 
 export type SiteHeaderVariant = "public" | "ceremony" | "auth";
@@ -22,7 +22,7 @@ export function SiteHeader({
         href="/"
         className="inline-flex items-center gap-2.5 text-foreground"
       >
-        <AgentSignMark
+        <OpenSealMark
           className={isPublicChrome ? "size-5 sm:size-6" : "size-5"}
         />
         <span
@@ -33,7 +33,7 @@ export function SiteHeader({
               : "text-xl tracking-tight",
           )}
         >
-          AgentSign
+          OpenSeal
         </span>
       </a>
       {variant === "public" ? (

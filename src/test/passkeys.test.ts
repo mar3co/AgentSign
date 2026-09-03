@@ -90,7 +90,7 @@ function createFakeAuth() {
           ok: true as const,
           challenge: {
             challengeId,
-            options: { challenge: "abc", rpId: "agentsign.co" },
+            options: { challenge: "abc", rpId: "openseal.me" },
           },
         };
       },
@@ -126,7 +126,7 @@ function createFakeAuth() {
           ok: true as const,
           challenge: {
             challengeId,
-            options: { challenge: "def", rpId: "agentsign.co" },
+            options: { challenge: "def", rpId: "openseal.me" },
           },
         };
       },

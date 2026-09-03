@@ -454,7 +454,7 @@ describe("POST /v1/documents/:id/attest", () => {
     expect(Buffer.from(sealed!).toString("latin1")).toContain(banner);
     expect(Buffer.from(cert!).toString("latin1")).toContain(banner);
     expect(Buffer.from(cert!).toString("latin1")).toContain("human_signatures: 0");
-    expect(Buffer.from(cert!).toString("latin1")).not.toContain("Sent with AgentSign");
+    expect(Buffer.from(cert!).toString("latin1")).not.toContain("Sent with OpenSeal");
   });
 
   it("concurrent double attest: one 200 one 409", { timeout: 60_000 }, async () => {

@@ -50,7 +50,7 @@ const STATUS_CALL = `# they signed. this is the trail: who,
 # when, and every step we recorded.
 # the throwaway key from send can read
 # this document only.
-$ curl https://agentsign.co/v1/documents/doc_kx3q9 \\
+$ curl https://openseal.me/v1/documents/doc_kx3q9 \\
        -H 'authorization: Bearer sign_live_...'
 { "status": "completed", "signers": [ … ], "audit": [ … ] }`;
 
@@ -58,13 +58,13 @@ const AGENT_CALL = `# named key, own receipt. it never
 # signs for a person. people still
 # finish the PDF by hand.
 $ curl -X POST \\
-    https://agentsign.co/v1/documents/doc_kx3q9/attest \\
+    https://openseal.me/v1/documents/doc_kx3q9/attest \\
     -H 'authorization: Bearer sign_agent_...'`;
 
 const VERIFY_CALL = `# anyone can run this. no key, no
 # account. the file is the proof.
 $ curl -F file=@sealed.pdf \\
-       https://agentsign.co/v1/verify
+       https://openseal.me/v1/verify
 { "valid": true, "human_signatures": 1, "agent_attestations": 1 }`;
 
 type Row = {
@@ -132,7 +132,7 @@ const CHAPTERS: readonly Chapter[] = [
   {
     eyebrow: "What do agents have to do with it?",
     headline: "It speaks agent and developer",
-    lede: "Every month, more of your paperwork is handled by something that isn't a person. AgentSign is built for that turn, and the audit trail names everyone who took it.",
+    lede: "Every month, more of your paperwork is handled by something that isn't a person. OpenSeal is built for that turn, and the audit trail names everyone who took it.",
     rows: [
       {
         icon: User,

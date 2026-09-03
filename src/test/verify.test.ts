@@ -47,7 +47,7 @@ const png = Uint8Array.from(
   ),
 );
 
-const FOOTER = "Sent with AgentSign";
+const FOOTER = "Sent with OpenSeal";
 const ATTESTED =
   "Attested by Grok Legal for shop@example.com at 2026-08-21T12:00:00.000Z. Not an electronic signature.";
 
@@ -445,7 +445,7 @@ describe("POST /v1/verify", () => {
     expect(env!.status).toBe("completed");
   });
 
-  it("Free sealed appearance includes Sent with AgentSign; certificate does not", {
+  it("Free sealed appearance includes Sent with OpenSeal; certificate does not", {
     timeout: 60_000,
   }, async () => {
     const { store, sent } = await boot();
@@ -506,7 +506,7 @@ describe("POST /v1/verify", () => {
     expect(json.human_signatures).toBeGreaterThanOrEqual(1);
   });
 
-  it("Pro sealed appearance does not include Sent with AgentSign", { timeout: 60_000 }, async () => {
+  it("Pro sealed appearance does not include Sent with OpenSeal", { timeout: 60_000 }, async () => {
     const { db, store, sent, userFor } = await boot();
     const { cookie } = await asPro(db, userFor);
     const live = await mintLive(cookie);

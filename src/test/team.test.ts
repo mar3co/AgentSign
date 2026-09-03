@@ -335,7 +335,7 @@ describe("team API", () => {
     expect(invited.status).toBe("invited");
     expect(sent).toHaveLength(1);
     expect(sent[0]!.to).toBe("tech@example.com");
-    expect(sent[0]!.subject).toBe("Join your team on AgentSign");
+    expect(sent[0]!.subject).toBe("Join your team on OpenSeal");
     expect(sent[0]!.text).toContain("/team/accept?token=");
     tokenFromMail(sent[0]!.text);
 

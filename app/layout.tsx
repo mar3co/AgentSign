@@ -50,11 +50,11 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://agentsign.co"),
-  applicationName: "AgentSign",
+  metadataBase: new URL("https://openseal.me"),
+  applicationName: "OpenSeal",
   title: {
-    default: "AgentSign",
-    template: "%s · AgentSign",
+    default: "OpenSeal",
+    template: "%s · OpenSeal",
   },
   description,
   icons: {
@@ -66,21 +66,21 @@ export const metadata: Metadata = {
     apple: [{ url: "/apple-icon.png", sizes: "180x180", type: "image/png" }],
   },
   appleWebApp: {
-    title: "AgentSign",
+    title: "OpenSeal",
     capable: true,
     statusBarStyle: "default",
   },
   openGraph: {
-    title: "AgentSign",
+    title: "OpenSeal",
     description,
     url: "/",
-    siteName: "AgentSign",
+    siteName: "OpenSeal",
     type: "website",
     locale: "en_US",
   },
   twitter: {
     card: "summary_large_image",
-    title: "AgentSign",
+    title: "OpenSeal",
     description,
   },
 };

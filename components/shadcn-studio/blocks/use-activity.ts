@@ -12,7 +12,7 @@ export type ActivityItem = {
   at: string;
 };
 
-const SEEN_KEY = "agentsign.activity.seen";
+const SEEN_KEY = "openseal.activity.seen";
 
 function lastSeen(): number {
   try {

@@ -15,7 +15,7 @@ export async function sealPdf(
     pdfPage: pages[pages.length - 1],
     reason: "Document electronically signed",
     contactInfo: "sign@localhost",
-    name: "AgentSign",
+    name: "OpenSeal",
     location: "UTC",
     // Default 8192 can be tight for RSA-2048 + cert in PKCS#7.
     signatureLength: 16384,

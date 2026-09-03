@@ -62,9 +62,9 @@ describe("public chrome", () => {
 
   it("public header lockup is the mark plus a font-heading wordmark", () => {
     render(createElement(SiteHeader, { variant: "public" }));
-    const lockup = screen.getByRole("link", { name: "AgentSign" });
+    const lockup = screen.getByRole("link", { name: "OpenSeal" });
     expect(lockup.querySelector("svg")).toBeTruthy();
-    expect(lockup.querySelector(".font-heading")?.textContent).toBe("AgentSign");
+    expect(lockup.querySelector(".font-heading")?.textContent).toBe("OpenSeal");
   });
 
   it("auth header still offers Send a document", () => {

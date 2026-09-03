@@ -392,7 +392,7 @@ export async function commitCompletedDocument(opts: {
 
   let keepDays = Number(getEnv().FREE_KEEP_DAYS);
   const proDays = Number(getEnv().PRO_KEEP_DAYS);
-  let footer: string | undefined = "Sent with AgentSign";
+  let footer: string | undefined = "Sent with OpenSeal";
   if (document.userId) {
     const team = await teamForUser(db, document.userId);
     if (team.entitled) {

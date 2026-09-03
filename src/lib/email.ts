@@ -121,7 +121,7 @@ export function createMailer(): Mailer {
 
 export function otpEmail(digits: string): Pick<MailMessage, "subject" | "text"> {
   return {
-    subject: "Your AgentSign verification code",
+    subject: "Your OpenSeal verification code",
     text: `Your verification code is ${digits}. It expires in 10 minutes.`,
   };
 }
@@ -253,9 +253,9 @@ export function teamInviteEmail(input: {
   acceptUrl: string;
 }): Pick<MailMessage, "subject" | "text"> {
   return {
-    subject: "Join your team on AgentSign",
+    subject: "Join your team on OpenSeal",
     text: [
-      "You were invited to join a team on AgentSign.",
+      "You were invited to join a team on OpenSeal.",
       "",
       `Accept here: ${absoluteUrl(input.acceptUrl)}`,
       "",

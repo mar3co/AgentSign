@@ -1,14 +1,14 @@
-# AgentSign
+# OpenSeal
 
 A signing **primitive**, not a signing suite. Drop a file or `POST` it. A human Finishes. An agent can Attest. You get a PDF and an audit trail. Open source + cloud.
 
-Product of MAR3. Repo [mar3co/AgentSign](https://github.com/mar3co/AgentSign). Canonical host **https://agentsign.co**. Folder and npm name stay `sign`. Key prefixes stay `sign_tmp_` / `sign_live_` / `sign_agent_` / `sign_oauth_`.
+Product of MAR3. Repo [mar3co/OpenSeal](https://github.com/mar3co/OpenSeal). Canonical host **https://openseal.me**; `agentsign.co` and `agentsign.net` 301 here permanently. The npm name stays `sign` and the key prefixes stay `sign_tmp_` / `sign_live_` / `sign_agent_` / `sign_oauth_` — both are brand-neutral by design and survive a rename.
 
 **Free path does not require a login.** Optional login (Supabase Auth: passkey, magic link, email+password, Google, GitHub) is for people who want to keep their documents and mint live API keys. Machines use `sign_tmp_…` (job, dies with the file), `sign_live_…` (minted after login), `sign_oauth_…` (granted to a connected agent), or a Pro named-agent `sign_agent_…` to Attest. **Humans never need an account to Finish.** After they sign, we ask them to create one so they can keep docs they signed — that is the growth loop. Never signup-to-sign. Keys authenticate the caller; they never Finish a human party. No `sign` MCP tool.
 
 **Legal:** same class as DocuSeal’s **default** product — SES designed for ESIGN + UETA (consent, intent, email-link attribution, PKCS#12 seal, completion certificate). Agent attestation is a cryptographic receipt, not an electronic signature. We do **not** claim court admissibility, SOC 2, HIPAA, or QES.
 
-**Packaging:** two columns. **Free** (login optional): 7 days to sign, **7-day shredder** after keep window, live keys after login, quiet ~20 sends / 30 days, “Sent with AgentSign” on the appearance page. **Pro $19/mo** (Stripe Checkout): 1-year keep, cap lift, footer off, plus branding, saved templates (cap 50), team invites (soft cap 10, not billed per person), and **10 named agents**. No seats, no per-document, no Enterprise page. Self-host is forever: set `SELF_HOST=1` to entitle Pro extras without a Stripe plan.
+**Packaging:** two columns. **Free** (login optional): 7 days to sign, **7-day shredder** after keep window, live keys after login, quiet ~20 sends / 30 days, “Sent with OpenSeal” on the appearance page. **Pro $19/mo** (Stripe Checkout): 1-year keep, cap lift, footer off, plus branding, saved templates (cap 50), team invites (soft cap 10, not billed per person), and **10 named agents**. No seats, no per-document, no Enterprise page. Self-host is forever: set `SELF_HOST=1` to entitle Pro extras without a Stripe plan.
 
 **Surface:** REST, grouped by who can call it: open (`/v1/documents`, `/v1/verify`, `/v1/detect-fields`), account (`/v1/keys` mints live keys, plus `/v1/workspace`, `/v1/billing`, `/v1/activity`, `/v1/stats`, `/v1/sending`), and Pro or self-host (`/v1/branding`, `/v1/templates`, `/v1/team`, `/v1/agents`). **`/openapi.json` is the full list with request and response shapes**; **llms.txt** is the same surface for agents. MCP (stdio and HTTP) exposes `send`, `status`, `download`, `attest`, `reject`, `verify`, `list_templates`, `send_template`. No `sign` tool. Humans Finish. Agents Attest. Ceremony logo is `GET /s/:token/logo` (signing token, not a public account URL).
 
@@ -21,10 +21,10 @@ Document work, since it shapes the deploy: PDFs are read with `pdfjs-dist` (+ `@
 ## Docs
 
 - [Product plan](docs/2026-08-19-product-plan.md): positioning, auth lanes, retention, stack, decisions
-- [Name](docs/name.md): AgentSign, domains, key prefixes
+- [Name](docs/name.md): OpenSeal, domains, key prefixes
 - [OSS competitor research](docs/research/2026-08-20-competitor-research.md): DocuSeal, Documenso, OpenSign, SendSign, LibreSign, Signbee; steal/avoid
 - [Design specs and plans](docs/superpowers/): one dated design and plan per feature (v1 through markdown send), written before the code and reviewed in the PR that ships it
-- [Wiki](https://github.com/mar3co/AgentSign/wiki): product orientation for humans who are not in the code yet
+- [Wiki](https://github.com/mar3co/OpenSeal/wiki): product orientation for humans who are not in the code yet
 
 License: **Apache-2.0** (`LICENSE`).
 

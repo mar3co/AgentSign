@@ -165,7 +165,7 @@ export async function appendSignaturePage(
       doc,
       page,
       fontKey,
-      "Sent with AgentSign",
+      "Sent with OpenSeal",
       margin,
       margin,
       size,

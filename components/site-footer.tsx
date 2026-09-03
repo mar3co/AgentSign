@@ -15,7 +15,7 @@ export function SiteFooter({ className }: { className?: string }) {
       <Separator className="mb-4" />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-col gap-1">
-          <p className="font-heading text-sm tracking-tight">AgentSign</p>
+          <p className="font-heading text-sm tracking-tight">OpenSeal</p>
           <p className="text-xs text-muted-foreground">
             Easy signing for everything.
           </p>

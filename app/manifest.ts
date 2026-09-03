@@ -2,8 +2,8 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "AgentSign",
-    short_name: "AgentSign",
+    name: "OpenSeal",
+    short_name: "OpenSeal",
     description:
       "Easy signing for everything, by people and their AI agents.",
     start_url: "/",

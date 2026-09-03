@@ -3,15 +3,15 @@ import { appOrigin } from "@/src/env";
 export const runtime = "nodejs";
 
 function llmsTxt(origin: string): string {
-  return `# AgentSign
+  return `# OpenSeal
 
-AgentSign is a signing primitive. Human always signs. Bearer keys authenticate the caller; they never skip the signer and never auto-sign. No sign tool. Humans Finish. Agents Attest.
+OpenSeal is a signing primitive. Human always signs. Bearer keys authenticate the caller; they never skip the signer and never auto-sign. No sign tool. Humans Finish. Agents Attest.
 
 ## MCP
 
 Endpoint: ${origin}/mcp (streamable HTTP, POST).
-Claude Code: claude mcp add --transport http agentsign ${origin}/mcp
-Cursor (mcp.json): {"mcpServers":{"agentsign":{"url":"${origin}/mcp"}}}
+Claude Code: claude mcp add --transport http openseal ${origin}/mcp
+Cursor (mcp.json): {"mcpServers":{"openseal":{"url":"${origin}/mcp"}}}
 Claude Desktop / claude.ai: Settings > Connectors > Add custom connector, URL ${origin}/mcp.
 Auth: OAuth 2.1 + PKCE (S256), or Authorization: Bearer sign_live_ / sign_agent_. An unauthenticated POST /mcp returns 401 with WWW-Authenticate resource_metadata.
 Discovery: GET /.well-known/oauth-protected-resource, GET /.well-known/oauth-authorization-server. Client registration: CIMD https client_id, else dynamic registration at POST /oauth/register. Consent at GET /oauth/authorize, tokens at POST /oauth/token. A grant carries the agents it may attest as.
@@ -44,7 +44,7 @@ Agent error codes ({ error, code }): human_required (400, every party attested a
 
 ## On-page fields and embed
 
-Optional on POST /v1/documents: fields JSON (page 1-based, x/y/w/h percent top-left), values prefill, order=parallel, send_email=false, embed_origin, completed_redirect_url. {{sig}} tags work in markdown and in PDF Free one-offs. Markdown sends keep their source: GET /v1/documents/{id}.pdf?kind=source returns it (any time before shred). Embed: iframe /s/:token and listen for postMessage { source: "agentsign", event }. No sign tool.
+Optional on POST /v1/documents: fields JSON (page 1-based, x/y/w/h percent top-left), values prefill, order=parallel, send_email=false, embed_origin, completed_redirect_url. {{sig}} tags work in markdown and in PDF Free one-offs. Markdown sends keep their source: GET /v1/documents/{id}.pdf?kind=source returns it (any time before shred). Embed: iframe /s/:token and listen for postMessage { source: "openseal", event }. No sign tool.
 
 ## REST
 

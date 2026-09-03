@@ -109,10 +109,10 @@ export function createSignMcpServer(opts?: {
   const allowEnvKey = opts?.allowEnvKey === true;
   const maxDownloadBytes = opts?.maxDownloadBytes ?? MCP_DOWNLOAD_MAX_BYTES;
   const server = new McpServer(
-    { name: "agentsign", version: pkg.version },
+    { name: "openseal", version: pkg.version },
     {
       instructions:
-        "AgentSign is a signing primitive. Human always signs. Keys authenticate the caller and never sign. No sign tool. Humans Finish. Agents Attest. Tools: send, status, download, attest, reject, verify, list_templates, send_template. Optional send fields (JSON); message, send/send_template values, order, send_email, completed_redirect_url, embed_origin. PDF {{sig}} tags work on Free one-offs.",
+        "OpenSeal is a signing primitive. Human always signs. Keys authenticate the caller and never sign. No sign tool. Humans Finish. Agents Attest. Tools: send, status, download, attest, reject, verify, list_templates, send_template. Optional send fields (JSON); message, send/send_template values, order, send_email, completed_redirect_url, embed_origin. PDF {{sig}} tags work on Free one-offs.",
     },
   );
 
@@ -284,7 +284,7 @@ export function createSignMcpServer(opts?: {
           {
             type: "resource" as const,
             resource: {
-              uri: `agentsign://documents/${fileName}`,
+              uri: `openseal://documents/${fileName}`,
               mimeType: "application/pdf",
               blob: Buffer.from(bytes).toString("base64"),
             },

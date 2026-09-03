@@ -151,10 +151,11 @@ export function SigningCeremony({
     if (window.parent === window) return;
     const origin = state.embed_origin;
     if (!origin) return;
-    window.parent.postMessage(
-      { source: "agentsign", event, id: state.id, status },
-      origin,
-    );
+    const message = { event, id: state.id, status };
+    window.parent.postMessage({ source: "openseal", ...message }, origin);
+    // Embedders filter on source. Keep emitting the pre-rename value so existing
+    // iframes keep working; drop after the deprecation window.
+    window.parent.postMessage({ source: "agentsign", ...message }, origin);
   }
 
   function maybeRedirect() {

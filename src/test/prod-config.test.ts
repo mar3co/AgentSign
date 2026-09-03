@@ -6,10 +6,10 @@ const full = {
   SUPABASE_URL: "https://x.supabase.co",
   SUPABASE_ANON_KEY: "anon",
   SUPABASE_SERVICE_ROLE_KEY: "svc",
-  APP_URL: "https://agentsign.co",
+  APP_URL: "https://openseal.me",
   APP_ORIGIN: "",
   RESEND_API_KEY: "re_x",
-  FROM_EMAIL: "AgentSign <sign@agentsign.co>",
+  FROM_EMAIL: "OpenSeal <sign@openseal.me>",
   CRON_SECRET: "c",
   WEBHOOK_KEK: "k",
   P12_PATH: "/var/cert.p12",
@@ -41,7 +41,7 @@ describe("missingProductionConfig", () => {
   });
 
   it("accepts APP_ORIGIN in place of APP_URL, since every reader takes either", () => {
-    const env = { ...full, APP_URL: "", APP_ORIGIN: "https://agentsign.co" };
+    const env = { ...full, APP_URL: "", APP_ORIGIN: "https://openseal.me" };
     expect(missingProductionConfig(env, "production")).toEqual([]);
   });
 
