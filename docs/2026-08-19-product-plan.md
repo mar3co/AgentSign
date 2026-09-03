@@ -1,11 +1,11 @@
 # Sign — Product Plan
 
-**Name:** AgentSign (one word). See [name.md](./name.md).  
+**Name:** OpenSeal (one word). Renamed from AgentSign on 2026-09-03; see [name.md](./name.md).  
 **Date:** 2026-08-19  
 **Updated:** 2026-08-21  
 **Status:** Agreed direction. v1 + v1.1 implemented locally. v1.2 agent parties spec locked.  
-**Repo:** [mar3co/AgentSign](https://github.com/mar3co/AgentSign)  
-**Host:** agentsign.co (Cloudflare). agentsign.net → 301.  
+**Repo:** [mar3co/openseal](https://github.com/mar3co/openseal)  
+**Host:** openseal.me (Cloudflare). agentsign.co and agentsign.net → 301, permanently.  
 **Not:** a suite SKU, an industry fork, or a private cloud for one company. This is its own product.
 
 ---
