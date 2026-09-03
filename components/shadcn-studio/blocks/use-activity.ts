@@ -12,11 +12,19 @@ export type ActivityItem = {
   at: string;
 };
 
-const SEEN_KEY = "agentsign.activity.seen";
+const SEEN_KEY = "openseal.activity.seen";
+/** Pre-rename key. Read once so the bell does not light up with every past
+ *  event on the first load after the rename; markSeen writes the new key. */
+const LEGACY_SEEN_KEY = "agentsign.activity.seen";
 
 function lastSeen(): number {
   try {
-    return Number(window.localStorage.getItem(SEEN_KEY)) || 0;
+    const store = window.localStorage;
+    return (
+      Number(store.getItem(SEEN_KEY)) ||
+      Number(store.getItem(LEGACY_SEEN_KEY)) ||
+      0
+    );
   } catch {
     return 0;
   }

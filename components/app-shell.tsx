@@ -12,7 +12,7 @@ import {
   Send,
 } from "lucide-react";
 import { NAV, NAV_GROUPS, type NavItem } from "@/components/app-nav";
-import { AgentSignMark } from "@/components/brand-mark";
+import { OpenSealMark } from "@/components/brand-mark";
 import { LinkButton } from "@/components/link-button";
 import { NavUser } from "@/components/nav-user";
 import { ActivityDialog } from "@/components/shadcn-studio/blocks/dialog-activity";
@@ -211,11 +211,11 @@ export function AppShell({
                     render={<a href="/dashboard" />}
                   >
                     <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand-wax text-primary-foreground">
-                      <AgentSignMark className="size-4" mono />
+                      <OpenSealMark className="size-4" mono />
                     </div>
                     {/* Lockup: the mark carries the wax pixel, so no full-stop. */}
                     <span className="font-sans text-xl font-semibold">
-                      AgentSign
+                      OpenSeal
                     </span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
@@ -301,7 +301,7 @@ export function AppShell({
                 </div>
               </div>
               <footer className="flex items-center justify-between gap-3 px-4 pt-4 text-xs text-muted-foreground max-sm:flex-col sm:px-6">
-                <p>&copy;{new Date().getFullYear()} AgentSign</p>
+                <p>&copy;{new Date().getFullYear()} OpenSeal</p>
                 <div className="flex items-center gap-4">
                   <a href="/docs" className="hover:text-foreground">
                     Docs

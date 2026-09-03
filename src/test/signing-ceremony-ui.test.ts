@@ -167,6 +167,9 @@ describe("SigningCeremony fields UI", () => {
         "https://app.example.com",
       );
     });
+    // Exactly one message: embedders that do not filter on source must not run
+    // their completion path twice.
+    expect(postMessage).toHaveBeenCalledTimes(1);
     expect(topLocation.href).toBe("https://app.example.com/done");
   });
 

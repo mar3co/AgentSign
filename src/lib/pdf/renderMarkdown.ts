@@ -503,8 +503,8 @@ export async function renderMarkdown(
   const epoch = new Date(0);
   doc.setCreationDate(epoch);
   doc.setModificationDate(epoch);
-  doc.setProducer("AgentSign");
-  doc.setCreator("AgentSign");
+  doc.setProducer("OpenSeal");
+  doc.setCreator("OpenSeal");
   const fonts: Fonts = {
     regular: await doc.embedFont(StandardFonts.TimesRoman),
     bold: await doc.embedFont(StandardFonts.TimesRomanBold),

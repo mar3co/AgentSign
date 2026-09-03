@@ -1,4 +1,4 @@
-# AgentSign Brand
+# OpenSeal Brand
 
 Easy signing for everything, by people and their AI agents — and a visual identity to match:
 **a familiar pen writing digital ink, sealed in wax.**
@@ -34,20 +34,24 @@ pixel carries the brand color: the wax seal, the moment the signature completes.
 
 ## The wordmark
 
-**Public Sans SemiBold (600), CamelCase "AgentSign", tracking ≈ −1.5%.** Public Sans was
+**Public Sans SemiBold (600), CamelCase "OpenSeal", tracking ≈ −1.5%.** Public Sans was
 commissioned for U.S. government paperwork — forms, notices, things people sign — and it is
 already the site's sans (`--font-sans-face` in `app/layout.tsx`), so the wordmark costs nothing
 to render live.
 
 **The wax full-stop:** a standalone wordmark ends in a square wax pixel (0.15em, baseline-
-aligned, 0.12em after the "n") — "AgentSign▪". It is the mark's accent pixel migrated into
+aligned, 0.12em after the "l") — "OpenSeal▪". It is the mark's accent pixel migrated into
 typography.
 
 **The one-pixel rule applies across the lockup:** when the mark and wordmark appear together,
 the wordmark **drops** the full-stop; the mark's accent pixel is the one wax pixel in view.
 
-Display treatment (marketing heroes and deck covers only, never UI): "Agent" in IBM Plex Mono
-Medium + "Sign" in a serif italic — the machine types, the human signs. Use sparingly and large.
+Display treatment (marketing heroes and deck covers only, never UI): "Open" in IBM Plex Mono
+Medium + "Seal" in a serif italic — the record is open, the seal is human. Use sparingly and
+large. *(Carried over from the AgentSign treatment, which set "Agent" in mono against "Sign" in
+serif for "the machine types, the human signs". The split still lands on the new name, but it
+is the one brand call made during the rename rather than before it — confirm before it ships on
+anything printed.)*
 
 ## Color
 
@@ -90,15 +94,15 @@ All vector sources live in `public/brand/`; the favicon is served by Next from `
 
 | File | What it is |
 | --- | --- |
-| `public/brand/agentsign-mark.svg` | Mark, ink on transparent (light grounds) |
-| `public/brand/agentsign-mark-dark.svg` | Mark, paper on transparent (dark grounds) |
-| `public/brand/agentsign-mark-mono.svg` | Mark, single `currentColor` (one-color contexts) |
-| `public/brand/agentsign-tile.svg` | Ink tile, 512-ready |
-| `public/brand/agentsign-tile-wax.svg` | Wax tile, 512-ready |
-| `public/brand/agentsign-wordmark.svg` / `-dark` | Standalone wordmark with wax full-stop |
-| `public/brand/agentsign-lockup.svg` / `-dark` | Mark + wordmark, no full-stop |
+| `public/brand/openseal-mark.svg` | Mark, ink on transparent (light grounds) |
+| `public/brand/openseal-mark-dark.svg` | Mark, paper on transparent (dark grounds) |
+| `public/brand/openseal-mark-mono.svg` | Mark, single `currentColor` (one-color contexts) |
+| `public/brand/openseal-tile.svg` | Ink tile, 512-ready |
+| `public/brand/openseal-tile-wax.svg` | Wax tile, 512-ready |
+| `public/brand/openseal-wordmark.svg` / `-dark` | Standalone wordmark with wax full-stop |
+| `public/brand/openseal-lockup.svg` / `-dark` | Mark + wordmark, no full-stop |
 | `app/icon.svg` | Favicon: wax tile, 16px-tuned glyph (3 pixels) |
-| `components/brand-mark.tsx` | `AgentSignMark` and `AgentSignWordmark` React components |
+| `components/brand-mark.tsx` | `OpenSealMark` and `OpenSealWordmark` React components |
 
 The wordmark/lockup SVGs render text in Public Sans, right-anchored so the wax stop keeps a
 fixed gap even under font fallback.
@@ -111,8 +115,16 @@ fixed gap even under font fallback.
 | `apple-touch-icon-180.png` | 180 | wax tile |
 | `tile-wax-512.png`, `tile-ink-512.png` | 512 | tiles |
 | `mark-512.png`, `mark-dark-512.png` | 512 | marks |
-| `wordmark-4x.png`, `wordmark-dark-4x.png` | 1216w | wordmarks |
-| `lockup-4x.png`, `lockup-dark-4x.png` | 1168w | lockups |
+| `wordmark-4x.png`, `wordmark-dark-4x.png` | 1120w | wordmarks |
+| `lockup-4x.png`, `lockup-dark-4x.png` | 992w | lockups |
+
+**Refitted for the shorter word (2026-09-03).** "OpenSeal" is one character shorter than
+"AgentSign", which left dead space in the text-bearing SVGs: on the **left** of the wordmark
+(the text is right-anchored) and on the **right** of the lockup (left-anchored). Both were
+retightened by moving the `viewBox`, not the elements, so the wax full-stop keeps the exact gap
+it was designed with. Measured ink margins are now 2.75/3.125 units on the wordmark and
+2.0/2.5 on the lockup. The four text-bearing PNGs were re-exported at the new widths; the
+glyph-only exports carry no text and were untouched.
 
 To regenerate: `rsvg-convert -w <px> <src>.svg -o <out>.png` (`brew install librsvg`). The
 text-bearing SVGs need **Public Sans SemiBold** visible to fontconfig — either install it
@@ -123,15 +135,15 @@ correctly under fontconfig; use the static SemiBold.
 
 ## In the app
 
-The sidebar header (`components/app-shell.tsx`) renders `AgentSignMark` inside the wax
+The sidebar header (`components/app-shell.tsx`) renders `OpenSealMark` inside the wax
 tile. The glyph is `mono` (all `currentColor`) so a wax pixel does not vanish on a wax
 ground; the tile itself is the wax.
 
 ```tsx
-import { AgentSignMark } from "@/components/brand-mark";
+import { OpenSealMark } from "@/components/brand-mark";
 
 <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand-wax text-primary-foreground">
-  <AgentSignMark className="size-4" mono />
+  <OpenSealMark className="size-4" mono />
 </div>
 ```
 
@@ -139,7 +151,7 @@ import { AgentSignMark } from "@/components/brand-mark";
 
 Applied 2026-08-23:
 
-- Sidebar mark: `AgentSignMark` replaces lucide `PenLine` in `components/app-shell.tsx`; the
+- Sidebar mark: `OpenSealMark` replaces lucide `PenLine` in `components/app-shell.tsx`; the
   public header wordmark carries the wax full-stop via `WaxStop`. The in-app lockup uses the
   wax tile with a mono glyph.
 - **Dashboard `--app-band`**: retired. The studio indigo / Bond Navy / wax header

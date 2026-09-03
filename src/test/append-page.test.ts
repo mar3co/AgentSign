@@ -38,10 +38,10 @@ describe("appendSignaturePage", () => {
     expect(latin1).toContain(
       "Attested by Grok Legal for shop@example.com at 2026-08-21T12:00:00.000Z. Not an electronic signature.",
     );
-    expect(latin1).not.toContain("Sent with AgentSign");
+    expect(latin1).not.toContain("Sent with OpenSeal");
   });
 
-  it("draws Sent with AgentSign at the bottom when footer is set", async () => {
+  it("draws Sent with OpenSeal at the bottom when footer is set", async () => {
     const input = await minimalPdf();
     const out = await appendSignaturePage(input, {
       png: Uint8Array.from(
@@ -53,8 +53,8 @@ describe("appendSignaturePage", () => {
       name: "Jane Doe",
       email: "jane@example.com",
       signedAt: new Date("2026-08-21T12:00:00.000Z"),
-      footer: "Sent with AgentSign",
+      footer: "Sent with OpenSeal",
     });
-    expect(Buffer.from(out).toString("latin1")).toContain("Sent with AgentSign");
+    expect(Buffer.from(out).toString("latin1")).toContain("Sent with OpenSeal");
   });
 });

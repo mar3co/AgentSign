@@ -178,7 +178,7 @@ describe("AuthorizeForm", () => {
         agents: [{ id: "agt_1", slug: "grok-legal", name: "Grok Legal" }],
       }),
     );
-    expect(screen.getByText(/Grok wants to use your AgentSign account/)).toBeTruthy();
+    expect(screen.getByText(/Grok wants to use your OpenSeal account/)).toBeTruthy();
     const form = document.querySelector('form[action="/oauth/authorize"]');
     expect(form?.getAttribute("method")?.toLowerCase()).toBe("post");
     const box = document.querySelector('input[name="agent_ids[]"][value="agt_1"]');

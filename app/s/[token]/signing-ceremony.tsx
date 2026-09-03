@@ -151,6 +151,11 @@ export function SigningCeremony({
     if (window.parent === window) return;
     const origin = state.embed_origin;
     if (!origin) return;
+    // "agentsign" is a frozen protocol constant, not a brand surface. It lives in
+    // embedders' message handlers, the same way sign_live_ keys live in their
+    // config, so the OpenSeal rename deliberately left it alone. Renaming it would
+    // silently break every embedder that filters on it; emitting both values would
+    // double-fire the completion path for every embedder that does not filter.
     window.parent.postMessage(
       { source: "agentsign", event, id: state.id, status },
       origin,

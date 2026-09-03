@@ -276,7 +276,7 @@ describe("completeDocumentPdf", () => {
     expect(cert).toContain("agent_attestations: 1");
     expect(cert).toContain("No human electronic signature. Agent attestations only.");
     expect(cert).not.toContain("Consent:");
-    expect(cert).not.toContain("Sent with AgentSign");
+    expect(cert).not.toContain("Sent with OpenSeal");
   });
 });
 

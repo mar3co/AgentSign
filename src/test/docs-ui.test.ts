@@ -39,7 +39,7 @@ describe("docs page", () => {
       screen.getByRole("link", { name: /connect over mcp/i }).getAttribute("href"),
     ).toBe("#mcp");
     const text = document.body.textContent ?? "";
-    expect(text).toContain("claude mcp add --transport http agentsign");
+    expect(text).toContain("claude mcp add --transport http openseal");
     expect(text).toContain('"mcpServers"');
     expect(text).toContain("/.well-known/oauth-authorization-server");
     expect(text).toContain("/oauth/register");

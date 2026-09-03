@@ -21,7 +21,7 @@ describe("SiteHeader", () => {
 
   it("public header links the wordmark home and Log in, not app nav items", () => {
     render(createElement(SiteHeader, { variant: "public" }));
-    expect(screen.getByRole("link", { name: /^agentsign$/i }).getAttribute("href")).toBe(
+    expect(screen.getByRole("link", { name: /^openseal$/i }).getAttribute("href")).toBe(
       "/",
     );
     expect(screen.getByRole("link", { name: /log in/i }).getAttribute("href")).toBe(
@@ -69,7 +69,7 @@ describe("AppShell", () => {
 
   it("sidebar mark sits on a wax tile with a one-color glyph", () => {
     render(createElement(AppShell, null, "content"));
-    const lockup = screen.getByRole("link", { name: /^agentsign$/i });
+    const lockup = screen.getByRole("link", { name: /^openseal$/i });
     const mark = lockup.querySelector("svg");
     expect(mark?.parentElement?.className).toContain("bg-brand-wax");
     expect(mark?.querySelector("rect[fill='var(--brand-wax)']")).toBeNull();
@@ -98,14 +98,14 @@ describe("NavUser", () => {
       "fetch",
       vi.fn(
         async () =>
-          new Response(JSON.stringify({ email: "demo@agentsign.dev" }), {
+          new Response(JSON.stringify({ email: "demo@openseal.me" }), {
             status: 200,
             headers: { "content-type": "application/json" },
           }),
       ),
     );
     render(createElement(AppShell, null, "content"));
-    expect(await screen.findByText("demo@agentsign.dev")).toBeTruthy();
+    expect(await screen.findByText("demo@openseal.me")).toBeTruthy();
   });
 
   it("offers Log in when whoami says there is no session", async () => {

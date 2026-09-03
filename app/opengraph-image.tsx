@@ -40,7 +40,7 @@ export default async function Image() {
             letterSpacing: -1.5,
           }}
         >
-          AgentSign
+          OpenSeal
         </div>
         <div
           style={{

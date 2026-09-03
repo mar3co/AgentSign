@@ -4,11 +4,11 @@ const PEN_PATH =
   "M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.854z";
 
 /**
- * The AgentSign mark: the pen over four uniform pixels, accent on the last.
+ * The OpenSeal mark: the pen over four uniform pixels, accent on the last.
  * Inherits ink from `currentColor`; the accent pixel reads `--brand-wax`
  * (#cc4416 light / #ff8a5c dark, set in globals.css). See Brand.md.
  */
-export function AgentSignMark({
+export function OpenSealMark({
   className,
   mono = false,
 }: {
@@ -67,7 +67,7 @@ export function WaxStop({ className }: { className?: string }) {
 /**
  * Standalone wordmark: Public Sans SemiBold ending in the wax full-stop.
  */
-export function AgentSignWordmark({ className }: { className?: string }) {
+export function OpenSealWordmark({ className }: { className?: string }) {
   return (
     <span
       className={cn(
@@ -75,7 +75,7 @@ export function AgentSignWordmark({ className }: { className?: string }) {
         className,
       )}
     >
-      AgentSign
+      OpenSeal
       <WaxStop />
     </span>
   );

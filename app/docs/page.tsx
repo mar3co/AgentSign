@@ -23,28 +23,28 @@ const SEND_BLOCK = `$ curl -F title='Repair authorization' \\
        -F signers='[{"name":"Jane",
          "email":"jane@example.com"}]' \\
        -F file=@form.pdf \\
-       https://agentsign.co/v1/documents
+       https://openseal.me/v1/documents
 { "id": "doc_kx3q9", "status": "sent" }`;
 
-const STATUS_BLOCK = `$ curl https://agentsign.co/v1/documents/doc_kx3q9 \\
+const STATUS_BLOCK = `$ curl https://openseal.me/v1/documents/doc_kx3q9 \\
        -H 'authorization: Bearer sign_live_...'
 { "status": "completed", "signers": [ … ], "audit": [ … ] }`;
 
 const VERIFY_BLOCK = `$ curl -F file=@sealed.pdf \\
-       https://agentsign.co/v1/verify
+       https://openseal.me/v1/verify
 { "valid": true, "human_signatures": 1, "agent_attestations": 1 }`;
 
-const EMBED_BLOCK = `<iframe src="https://agentsign.co/s/TOKEN"></iframe>
-// listen for { source: "agentsign", event }
+const EMBED_BLOCK = `<iframe src="https://openseal.me/s/TOKEN"></iframe>
+// listen for { source: "agentsign", event } — frozen protocol constant, not a typo
 // optional: embed_origin, send_email=false, fields JSON, PDF {{sig}}`;
 
 function mcpBlock(origin: string): string {
   return `# Claude Code
-$ claude mcp add --transport http agentsign \\
+$ claude mcp add --transport http openseal \\
        ${origin}/mcp
 
 # Cursor (mcp.json)
-{ "mcpServers": { "agentsign": {
+{ "mcpServers": { "openseal": {
     "url": "${origin}/mcp" } } }
 
 # Claude Desktop, claude.ai
