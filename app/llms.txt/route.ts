@@ -44,7 +44,7 @@ Agent error codes ({ error, code }): human_required (400, every party attested a
 
 ## On-page fields and embed
 
-Optional on POST /v1/documents: fields JSON (page 1-based, x/y/w/h percent top-left), values prefill, order=parallel, send_email=false, embed_origin, completed_redirect_url. {{sig}} tags work in markdown and in PDF Free one-offs. Markdown sends keep their source: GET /v1/documents/{id}.pdf?kind=source returns it (any time before shred). Embed: iframe /s/:token and listen for postMessage { source: "openseal", event }. No sign tool.
+Optional on POST /v1/documents: fields JSON (page 1-based, x/y/w/h percent top-left), values prefill, order=parallel, send_email=false, embed_origin, completed_redirect_url. {{sig}} tags work in markdown and in PDF Free one-offs. Markdown sends keep their source: GET /v1/documents/{id}.pdf?kind=source returns it (any time before shred). Embed: iframe /s/:token and listen for postMessage { source: "agentsign", event } (a frozen protocol constant, unchanged by the OpenSeal rename). No sign tool.
 
 ## REST
 

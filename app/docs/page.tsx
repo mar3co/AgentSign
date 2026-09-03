@@ -35,7 +35,7 @@ const VERIFY_BLOCK = `$ curl -F file=@sealed.pdf \\
 { "valid": true, "human_signatures": 1, "agent_attestations": 1 }`;
 
 const EMBED_BLOCK = `<iframe src="https://openseal.me/s/TOKEN"></iframe>
-// listen for { source: "openseal", event }
+// listen for { source: "agentsign", event } — frozen protocol constant, not a typo
 // optional: embed_origin, send_email=false, fields JSON, PDF {{sig}}`;
 
 function mcpBlock(origin: string): string {

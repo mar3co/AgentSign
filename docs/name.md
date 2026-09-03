@@ -56,6 +56,18 @@ Producer/Creator metadata, and the Free-tier appearance footer. They are cryptog
 sealed and cannot be rewritten. Verification does not read the product name out of a PDF, so
 **they keep verifying** — the mixed history is cosmetic and permanent.
 
+**Passkeys do not survive the host move.** WebAuthn credentials are bound to the relying-party
+id, which is the host, so every passkey registered against `agentsign.co` stops working once
+the canonical host is `openseal.me`. It is not a lockout — magic link, password and the social
+providers still work — but affected users must re-enroll. This is a second reason to settle
+`openseal.me` vs a later `openseal.co` *before* the cutover rather than after: moving the host
+twice means asking people to re-enroll twice.
+
+**The embed `postMessage` source stays `"agentsign"`.** It is a protocol constant sitting in
+embedders' message handlers, the same category as the `sign_` key prefixes. Renaming it would
+break every embedder that filters on it, and emitting both values would double-fire the
+completion path for every embedder that does not.
+
 Dated plans and specs under `docs/superpowers/` and `docs/2026-08-19-product-plan.md` are left
 in the old name on purpose. They record what was built and when; rewriting them would falsify
 the record.
