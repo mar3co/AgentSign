@@ -6,7 +6,7 @@
 export const TERMS_SECTIONS: { heading: string; body: string }[] = [
   {
     heading: "Send, sign, fetch",
-    body: "OpenSeal is a signing primitive: send, sign, fetch. The software is licensed Apache-2.0. You bring the PDF. We do not write it, place fields on it, or claim it is good enough for any particular statute.",
+    body: "OpenSeal is a signing primitive: send, sign, fetch. The software is licensed AGPL-3.0. You bring the PDF. We do not write it, place fields on it, or claim it is good enough for any particular statute.",
   },
   {
     heading: "Finish and Attest",

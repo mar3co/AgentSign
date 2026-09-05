@@ -27,7 +27,7 @@ one integration — and it already described the identity: the mark has been a p
 pixels with a wax seal on the last one since 2026-08-23, and the favicon is a wax tile. See
 [Brand.md](../Brand.md).
 
-"Open" is a claim the repo can support — public, Apache-2.0, and `SELF_HOST=1` entitles the Pro
+"Open" is a claim the repo can support — public, AGPL-3.0, and `SELF_HOST=1` entitles the Pro
 extras without a plan. Keep it true.
 
 ## Form
