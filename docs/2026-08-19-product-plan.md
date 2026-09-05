@@ -259,7 +259,7 @@ Signing-page checkbox must cover: agree to sign electronically; consent to elect
 
 ## 9. License
 
-**Apache-2.0.** Not MIT, not AGPL. Patent grant; one LICENSE file; companies can use it without a copyleft scare.
+~~**Apache-2.0.** Not MIT, not AGPL. Patent grant; one LICENSE file; companies can use it without a copyleft scare.~~ **Superseded 2026-09-05: AGPL-3.0-only**, matching the OpenSoft family default. Self-host still gets every feature; the copyleft applies to hosting a modified OpenSeal.
 
 - Self-host includes the API. That is the DocuSeal wound.
 - Cloud is how we charge (email, storage, uptime).
@@ -343,7 +343,7 @@ PDF module: `pdf-lib` + `@signpdf/signpdf` + placeholder-pdf-lib + signer-p12. F
 | File | PDF-first, append signature page, then seal | Shops already have forms |
 | Agent | REST + OpenAPI + llms.txt + MCP (stdio **and** HTTP) in v1 | Three tools wrap REST. Webhooks on complete. Human still signs |
 | OSS vs cloud | Both; API free on self-host | Honest open source |
-| License | Apache-2.0 | Not AGPL paywall theater |
+| License | AGPL-3.0-only (was Apache-2.0 until 2026-09-05) | Family default; self-host keeps every feature |
 | GTM | One public cloud, public price | Not a private fork; not an industry SKU |
 | Free cloud | 7 days to sign; 7 days to keep; ~20 sends/30d quiet cap | Storage + abuse. Login does not lift the cap |
 | Pro | $19/mo · 1 year keep · cap lift · footer off | One Stripe Price. Not unlimited |
@@ -367,7 +367,7 @@ PDF module: `pdf-lib` + `@signpdf/signpdf` + placeholder-pdf-lib + signer-p12. F
 1. **Name and domain.**
 2. **7-year insurance hold** — candidate for a *second* SKU after shops ask; not on the pricing page now.
 
-License is **Apache-2.0**. Login is magic link + password + Google/GitHub (SSO/SAML is not v1). **Signup-after-sign** is the funnel; signup-to-sign is forbidden. **v1 agents = REST + OpenAPI + llms.txt + MCP (stdio and HTTP) + `envelope.completed` webhook.** v1.1 = branding, packets, team invites. Packaging (Free + Pro $19), no seats, live keys on free login, quiet 20/30d cap, sequential N signers, stack, two-clock retention, Resend, Stripe Checkout, cabinet = sent or signed, SES / ESIGN+UETA matching DocuSeal’s **default**, and **Next.js** (pages + Route Handlers, shadcn on Base UI, no Hono, Node runtime, not Edge for seal) are **closed**.
+License is **AGPL-3.0-only** (relicensed 2026-09-05, was Apache-2.0). Login is magic link + password + Google/GitHub (SSO/SAML is not v1). **Signup-after-sign** is the funnel; signup-to-sign is forbidden. **v1 agents = REST + OpenAPI + llms.txt + MCP (stdio and HTTP) + `envelope.completed` webhook.** v1.1 = branding, packets, team invites. Packaging (Free + Pro $19), no seats, live keys on free login, quiet 20/30d cap, sequential N signers, stack, two-clock retention, Resend, Stripe Checkout, cabinet = sent or signed, SES / ESIGN+UETA matching DocuSeal’s **default**, and **Next.js** (pages + Route Handlers, shadcn on Base UI, no Hono, Node runtime, not Edge for seal) are **closed**.
 
 ---
 

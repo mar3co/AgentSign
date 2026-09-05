@@ -14,7 +14,7 @@ Product of MAR3. Repo [mar3co/openseal](https://github.com/mar3co/openseal). Can
 
 Agents can also connect over **OAuth** instead of a pasted key: dynamic client registration at `/oauth/register`, discovery under `/.well-known/`, and the grant mints a `sign_oauth_…` token. Those sends are held for the account owner's emailed confirmation unless they turn that off.
 
-**Platforms:** **Vercel** (Next.js App Router — pages **and** `/v1` Route Handlers, Fluid Compute **Node**, Cron) + **Supabase** (Postgres, Auth, Storage) + **Resend** (app mail) + **Stripe Checkout** (Pro). Pages: **shadcn/ui on Base UI** (Tailwind). Auth stays on Supabase (point custom SMTP at Resend). Self-host is `supabase start` + `next start`. No Hono. **Apache-2.0.**
+**Platforms:** **Vercel** (Next.js App Router — pages **and** `/v1` Route Handlers, Fluid Compute **Node**, Cron) + **Supabase** (Postgres, Auth, Storage) + **Resend** (app mail) + **Stripe Checkout** (Pro). Pages: **shadcn/ui on Base UI** (Tailwind). Auth stays on Supabase (point custom SMTP at Resend). Self-host is `supabase start` + `next start`. No Hono. **AGPL-3.0.**
 
 Document work, since it shapes the deploy: PDFs are read with `pdfjs-dist` (+ `@napi-rs/canvas`) and written with `pdf-lib`; markdown renders through `marked`; `.docx` converts through `mammoth` + headless Chromium (`puppeteer-core`, `@sparticuz/chromium`); the seal is `@signpdf` + `node-forge`; `/v1/detect-fields` is a Vercel **AI SDK** call through AI Gateway (`AI_GATEWAY_API_KEY`, or OIDC on Vercel). Those payloads are why `.npmrc` pins a hoisted `node_modules` and `next.config.ts` traces files explicitly. Agent-party behavior and AI detection sit behind Vercel feature flags (`agent_parties`, `agent_only_attest`, `ai_field_detect`).
 
@@ -26,7 +26,7 @@ Document work, since it shapes the deploy: PDFs are read with `pdfjs-dist` (+ `@
 - [Design specs and plans](docs/superpowers/): one dated design and plan per feature (v1 through markdown send), written before the code and reviewed in the PR that ships it
 - [Wiki](https://github.com/mar3co/openseal/wiki): product orientation for humans who are not in the code yet
 
-License: **Apache-2.0** (`LICENSE`).
+License: **AGPL-3.0-only** (`LICENSE`). Relicensed from Apache-2.0 on 2026-09-05 to match the OpenSoft family default; releases up to v2.1.0 remain available under Apache-2.0.
 
 ## Local run
 
